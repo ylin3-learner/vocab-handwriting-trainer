@@ -55,7 +55,6 @@ export class QuizOrchestrator {
     for (const w of this.words) {
       this.wordMap.set(w.id, w);
     }
-    // 🔥 預載所有狀態（一次讀取，避免重複查詢）
     this.stateCache = await this.deps.progressStore.getAllStates(this.studentId);
   }
 
@@ -70,19 +69,10 @@ export class QuizOrchestrator {
 
     const entries: WordEntry[] = [];
     for (const word of this.words) {
-      // 從快取讀取，若無則建立初始狀態
       const state = this.stateCache?.get(word.id) ?? createInitialReviewState();
       const overdueDays = calculateOverdueDays(state.nextReviewDate, this.getNow());
       entries.push({ wordId: word.id, state, overdueDays });
     }
-
-    console.log('🔍 選題前的 entries (前 10 筆):', entries.slice(0, 10).map(e => ({
-      wordId: e.wordId,
-      reviewCount: e.state.reviewCount,
-      overdueDays: e.overdueDays,
-      isNew: e.state.reviewCount === 0 && !e.state.lastReviewed,
-      priority: (e.state.reviewCount * 80) + ((e.overdueDays ?? 0) * 20) + ((e.state.reviewCount === 0 && !e.state.lastReviewed) ? 50 : 0)
-    })));
 
     const selectedId = pickNextWordId(entries, {
       dailyAnsweredCount: this.dailyAnsweredCount,
@@ -124,7 +114,7 @@ export class QuizOrchestrator {
       timedOut: submission.timedOut,
     });
 
-    // ===== 計算相似度指標 (Sprint 6-B) =====
+    // ===== 計算相似度指標 =====
     const editDistance = levenshteinDistance(
       submission.recognizedText,
       word.word
@@ -152,13 +142,18 @@ export class QuizOrchestrator {
 
     const nextState = mergeSM2ResultWithState(currentState, scheduling, now);
 
-    // ===== 儲存進度 (使用 Transaction) =====
-    await this.deps.progressStore.saveState(this.studentId, wordId, nextState);
+    // ===== 儲存進度（失敗不拋出錯誤，只記錄日誌） =====
+    try {
+      await this.deps.progressStore.saveState(this.studentId, wordId, nextState);
+      // 更新快取
+      this.stateCache?.set(wordId, nextState);
+    } catch (error) {
+      console.warn('⚠️ 儲存進度失敗（已加入同步佇列）:', error);
+      // 即使儲存失敗，快取還是要更新，讓下一題能讀到最新狀態
+      this.stateCache?.set(wordId, nextState);
+    }
 
-    // 更新快取
-    this.stateCache?.set(wordId, nextState);
-
-    // ===== 記錄作答 (包含新的相似度訊號) =====
+    // ===== 記錄作答（失敗不拋出錯誤，只記錄日誌） =====
     const attempt: AttemptRecord = {
       studentId: this.studentId,
       wordId,
@@ -167,15 +162,17 @@ export class QuizOrchestrator {
       isCorrect: grading.isCorrect,
       responseTimeMs: submission.elapsedMs,
       snapshotImageUrl: submission.snapshotImageUrl,
-
-      // Sprint 6-B 新增欄位
       editDistance,
       similarity,
       snapshotEaseFactor: scheduling.nextEaseFactor,
       snapshotInterval: scheduling.nextInterval,
-      // vocabVersion: 預留給未來
     };
-    await this.deps.progressStore.recordAttempt(attempt);
+
+    try {
+      await this.deps.progressStore.recordAttempt(attempt);
+    } catch (error) {
+      console.warn('⚠️ 記錄作答失敗（已加入同步佇列）:', error);
+    }
 
     // ===== 更新配額 =====
     this.dailyAnsweredCount += 1;
