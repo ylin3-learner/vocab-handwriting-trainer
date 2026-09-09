@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { InMemoryWordRepository } from '../../services/wordRepository/InMemoryWordRepository';
-import { InMemoryProgressStore } from '../../services/storage/InMemoryProgressStore';
+// import { InMemoryProgressStore } from '../../services/storage/InMemoryProgressStore';
+import { FirestoreProgressStore } from '../../services/storage/FirestoreProgressStore'; 
 import { QuizOrchestrator } from '../quiz/QuizOrchestrator';
 import type { Word } from '../../types/word';
 
@@ -40,7 +41,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ words, onStart }) =>
 
     // 2. 建立測驗流程
     const repo = new InMemoryWordRepository(words);
-    const store = new InMemoryProgressStore();
+    const store = new FirestoreProgressStore();
     const orchestrator = new QuizOrchestrator(studentId.trim(), {
       wordRepository: repo,
       progressStore: store,
