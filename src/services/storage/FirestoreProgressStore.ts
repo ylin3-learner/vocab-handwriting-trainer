@@ -1,7 +1,8 @@
 // src/services/storage/FirestoreProgressStore.ts
-import { 
-  doc, getDoc, setDoc, collection, addDoc, 
-  query, where, getDocs, writeBatch, deleteDoc 
+import {
+  doc, getDoc, setDoc, collection, addDoc,
+  query, where, getDocs, writeBatch, deleteDoc,
+  runTransaction // 新增導入
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { ReviewState, createInitialReviewState } from '../../types/word';
@@ -18,17 +19,54 @@ export class FirestoreProgressStore implements ProgressStore {
     return createInitialReviewState();
   }
 
-  async saveState(studentId: string, wordId: string, state: ReviewState): Promise<void> {
-    const docRef = doc(db, 'students', studentId, 'words', wordId);
-    await setDoc(docRef, state);
+  // ----- 新增：一次取得某學生所有單字的狀態（用於初始化快取） -----
+  async getAllStates(studentId: string): Promise<Map<string, ReviewState>> {
+    const wordsRef = collection(db, 'students', studentId, 'words');
+    const snap = await getDocs(wordsRef);
+    const map = new Map<string, ReviewState>();
+    snap.docs.forEach(doc => {
+      map.set(doc.id, doc.data() as ReviewState);
+    });
+    return map;
   }
 
+  // 核心修改：使用 runTransaction 確保原子性，防止併發覆蓋
+  async saveState(studentId: string, wordId: string, state: ReviewState): Promise<void> {
+    const docRef = doc(db, 'students', studentId, 'words', wordId);
+
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(docRef);
+
+      if (snap.exists()) {
+        const existing = snap.data() as ReviewState;
+        // 樂觀鎖定檢查：如果資料庫中的 totalReviews 已經大於或等於
+        // 我們要寫入的 totalReviews，代表有其他程序已經更新過了，
+        // 此時放棄本次寫入 (保留較新資料)。
+        // (注意：state 是已經計算完成的最新狀態)
+        if (existing.totalReviews > state.totalReviews) {
+          // 放棄交易，不寫入
+          return;
+        }
+      }
+
+      // 若無衝突或文件不存在，直接寫入
+      transaction.set(docRef, state);
+    });
+  }
+
+  // 記錄作答 (順應新的 AttemptRecord 結構)
   async recordAttempt(attempt: AttemptRecord): Promise<void> {
     await addDoc(collection(db, 'attempts'), {
       ...attempt,
-      // timestamp 已經是 ISO 字串，直接存
+      // 確保所有新欄位都存在 (若為 undefined 則設為 null 或預設值)
+      editDistance: attempt.editDistance ?? -1,
+      similarity: attempt.similarity ?? 0,
+      snapshotEaseFactor: attempt.snapshotEaseFactor ?? 2.5,
+      snapshotInterval: attempt.snapshotInterval ?? 0,
+      vocabVersion: attempt.vocabVersion ?? null,
     });
   }
+
 
   // ----- 教師專用：查詢與清理數據 -----
   async getAllStudents(): Promise<{ id: string; name?: string; class?: string }[]> {
