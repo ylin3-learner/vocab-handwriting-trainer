@@ -1,7 +1,8 @@
+// src/features/login/StudentLogin.tsx
 import React, { useState } from 'react';
 import { InMemoryWordRepository } from '../../services/wordRepository/InMemoryWordRepository';
-import { FirestoreWordRepository } from '../../services/wordRepository/FirestoreWordRepository'; // 👈 新增
-import { FirestoreProgressStore } from '../../services/storage/FirestoreProgressStore';
+import { FirestoreWordRepository } from '../../services/wordRepository/FirestoreWordRepository';
+import { HybridProgressStore } from '../../services/storage/HybridProgressStore'; // 👈 改這個
 import { QuizOrchestrator } from '../quiz/QuizOrchestrator';
 import type { Word } from '../../types/word';
 
@@ -15,14 +16,13 @@ const FALLBACK_WORDS: Word[] = [
 ];
 
 interface StudentLoginProps {
-  // 移除 words: Word[]（不再從外部傳入）
   onStart: (orchestrator: QuizOrchestrator) => void;
 }
 
-export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => { // 👈 移除 words 參數
+export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
   const [studentId, setStudentId] = useState('');
   const [className, setClassName] = useState('');
-  const [isLoading, setIsLoading] = useState(false); // 新增載入狀態
+  const [isLoading, setIsLoading] = useState(false);
 
   const unlockSpeech = () => {
     if (window.speechSynthesis) {
@@ -38,14 +38,14 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => { // �
     }
   };
 
-  const handleStart = async () => { // 改為 async
+  const handleStart = async () => {
     if (!studentId.trim()) {
       alert('請輸入姓名或座號');
       return;
     }
 
     unlockSpeech();
-    setIsLoading(true); // 開始載入
+    setIsLoading(true);
 
     try {
       // 1. 從 Firestore 讀取單字
@@ -60,9 +60,10 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => { // �
 
       console.log(`✅ 成功載入 ${words.length} 個單字`);
 
-      // 3. 建立測驗流程（使用載入的單字）
+      // 3. 建立測驗流程
       const repo = new InMemoryWordRepository(words);
-      const store = new FirestoreProgressStore();
+      // 👇 換成 HybridProgressStore，傳入 studentId
+      const store = new HybridProgressStore(studentId.trim());
       const orchestrator = new QuizOrchestrator(studentId.trim(), {
         wordRepository: repo,
         progressStore: store,
@@ -77,7 +78,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => { // �
       console.error('啟動測驗失敗:', error);
       alert('載入單字庫失敗，請確認網路連線後重試');
     } finally {
-      setIsLoading(false); // 載入完成
+      setIsLoading(false);
     }
   };
 
@@ -92,7 +93,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => { // �
           onChange={(e) => setStudentId(e.target.value)}
           style={{ width: '100%', padding: '0.5rem', fontSize: '1rem' }}
           placeholder="例如：王小明 或 12"
-          disabled={isLoading} // 👈 載入中禁用
+          disabled={isLoading}
         />
       </div>
       <div style={{ marginBottom: '1rem' }}>
@@ -103,16 +104,16 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => { // �
           onChange={(e) => setClassName(e.target.value)}
           style={{ width: '100%', padding: '0.5rem', fontSize: '1rem' }}
           placeholder="例如：701"
-          disabled={isLoading} // 👈 載入中禁用
+          disabled={isLoading}
         />
       </div>
       <button
         onClick={handleStart}
-        disabled={isLoading} // 👈 載入中禁用
+        disabled={isLoading}
         style={{
           padding: '0.75rem 2rem',
           fontSize: '1.2rem',
-          background: isLoading ? '#6c757d' : '#28a745', // 👈 載入中變灰色
+          background: isLoading ? '#6c757d' : '#28a745',
           color: '#fff',
           border: 'none',
           borderRadius: '8px',

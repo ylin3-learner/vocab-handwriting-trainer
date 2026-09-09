@@ -1,11 +1,13 @@
 // src/features/dashboard/TeacherDashboard.tsx
 import React, { useState, useEffect } from 'react';
 import { AnalyticsService, StudentStat, WeakWord } from '../../services/analytics/AnalyticsService';
+import { HybridProgressStore } from '../../services/storage/HybridProgressStore';
 
 const analytics = new AnalyticsService();
 
 export const TeacherDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [students, setStudents] = useState<StudentStat[]>([]);
   const [weakWords, setWeakWords] = useState<WeakWord[]>([]);
   const [summary, setSummary] = useState<{
@@ -33,6 +35,34 @@ export const TeacherDashboard: React.FC = () => {
     }
   };
 
+  // 手動觸發同步：對所有學生執行同步
+  const handleSyncAll = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      // 從 Firestore 取得所有學生 ID
+      const studentList = await analytics.getAllStudents();
+      let totalSynced = 0;
+      for (const s of studentList) {
+        try {
+          const store = new HybridProgressStore(s.id);
+          await store.syncNow();
+          totalSynced++;
+        } catch (e) {
+          console.warn(`同步學生 ${s.id} 失敗:`, e);
+        }
+      }
+      alert(`✅ 已觸發 ${totalSynced} 位學生的同步，數據將在背景上傳至雲端。`);
+      // 重新載入數據
+      await loadData();
+    } catch (error) {
+      console.error('同步失敗:', error);
+      alert('同步失敗，請稍後再試');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, []);
@@ -51,9 +81,16 @@ export const TeacherDashboard: React.FC = () => {
         >
           🔄 重新整理
         </button>
+        <button 
+          onClick={handleSyncAll} 
+          disabled={syncing}
+          style={{ marginLeft: '0.5rem', fontSize: '0.8rem', padding: '0.3rem 1rem', background: syncing ? '#6c757d' : '#ffc107', color: syncing ? '#fff' : '#000', border: 'none', borderRadius: '4px', cursor: syncing ? 'default' : 'pointer' }}
+        >
+          {syncing ? '⏳ 同步中...' : '📤 強制同步'}
+        </button>
       </h1>
 
-      {/* 摘要卡片（對應 6.2） */}
+      {/* 摘要卡片 */}f
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', margin: '2rem 0' }}>
         <div style={{ background: '#f8f9fa', padding: '1.5rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
           <h3 style={{ margin: 0, color: '#6c757d', fontSize: '0.9rem' }}>👨‍🎓 學生總數</h3>
@@ -76,7 +113,7 @@ export const TeacherDashboard: React.FC = () => {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }}>
-        {/* 左欄：學生總覽表格（6.2, 6.3, 6.5） */}
+        {/* 左欄：學生總覽表格 */}
         <div style={{ background: 'white', padding: '1rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
           <h2>📋 學生表現總覽</h2>
           <div style={{ overflowX: 'auto' }}>
@@ -112,7 +149,7 @@ export const TeacherDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* 右欄：弱點分析（6.4）與清理功能 */}
+        {/* 右欄：弱點分析 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div style={{ background: 'white', padding: '1rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
             <h2>🔍 Top-5 弱點單字</h2>
@@ -131,6 +168,13 @@ export const TeacherDashboard: React.FC = () => {
                 ))}
               </ul>
             )}
+          </div>
+          <div style={{ background: '#e9ecef', padding: '1rem', borderRadius: '8px' }}>
+            <h4 style={{ margin: '0 0 0.5rem 0' }}>ℹ️ 同步說明</h4>
+            <p style={{ fontSize: '0.9rem', color: '#495057', margin: 0 }}>
+              學生資料會先儲存在本地，再背景同步至雲端。
+              點擊「強制同步」可立即將所有本地資料上傳至雲端。
+            </p>
           </div>
         </div>
       </div>
