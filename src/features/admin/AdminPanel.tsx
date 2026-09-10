@@ -1,7 +1,7 @@
 // src/features/admin/AdminPanel.tsx
 import React, { useState, useCallback } from 'react';
 import * as ExcelJS from 'exceljs';
-import { collection, addDoc, doc, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Word } from '../../types/word';
 
@@ -13,6 +13,11 @@ interface ValidationError {
     row: number;
     field: string;
     message: string;
+}
+
+// 🔥 安全化 docId：Firestore 不允許 `/`，且長度限制 1500 bytes
+function sanitizeDocId(word: string): string {
+    return word.trim().replace(/\//g, '_');
 }
 
 export const AdminPanel: React.FC = () => {
@@ -45,16 +50,13 @@ export const AdminPanel: React.FC = () => {
             throw new Error('CSV 檔案為空');
         }
 
-        // 解析標題列（移除可能的外層引號）
         const headerLine = lines[0];
         if (!headerLine) {
             throw new Error('CSV 標題列為空');
         }
         const headers = headerLine.split(',').map(h => h.replace(/^"|"$/g, '').trim());
 
-        // 解析資料列
         const rows = lines.slice(1).map(line => {
-            // 簡單解析逗號分隔，並移除引號
             return line.split(',').map(cell => cell.replace(/^"|"$/g, '').trim());
         });
 
@@ -70,7 +72,6 @@ export const AdminPanel: React.FC = () => {
         let dataRows: string[][] = [];
 
         if (fileExt === 'csv') {
-            // --- 手動解析 CSV ---
             const decoder = new TextDecoder('utf-8');
             const csvText = decoder.decode(buffer);
             const parsed = parseCSV(csvText);
@@ -84,22 +85,18 @@ export const AdminPanel: React.FC = () => {
                 throw new Error('檔案中找不到工作表 (Sheet)');
             }
 
-            // 讀取標題列（改用 push 避免 undefined）
             const headerValues: string[] = [];
             const headerRow = worksheet.getRow(1);
-            // 標題列
             headerRow.eachCell((cell) => {
                 const value = String((cell.value as any) || '').trim();
                 if (value) headerValues.push(value);
             });
             headers = headerValues;
 
-            // 讀取資料列
             const rowDataList: string[][] = [];
             worksheet.eachRow((row, rowNumber) => {
                 if (rowNumber === 1) return;
                 const rowData: string[] = [];
-                // 資料列
                 row.eachCell((cell) => {
                     rowData.push(String((cell.value as any) || '').trim());
                 });
@@ -110,7 +107,6 @@ export const AdminPanel: React.FC = () => {
             dataRows = rowDataList;
         }
 
-        // --- 驗證標題 ---
         const missingHeaders = REQUIRED_FIELDS.filter(
             field => !headers.includes(field)
         );
@@ -118,7 +114,6 @@ export const AdminPanel: React.FC = () => {
             throw new Error(`缺少必填欄位: ${missingHeaders.join(', ')}`);
         }
 
-        // 建立欄位索引對照表
         const columnMap: Record<string, number> = {};
         headers.forEach((header, index) => {
             if (header && ALLOWED_FIELDS.includes(header)) {
@@ -129,9 +124,8 @@ export const AdminPanel: React.FC = () => {
         const results: Word[] = [];
         const errors: ValidationError[] = [];
 
-        // --- 逐列解析 ---
         dataRows.forEach((row, rowIndex) => {
-            const rowNumber = rowIndex + 2; // 第1列是標題，所以資料從第2列開始
+            const rowNumber = rowIndex + 2;
             const word: Partial<Word> = {};
             let hasData = false;
 
@@ -148,7 +142,6 @@ export const AdminPanel: React.FC = () => {
 
                 if (value) {
                     hasData = true;
-                    // 特殊處理：level 轉為字串
                     if (field === 'level' && !isNaN(Number(value))) {
                         (word as any)[field] = String(value);
                     } else if (field === 'root_meaning') {
@@ -243,7 +236,7 @@ export const AdminPanel: React.FC = () => {
         setPublishStatus(`⏳ 準備寫入 ${previewData.length} 筆資料...`);
 
         try {
-            const BATCH_SIZE = 500; // Firestore 批次上限
+            const BATCH_SIZE = 500;
             const allWords = previewData.map(word =>
                 Object.fromEntries(
                     Object.entries(word).filter(([_, value]) => value !== undefined)
@@ -257,8 +250,12 @@ export const AdminPanel: React.FC = () => {
                 const chunk = allWords.slice(i, i + BATCH_SIZE);
 
                 for (const word of chunk) {
-                    const draftDocRef = doc(collection(db, 'vocabulary', 'draft', 'words'));
-                    const currentDocRef = doc(collection(db, 'vocabulary', 'current', 'words'));
+                    // 🔥 關鍵修正：用 word 欄位當作 document ID
+                    const wordId = sanitizeDocId(String(word.word || ''));
+                    if (!wordId) continue;
+
+                    const draftDocRef = doc(db, 'vocabulary', 'draft', 'words', wordId);
+                    const currentDocRef = doc(db, 'vocabulary', 'current', 'words', wordId);
                     batch.set(draftDocRef, word);
                     batch.set(currentDocRef, word);
                 }
@@ -268,7 +265,6 @@ export const AdminPanel: React.FC = () => {
                 setPublishStatus(`✅ 已寫入 ${totalCommitted}/${allWords.length} 筆`);
             }
 
-            // 記錄版本
             const version = new Date().toISOString().slice(0, 10);
             await setDoc(doc(db, 'vocabulary', 'metadata'), {
                 currentVersion: version,

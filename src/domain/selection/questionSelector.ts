@@ -30,7 +30,10 @@ export function calculatePriority(state: ReviewState, overdueDays: number): numb
   const reviewWeight = Math.log1p(state.reviewCount) * 100;
   const overdueWeight = overdueDays * 20;
   const newBonus = isNew ? 80 : 0;
-  return reviewWeight + overdueWeight + newBonus;
+
+  const BASE_WEIGHT = 1;  // 避免權重全為 0
+
+  return BASE_WEIGHT + reviewWeight + overdueWeight + newBonus;
 }
 
 export function isNewWord(state: ReviewState): boolean {
@@ -79,7 +82,7 @@ function weightedPick(entries: WordEntry[], explorationRate: number): string {
 export function pickNextWordId(
   entries: WordEntry[],
   quota: DailyQuota,
-  explorationRate: number = 0.1 // 預設 10%
+  explorationRate: number = 0.1
 ): string | null {
   if (quota.dailyAnsweredCount >= quota.dailyMaxQuota) {
     return null;
@@ -87,7 +90,16 @@ export function pickNextWordId(
 
   const { newWords, dueWords } = splitNewAndDue(entries);
 
+  // 1. 優先抽新字
   if (quota.dailyNewQuotaRemaining > 0 && newWords.length > 0) {
+    const index = Math.floor(Math.random() * newWords.length);
+    return newWords[index]!.wordId;
+  }
+
+  // 2. dueWords 太少時，從 newWords 抽
+  const MIN_DUE_POOL = 5;
+  if (dueWords.length < MIN_DUE_POOL && newWords.length > 0) {
+    console.log(`🔀 [pickNextWordId] dueWords 太少（${dueWords.length} < ${MIN_DUE_POOL}），從 newWords 抽`);
     const index = Math.floor(Math.random() * newWords.length);
     return newWords[index]!.wordId;
   }
