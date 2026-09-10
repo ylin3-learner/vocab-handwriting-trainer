@@ -212,19 +212,25 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
   return (
     <div style={{ maxWidth: '700px', margin: '0 auto', padding: '1rem' }}>
-      {activeAssignment && (
+      {dailyProgress.max > 0 && (
         <div style={{
           padding: '0.5rem 1rem',
-          background: '#e7f3ff',
+          background: activeAssignment ? '#e7f3ff' : '#f0f0f0',
           borderRadius: '6px',
           marginBottom: '1rem',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           fontSize: '0.9rem',
-          border: '1px solid #b8daff',
+          border: activeAssignment ? '1px solid #b8daff' : '1px solid #d0d0d0',
         }}>
-          <span>📋 <strong>{activeAssignment.assignment.name}</strong></span>
+          <span>
+            📋 <strong>
+              {activeAssignment
+                ? activeAssignment.assignment.name
+                : '每日練習（預設配額）'}
+            </strong>
+          </span>
           <span style={{ color: '#6c757d' }}>
             進度：{dailyProgress.answered} / {dailyProgress.max} 題
           </span>
