@@ -101,7 +101,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
         {
           wordRepository: repo,
           progressStore: store,
-          timeLimitMs: 15000,
+          timeLimitMs: 8000, // 統一 8 秒
           defaultDailyMaxQuota: 10,
           defaultDailyNewQuota: 3,
           studentName: studentName.trim(),
