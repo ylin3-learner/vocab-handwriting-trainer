@@ -4,6 +4,7 @@ import * as ExcelJS from 'exceljs';
 import { collection, doc, setDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Word } from '../../types/word';
+import { useAuth } from '../../contexts/AuthContext'; // 🔥 引入 AuthContext
 
 const REQUIRED_FIELDS = ['word', 'meaning', 'sentence'];
 const OPTIONAL_FIELDS = ['root', 'root_meaning', 'hint', 'level'];
@@ -21,24 +22,14 @@ function sanitizeDocId(word: string): string {
 }
 
 export const AdminPanel: React.FC = () => {
-    const [isAuthenticated, setIsAuthenticated] = useState(false);
-    const [password, setPassword] = useState('');
+    // 🔥 從 AuthContext 取得當前的角色與驗證狀態
+    const { role, loading: authLoading } = useAuth();
+
     const [file, setFile] = useState<File | null>(null);
     const [previewData, setPreviewData] = useState<Word[]>([]);
     const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [publishStatus, setPublishStatus] = useState<string>('');
-
-    const ADMIN_PASSWORD = 'admin456';
-
-    const handleLogin = () => {
-        if (password === ADMIN_PASSWORD) {
-            setIsAuthenticated(true);
-            setPassword('');
-        } else {
-            alert('❌ 管理員密碼錯誤');
-        }
-    };
 
     // ===== 手動解析 CSV =====
     const parseCSV = (csvText: string): { headers: string[]; rows: string[][] } => {
@@ -283,26 +274,21 @@ export const AdminPanel: React.FC = () => {
         }
     };
 
-    if (!isAuthenticated) {
+    // 🔥 根據 AuthContext 的狀態顯示對應畫面
+    if (authLoading) {
         return (
-            <div style={{ maxWidth: '400px', margin: '4rem auto', padding: '2rem', background: '#f8f9fa', borderRadius: '8px' }}>
-                <h2>🔐 管理員專用</h2>
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                    <input
-                        type="password"
-                        placeholder="請輸入管理員密碼"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                        style={{ flex: 1, padding: '0.5rem', borderRadius: '4px', border: '1px solid #ccc' }}
-                    />
-                    <button onClick={handleLogin} style={{ padding: '0.5rem 1.5rem', background: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                        進入
-                    </button>
-                </div>
-                <p style={{ fontSize: '0.8rem', color: '#6c757d', marginTop: '1rem' }}>
-                    * 此密碼與教師後台密碼不同
-                </p>
+            <div style={{ textAlign: 'center', padding: '4rem' }}>
+                <h2>⏳ 驗證身份中...</h2>
+            </div>
+        );
+    }
+
+    if (role !== 'admin') {
+        return (
+            <div style={{ maxWidth: '400px', margin: '4rem auto', padding: '2rem', background: '#f8f9fa', borderRadius: '8px', textAlign: 'center' }}>
+                <h2>🚫 權限不足</h2>
+                <p style={{ color: '#6c757d' }}>此頁面僅限管理員存取。</p>
+                <p style={{ color: '#6c757d', fontSize: '0.9rem' }}>請確認您已使用管理員帳號登入。</p>
             </div>
         );
     }
