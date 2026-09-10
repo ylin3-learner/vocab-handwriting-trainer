@@ -25,6 +25,7 @@ export interface ClassStats {
 export interface RecordAttemptParams {
   className: string;
   studentId: string;
+  studentName?: string;
   wordId: string;
   isCorrect: boolean;
 }
@@ -48,10 +49,12 @@ export class ClassStatsService {
 
   // 學生作答時呼叫（失敗不影響主流程）
   async recordAttempt(params: RecordAttemptParams): Promise<void> {
-    const { className, studentId, wordId, isCorrect } = params;
+    const { className, studentId, studentName, wordId, isCorrect } = params;
 
     // 班級為空時跳過（無法歸類）
     if (!className || !className.trim()) return;
+
+    const studentDisplayName = studentName || studentId; 
 
     const ref = this.getDocRef(className);
     const now = new Date().toISOString();
@@ -67,7 +70,7 @@ export class ClassStatsService {
           totalCorrect: isCorrect ? 1 : 0,
           students: {
             [studentId]: {
-              name: studentId,
+              name: studentDisplayName,
               attempts: 1,
               correct: isCorrect ? 1 : 0,
             },
@@ -86,7 +89,7 @@ export class ClassStatsService {
 
       // 已有文件：用 dot notation + increment 原子更新
       await updateDoc(ref, {
-        [`students.${studentId}.name`]: studentId,
+        [`students.${studentId}.name`]: studentDisplayName,
         [`students.${studentId}.attempts`]: increment(1),
         [`students.${studentId}.correct`]: increment(isCorrect ? 1 : 0),
         [`wordErrors.${wordId}.errorCount`]: increment(isCorrect ? 0 : 1),

@@ -1,14 +1,35 @@
-# ✍️ Vocab Handwriting Trainer (英語單字王手寫極速訓練系統)
+# 單字手寫訓練器 (Vocab Handwriting Trainer)
 
-> **專為「8秒聽音手寫驟死賽」量身打造的 EdTech 競賽訓練系統。**  
-> 結合 **Web Speech API 聽音**、**TF.js / Canvas 手寫辨識** 與 **SM-2 間隔重複演算法**，完全還原現場抗壓節奏與零容錯標準。
+一個專為中學生設計的英文單字手寫練習系統。老師上傳單字庫、派發作業，學生在平板上手寫作答，系統自動辨識、判分、排程複習，並在教師後台呈現學習數據。
 
----
+## ✨ 核心功能
 
-### 🌟 Key Features
+- **手寫辨識**：Google IME API，支援完整單字辨識
+- **間隔重複（SM-2）**：智慧排程複習時間
+- **Top-K 候選池**：大幅降低 Firestore 讀取量（99%+）
+- **作業派發**：老師可設定每日配額、新舊字比例、複習專注度
+- **教師後台**：班級進度、風險學生、弱點單字分析
+- **離線優先**：本地 localStorage + 背景雲端同步
+- **角色權限**：Firebase Auth + Firestore 安全規則
 
-* **⚡️ 8-Second Competitive Mode**：模擬外師發音 + 8 秒自動倒數，訓練直覺聽音辨字反應。
-* **🖋 Real-Time Canvas Handwriting**：直接於觸控螢幕/平板手寫作答，精準訓練手寫肌肉記憶。
-* **🎯 Absolute Zero-Tolerance Grading**：AI 自動逐字比對，塗改、寫錯、字跡模糊一律嚴格判定，擺脫心軟自評。
-* **📊 Data-Driven (Excel-to-JSON Pipeline)**：透過 GitHub Actions 自動驗證並轉譯 Excel 題庫，老師免動 Code 即可隨時更新賽事單字。
-* **🧠 Smarter Review with SM-2**：根據拼字正確率與作答耗時自動調整複習週期，高效率消除單字盲點。
+## 🛠️ 技術棧
+
+| 層級 | 技術 |
+| :--- | :--- |
+| 前端 | TypeScript + React + Vite |
+| 後端 | Firebase Firestore + Firebase Auth |
+| 手寫辨識 | Google Input Tools API |
+| 語音 | Web Speech API |
+| 部署 | GitHub Pages |
+
+## 🚀 快速開始
+
+### 前置需求
+
+- Node.js 18+
+- 一個 Firebase 專案（Spark 免費方案即可）
+
+### 1. 安裝依賴
+
+```bash
+npm install

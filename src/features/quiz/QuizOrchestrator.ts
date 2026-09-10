@@ -35,6 +35,7 @@ export interface QuizOrchestratorDeps {
   timeLimitMs: number;
   defaultDailyMaxQuota: number;
   defaultDailyNewQuota: number;
+  studentName?: string; // 新增（給 classStats 顯示用）
   now?: () => Date;
 }
 
@@ -271,11 +272,11 @@ export class QuizOrchestrator {
       await this.classStatsService.recordAttempt({
         className: this.className,
         studentId: this.studentId,
+        studentName: this.deps.studentName,  // 👈 新增
         wordId,
         isCorrect: grading.isCorrect,
       });
     } catch (error) {
-      // ClassStatsService 內部已 try-catch，這裡只是雙重保險
       console.warn('⚠️ 班級統計更新失敗:', error);
     }
 

@@ -1,6 +1,7 @@
 // src/firebase.ts
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -17,3 +18,6 @@ const app = initializeApp(firebaseConfig);
 
 // 匯出 Firestore 資料庫實例
 export const db = getFirestore(app);
+
+// 匯出 Firebase 身份驗證實例
+export const auth = getAuth(app);
