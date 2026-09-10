@@ -1,8 +1,11 @@
 // src/features/login/StudentLogin.tsx
 import React, { useState } from 'react';
+import { signInAnonymously } from 'firebase/auth';
+import { auth } from '../../firebase';
 import { FirestoreWordRepository } from '../../services/wordRepository/FirestoreWordRepository';
 import { InMemoryWordRepository } from '../../services/wordRepository/InMemoryWordRepository';
 import { HybridProgressStore } from '../../services/storage/HybridProgressStore';
+import { ProfileService } from '../../services/profile/ProfileService';
 import { QuizOrchestrator } from '../quiz/QuizOrchestrator';
 import type { Word } from '../../types/word';
 
@@ -42,12 +45,27 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
       alert('請輸入姓名或座號');
       return;
     }
+    if (!className.trim()) {
+      alert('請輸入班級');
+      return;
+    }
 
     unlockSpeech();
     setIsLoading(true);
 
     try {
-      // 1. 建立 WordRepository
+      // ===== 步驟 1：匿名登入 =====
+      console.log('🔐 [StudentLogin] 開始匿名登入...');
+      const cred = await signInAnonymously(auth);
+      const uid = cred.user.uid;
+      console.log(`🔐 [StudentLogin] 匿名登入成功，UID: ${uid}`);
+
+      // ===== 步驟 2：儲存學生 Profile =====
+      const profileService = new ProfileService();
+      await profileService.saveProfile(uid, studentId.trim(), className.trim());
+      console.log(`✅ [StudentLogin] Profile 已儲存：${studentId.trim()} (${className.trim()})`);
+
+      // ===== 步驟 3：建立 WordRepository =====
       const firestoreRepo = new FirestoreWordRepository();
       let repo;
       try {
@@ -63,17 +81,19 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
         repo = new InMemoryWordRepository(FALLBACK_WORDS);
       }
 
-      // 2. 建立測驗流程
-      const store = new HybridProgressStore(studentId.trim());
+      // ===== 步驟 4：建立測驗流程 =====
+      // 使用 UID 作為 studentId（而非姓名）
+      const store = new HybridProgressStore(uid);
       const orchestrator = new QuizOrchestrator(
-        studentId.trim(),
-        className.trim(), // 👈 傳入班級（可能為空字串）
+        uid,
+        className.trim(),
         {
           wordRepository: repo,
           progressStore: store,
           timeLimitMs: 15000,
-          defaultDailyMaxQuota: 10,  // fallback
-          defaultDailyNewQuota: 3,   // fallback
+          defaultDailyMaxQuota: 10,
+          defaultDailyNewQuota: 3,
+          studentName: studentId.trim(),  // 👈 給 classStats 顯示用
         }
       );
 
@@ -91,7 +111,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
     <div style={{ maxWidth: '400px', margin: '2rem auto', padding: '1rem' }}>
       <h2>📚 登入練習</h2>
       <div style={{ marginBottom: '1rem' }}>
-        <label>姓名 / 座號</label>
+        <label>姓名 / 座號 *</label>
         <input
           type="text"
           value={studentId}
@@ -102,7 +122,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
         />
       </div>
       <div style={{ marginBottom: '1rem' }}>
-        <label>班級（選填）</label>
+        <label>班級 *</label>
         <input
           type="text"
           value={className}

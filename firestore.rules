@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ========================================
+    // 輔助函式
+    // ========================================
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isTeacher() {
+      return isSignedIn() && (
+        request.auth.token.role == 'teacher' ||
+        request.auth.token.role == 'admin'
+      );
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.role == 'admin';
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ========================================
+    // 1. 單字庫 vocabulary
+    //    所有人（已登入）可讀，僅教師可寫
+    // ========================================
+    match /vocabulary/{docPath=**} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher();
+    }
+
+    // ========================================
+    // 2. 作業 assignments
+    //    所有人（已登入）可讀，僅教師可寫
+    // ========================================
+    match /assignments/{assignmentId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher();
+    }
+
+    // ========================================
+    // 3. 學生資料 students/{studentId}
+    //    學生只能讀寫自己的；教師可讀全部
+    // ========================================
+    match /students/{studentId} {
+      allow read: if isSelf(studentId) || isTeacher();
+      allow write: if isSelf(studentId);
+
+      // 子集合（例如 /words/{wordId}）
+      match /{document=**} {
+        allow read: if isSelf(studentId) || isTeacher();
+        allow write: if isSelf(studentId);
+      }
+    }
+
+    // ========================================
+    // 4. 作答紀錄 attempts
+    //    學生只能建立自己的；教師可讀全部
+    //    不允許修改或刪除
+    // ========================================
+    match /attempts/{attemptId} {
+      allow read: if isTeacher();
+      allow create: if isSignedIn()
+        && request.resource.data.studentId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ========================================
+    // 5. 班級統計 classStats
+    //    教師可讀；所有登入者可寫（暫時，因為學生作答時會更新）
+    //    限制寫入結構，避免惡意破壞
+    // ========================================
+    match /classStats/{className} {
+      allow read: if isTeacher();
+      allow create, update: if isSignedIn()
+        && request.resource.data.className == className
+        && request.resource.data.totalAttempts is number
+        && request.resource.data.totalCorrect is number;
+      allow delete: if isAdmin();
+    }
+
+    // ========================================
+    // 6. 其他集合：拒絕所有訪問（白名單策略）
+    //    未明確允許的集合一律拒絕
+    // ========================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
