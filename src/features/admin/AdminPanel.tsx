@@ -5,10 +5,11 @@ import { collection, doc, setDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Word } from '../../types/word';
 import { useAuth } from '../../contexts/AuthContext'; // 🔥 引入 AuthContext
+import { REQUIRED_FIELDS, OPTIONAL_FIELDS, ALLOWED_FIELDS } from '../../domain/validation/wordSchema';
 
-const REQUIRED_FIELDS = ['word', 'meaning', 'sentence'];
-const OPTIONAL_FIELDS = ['root', 'root_meaning', 'hint', 'level'];
-const ALLOWED_FIELDS = [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS];
+// 建立 Set 來進行快速且型別安全的檢查
+const ALLOWED_FIELDS_SET = new Set<string>(ALLOWED_FIELDS);
+const REQUIRED_FIELDS_SET = new Set<string>(REQUIRED_FIELDS);
 
 interface ValidationError {
     row: number;
@@ -16,13 +17,13 @@ interface ValidationError {
     message: string;
 }
 
-// 🔥 安全化 docId：Firestore 不允許 `/`，且長度限制 1500 bytes
+// 安全化 docId：Firestore 不允許 `/`，且長度限制 1500 bytes
 function sanitizeDocId(word: string): string {
     return word.trim().replace(/\//g, '_');
 }
 
 export const AdminPanel: React.FC = () => {
-    // 🔥 從 AuthContext 取得當前的角色與驗證狀態
+    // 從 AuthContext 取得當前的角色與驗證狀態
     const { role, loading: authLoading } = useAuth();
 
     const [file, setFile] = useState<File | null>(null);
@@ -107,7 +108,8 @@ export const AdminPanel: React.FC = () => {
 
         const columnMap: Record<string, number> = {};
         headers.forEach((header, index) => {
-            if (header && ALLOWED_FIELDS.includes(header)) {
+            // 🔥 使用 Set.has() 取代 Array.includes()
+            if (header && ALLOWED_FIELDS_SET.has(header)) {
                 columnMap[header] = index;
             }
         });
@@ -122,7 +124,8 @@ export const AdminPanel: React.FC = () => {
 
             for (const [field, colIndex] of Object.entries(columnMap)) {
                 const value = row[colIndex] || '';
-                if (REQUIRED_FIELDS.includes(field) && !value) {
+                // 🔥 使用 Set.has() 取代 Array.includes()
+                if (REQUIRED_FIELDS_SET.has(field) && !value) {
                     errors.push({
                         row: rowNumber,
                         field,
