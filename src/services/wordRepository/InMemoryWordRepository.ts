@@ -1,3 +1,4 @@
+// src/services/wordRepository/InMemoryWordRepository.ts
 import { Word } from '../../types/word';
 import { WordRepository } from './WordRepository';
 
@@ -6,5 +7,14 @@ export class InMemoryWordRepository implements WordRepository {
 
   async getAll(): Promise<Word[]> {
     return this.words;
+  }
+
+  async getWordsByIds(ids: string[]): Promise<Word[]> {
+    const idSet = new Set(ids);
+    return this.words.filter(w => idSet.has(w.id));
+  }
+
+  async getNewWords(excludeIds: Set<string>, limit: number): Promise<Word[]> {
+    return this.words.filter(w => !excludeIds.has(w.id)).slice(0, limit);
   }
 }

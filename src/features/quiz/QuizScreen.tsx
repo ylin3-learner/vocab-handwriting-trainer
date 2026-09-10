@@ -80,9 +80,14 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const canvasRef = useRef<HandwritingCanvasRef>(null);
   const [storageError, setStorageError] = useState<boolean>(false);
+  const [dailyProgress, setDailyProgress] = useState<{ answered: number; max: number }>({ answered: 0, max: 0 });
+
+  const activeAssignment = orchestrator.getActiveAssignment();
 
   const loadNext = async () => {
     const q = await orchestrator.nextQuestion();
+    // 更新進度顯示
+    setDailyProgress(orchestrator.getDailyProgress());
     if (!q) {
       setStatus('done');
       return;
@@ -143,7 +148,6 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         snapshotImageUrl: snapshotUrl || '',
       };
 
-      // 嘗試提交答案（儲存可能失敗，但會由 HybridProgressStore 處理）
       let isCorrect = false;
       let saveFailed = false;
       try {
@@ -152,7 +156,6 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
       } catch (saveError) {
         console.warn('⚠️ 提交答案儲存失敗，但辨識成功:', saveError);
         saveFailed = true;
-        // 如果儲存失敗，我們仍然以辨識結果來判斷正確性
         isCorrect = recognizedText.toLowerCase() === question.word.word.toLowerCase();
         setStorageError(true);
       }
@@ -190,17 +193,39 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         {storageError && (
           <p style={{ color: '#ffc107' }}>⚠️ 部分資料儲存失敗，但已保留在本地，將自動同步</p>
         )}
-        <button onClick={onSessionEnd}>返回登入</button>
+        <button onClick={onSessionEnd} style={{ padding: '0.5rem 2rem', fontSize: '1rem', cursor: 'pointer' }}>
+          返回登入
+        </button>
       </div>
     );
   }
 
   if (!question) {
-    return <div>載入中...</div>;
+    return <div style={{ padding: '2rem', textAlign: 'center' }}>載入中...</div>;
   }
 
   return (
     <div style={{ maxWidth: '700px', margin: '0 auto', padding: '1rem' }}>
+      {/* 👇 新增：作業資訊橫幅 */}
+      {activeAssignment && (
+        <div style={{
+          padding: '0.5rem 1rem',
+          background: '#e7f3ff',
+          borderRadius: '6px',
+          marginBottom: '1rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          fontSize: '0.9rem',
+          border: '1px solid #b8daff',
+        }}>
+          <span>📋 <strong>{activeAssignment.assignment.name}</strong></span>
+          <span style={{ color: '#6c757d' }}>
+            進度：{dailyProgress.answered} / {dailyProgress.max} 題
+          </span>
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ margin: 0 }}>{question.word.meaning}</h2>
         <Countdown
