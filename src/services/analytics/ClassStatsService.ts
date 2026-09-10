@@ -17,15 +17,16 @@ export interface ClassStats {
   className: string;
   totalAttempts: number;
   totalCorrect: number;
-  students: Record<string, StudentSummary>;
+  students: Record<string, StudentSummary>; // key = displayId
   wordErrors: Record<string, WordErrorStat>;
   lastUpdated: string;
 }
 
 export interface RecordAttemptParams {
   className: string;
-  studentId: string;
+  studentId: string;           // 匿名 UID（fallback）
   studentName?: string;
+  studentSeatNumber?: string;  // 👈 新增
   wordId: string;
   isCorrect: boolean;
 }
@@ -49,12 +50,17 @@ export class ClassStatsService {
 
   // 學生作答時呼叫（失敗不影響主流程）
   async recordAttempt(params: RecordAttemptParams): Promise<void> {
-    const { className, studentId, studentName, wordId, isCorrect } = params;
+    const { className, studentId, studentName, studentSeatNumber, wordId, isCorrect } = params;
 
     // 班級為空時跳過（無法歸類）
     if (!className || !className.trim()) return;
 
-    const studentDisplayName = studentName || studentId; 
+    // 🔥 用 displayId 當 key，實現跨裝置合併統計
+    const studentDisplayId = studentName && studentSeatNumber
+      ? `${className}_${studentSeatNumber}_${studentName}`
+      : studentId; // fallback：缺資料時用 UID
+
+    const studentDisplayName = studentName || studentId;
 
     const ref = this.getDocRef(className);
     const now = new Date().toISOString();
@@ -69,7 +75,7 @@ export class ClassStatsService {
           totalAttempts: 1,
           totalCorrect: isCorrect ? 1 : 0,
           students: {
-            [studentId]: {
+            [studentDisplayId]: {
               name: studentDisplayName,
               attempts: 1,
               correct: isCorrect ? 1 : 0,
@@ -89,9 +95,9 @@ export class ClassStatsService {
 
       // 已有文件：用 dot notation + increment 原子更新
       await updateDoc(ref, {
-        [`students.${studentId}.name`]: studentDisplayName,
-        [`students.${studentId}.attempts`]: increment(1),
-        [`students.${studentId}.correct`]: increment(isCorrect ? 1 : 0),
+        [`students.${studentDisplayId}.name`]: studentDisplayName,
+        [`students.${studentDisplayId}.attempts`]: increment(1),
+        [`students.${studentDisplayId}.correct`]: increment(isCorrect ? 1 : 0),
         [`wordErrors.${wordId}.errorCount`]: increment(isCorrect ? 0 : 1),
         [`wordErrors.${wordId}.totalCount`]: increment(1),
         totalAttempts: increment(1),
