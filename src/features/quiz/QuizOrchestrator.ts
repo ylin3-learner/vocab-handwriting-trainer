@@ -290,14 +290,16 @@ export class QuizOrchestrator {
 
     const nextState = mergeSM2ResultWithState(currentState, scheduling, now);
 
-    try {
-      await this.deps.progressStore.saveState(this.studentId, wordId, nextState);
-      this.stateCache?.set(wordId, nextState);
-    } catch (error) {
-      console.warn('⚠️ 儲存進度失敗（已加入同步佇列）:', error);
-      this.stateCache?.set(wordId, nextState);
-    }
+    // 🔥 儲存進度：fire-and-forget（不阻塞判分回傳）
+    this.deps.progressStore
+      .saveState(this.studentId, wordId, nextState)
+      .then(() => this.stateCache?.set(wordId, nextState))
+      .catch((error) => {
+        console.warn('⚠️ 儲存進度失敗（已加入同步佇列）:', error);
+        this.stateCache?.set(wordId, nextState);
+      });
 
+    // 🔥 記錄作答：fire-and-forget
     const attempt: AttemptRecord = {
       studentId: this.studentId,
       wordId,
@@ -312,24 +314,24 @@ export class QuizOrchestrator {
       snapshotInterval: scheduling.nextInterval,
     };
 
-    try {
-      await this.deps.progressStore.recordAttempt(attempt);
-    } catch (error) {
-      console.warn('⚠️ 記錄作答失敗（已加入同步佇列）:', error);
-    }
+    this.deps.progressStore
+      .recordAttempt(attempt)
+      .catch((error) => {
+        console.warn('⚠️ 記錄作答失敗（已加入同步佇列）:', error);
+      });
 
-    // 額外更新班級統計（容錯，失敗不影響主流程）
-    try {
-      await this.classStatsService.recordAttempt({
+    // 🔥 班級統計：fire-and-forget
+    this.classStatsService
+      .recordAttempt({
         className: this.className,
         studentId: this.studentId,
         studentName: this.deps.studentName,
         wordId,
         isCorrect: grading.isCorrect,
+      })
+      .catch((error) => {
+        console.warn('⚠️ 班級統計更新失敗:', error);
       });
-    } catch (error) {
-      console.warn('⚠️ 班級統計更新失敗:', error);
-    }
 
     this.dailyAnsweredCount += 1;
     if (grading.isCorrect) {
