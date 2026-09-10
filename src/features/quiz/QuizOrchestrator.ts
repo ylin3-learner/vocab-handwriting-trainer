@@ -35,7 +35,7 @@ export interface QuizOrchestratorDeps {
   timeLimitMs: number;
   defaultDailyMaxQuota: number;
   defaultDailyNewQuota: number;
-  studentName?: string; // 新增（給 classStats 顯示用）
+  studentName?: string;
   now?: () => Date;
 }
 
@@ -52,6 +52,7 @@ export class QuizOrchestrator {
   private assignmentService: AssignmentService;
   private activeAssignment: ActiveAssignment | null = null;
   private classStatsService: ClassStatsService;
+  private askedToday = new Set<string>();
 
   constructor(studentId: string, className: string, deps: QuizOrchestratorDeps) {
     this.studentId = studentId;
@@ -88,44 +89,79 @@ export class QuizOrchestrator {
     }
 
     // ===== 步驟 2：讀取學生進度狀態 =====
-    console.log('📋 [步驟 2] 讀取學生進度狀態（從 localStorage 快取）...');
+    console.log('📋 [步驟 2] 讀取學生進度狀態...');
     this.stateCache = await this.deps.progressStore.getAllStates(this.studentId);
     console.log(`   ✅ 已載入 ${this.stateCache.size} 個單字的進度狀態`);
 
-    // ===== 步驟 3：計算 K1 / K2 =====
+    // ===== 步驟 3：計算池子大小（倍數化） =====
     const K2 = this.dailyNewQuotaRemaining;
     const K1 = Math.max(0, this.dailyMaxQuota - K2);
-    console.log(`📊 [步驟 3] Top-K 配額：K1=${K1}（複習），K2=${K2}（新詞）`);
 
-    // ===== 步驟 4：從進度中挑選最緊急的 K1 個複習候選 =====
-    console.log('📋 [步驟 4] 挑選複習候選...');
+    const REVIEW_POOL_MULTIPLIER = 3;
+    const NEW_POOL_MULTIPLIER = 3;
+    const MIN_REVIEW_POOL = 50;
+    const MIN_NEW_POOL = 30;
+
+    const reviewPoolSize = Math.max(K1 * REVIEW_POOL_MULTIPLIER, MIN_REVIEW_POOL);
+    const newPoolSize = Math.max(K2 * NEW_POOL_MULTIPLIER, MIN_NEW_POOL);
+
+    console.log(`📊 [步驟 3] 池子大小：複習目標 ${reviewPoolSize}，新詞目標 ${newPoolSize}`);
+    console.log(`   （配額：K1=${K1}, K2=${K2}）`);
+
+    // ===== 步驟 4：挑選複習候選（已到期 + 最近學過） =====
     const allStates = Array.from(this.stateCache.entries());
+
+    // 4.1 已到期的複習單字（依 nextReviewDate 由舊到新）
     const dueStates = allStates
       .filter(([_, state]) => state.lastReviewed && state.nextReviewDate)
       .sort((a, b) => {
         const dateA = new Date(a[1].nextReviewDate!).getTime();
         const dateB = new Date(b[1].nextReviewDate!).getTime();
-        return dateA - dateB; // 最舊的優先（最緊急）
+        return dateA - dateB;
       });
 
-    const reviewWordIds = dueStates.slice(0, K1).map(([id]) => id);
-    console.log(`   - 待複習總數：${dueStates.length}`);
-    console.log(`   - 實際挑選：${reviewWordIds.length} 個（前 ${K1} 個最緊急）`);
+    const dueWordIds = dueStates.slice(0, reviewPoolSize).map(([id]) => id);
 
-    // ===== 步驟 5：批次載入複習候選的單字定義 =====
+    // 4.2 若池子不足，補上「最近學過但未到期」的單字
+    let supplementIds: string[] = [];
+    if (dueWordIds.length < reviewPoolSize) {
+      const supplementPool = allStates
+        .filter(([id, s]) => s.lastReviewed && !dueWordIds.includes(id))
+        .sort((a, b) => {
+          return (b[1].lastReviewed ?? '').localeCompare(a[1].lastReviewed ?? '');
+        });
+
+      supplementIds = supplementPool
+        .slice(0, reviewPoolSize - dueWordIds.length)
+        .map(([id]) => id);
+    }
+
+    const finalReviewIds = [...dueWordIds, ...supplementIds];
+    console.log(`   - 已到期複習：${dueWordIds.length} 個`);
+    console.log(`   - 補充最近學過：${supplementIds.length} 個`);
+    console.log(`   - 複習池總計：${finalReviewIds.length} 個`);
+
+    // ===== 步驟 5：批次載入複習候選 =====
     let reviewWords: Word[] = [];
-    if (reviewWordIds.length > 0) {
-      console.log('📋 [步驟 5] 批次載入複習候選的單字定義...');
-      reviewWords = await this.deps.wordRepository.getWordsByIds(reviewWordIds);
+    if (finalReviewIds.length > 0) {
+      console.log('📋 [步驟 5] 批次載入複習候選...');
+      reviewWords = await this.deps.wordRepository.getWordsByIds(finalReviewIds);
       console.log(`   ✅ 載入 ${reviewWords.length} 個複習單字`);
-    } else {
-      console.log('📋 [步驟 5] 無複習候選，跳過');
+
+      // 🔥 檢查是否所有 ID 都被載入（防禦：舊格式 wordId 會找不到）
+      if (reviewWords.length < finalReviewIds.length) {
+        const loadedIds = new Set(reviewWords.map(w => w.id));
+        const missingIds = finalReviewIds.filter(id => !loadedIds.has(id));
+        console.warn(`   ⚠️ ${missingIds.length} 個複習候選的 wordId 在單字庫中找不到`);
+        console.warn(`      遺失的 ID 前 5 個：${missingIds.slice(0, 5).join(', ')}`);
+        console.warn(`      → 這些是舊格式資料（Firestore 自動 ID），請清除 students 集合後重新開始`);
+      }
     }
 
     // ===== 步驟 6：載入新詞候選 =====
     console.log('📋 [步驟 6] 載入新詞候選...');
     const excludeIds = new Set(this.stateCache.keys());
-    const newWords = await this.deps.wordRepository.getNewWords(excludeIds, K2);
+    const newWords = await this.deps.wordRepository.getNewWords(excludeIds, newPoolSize);
     console.log(`   ✅ 載入 ${newWords.length} 個新單字`);
 
     // ===== 步驟 7：合併成最終單字池 =====
@@ -136,8 +172,8 @@ export class QuizOrchestrator {
 
     console.log('═══════════════════════════════════════');
     console.log(`✅ [QuizOrchestrator.init] 完成！`);
-    console.log(`   Top-K 載入：${reviewWords.length} 複習 + ${newWords.length} 新詞 = ${this.words.length} 個單字`);
-    console.log(`   （對比全量：${this.stateCache.size > 0 ? '7,087' : '未快取'} 個單字）`);
+    console.log(`   單字池：${reviewWords.length} 複習 + ${newWords.length} 新詞 = ${this.words.length} 個`);
+    console.log(`   （配額 ${this.dailyMaxQuota} 題，池子 ${this.words.length} 個，比例 1:${(this.words.length / this.dailyMaxQuota).toFixed(1)}）`);
     console.log('═══════════════════════════════════════');
   }
 
@@ -162,18 +198,31 @@ export class QuizOrchestrator {
       return null;
     }
 
+    // 🔥 優先從「今天還沒出過」的單字中選
+    const availableWords = this.words.filter(w => !this.askedToday.has(w.id));
+    const usingPool = availableWords.length > 0 ? availableWords : this.words;
+    const isReusing = availableWords.length === 0;
+
+    if (isReusing) {
+      console.warn(`⚠️ [nextQuestion] 池子已用完（${this.words.length} 個全出過），允許重複`);
+    }
+
     const entries: WordEntry[] = [];
-    for (const word of this.words) {
+    for (const word of usingPool) {
       const state = this.stateCache?.get(word.id) ?? createInitialReviewState();
       const overdueDays = calculateOverdueDays(state.nextReviewDate, this.getNow());
       entries.push({ wordId: word.id, state, overdueDays });
     }
 
-    const selectedId = pickNextWordId(entries, {
-      dailyAnsweredCount: this.dailyAnsweredCount,
-      dailyMaxQuota: this.dailyMaxQuota,
-      dailyNewQuotaRemaining: this.dailyNewQuotaRemaining,
-    }, this.activeAssignment?.explorationRate ?? 0.1);
+    const selectedId = pickNextWordId(
+      entries,
+      {
+        dailyAnsweredCount: this.dailyAnsweredCount,
+        dailyMaxQuota: this.dailyMaxQuota,
+        dailyNewQuotaRemaining: this.dailyNewQuotaRemaining,
+      },
+      this.activeAssignment?.explorationRate ?? 0.1
+    );
 
     if (!selectedId) {
       console.log(`📌 [nextQuestion] 無候選單字可選`);
@@ -183,7 +232,9 @@ export class QuizOrchestrator {
     const word = this.wordMap.get(selectedId);
     if (!word) return null;
 
-    console.log(`📌 [nextQuestion] 選中「${word.word}」（進度 ${this.dailyAnsweredCount + 1}/${this.dailyMaxQuota}）`);
+    this.askedToday.add(selectedId);
+
+    console.log(`📌 [nextQuestion] 選中「${word.word}」（進度 ${this.dailyAnsweredCount + 1}/${this.dailyMaxQuota}，池中剩 ${availableWords.length - 1} 個未出）`);
 
     return {
       word,
@@ -272,7 +323,7 @@ export class QuizOrchestrator {
       await this.classStatsService.recordAttempt({
         className: this.className,
         studentId: this.studentId,
-        studentName: this.deps.studentName,  // 👈 新增
+        studentName: this.deps.studentName,
         wordId,
         isCorrect: grading.isCorrect,
       });
