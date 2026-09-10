@@ -1,10 +1,10 @@
 // src/features/admin/AdminPanel.tsx
 import React, { useState, useCallback } from 'react';
 import * as ExcelJS from 'exceljs';
-import { collection, doc, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, writeBatch, getDocs } from 'firebase/firestore'; // 🔥 新增 getDocs
 import { db } from '../../firebase';
 import { Word } from '../../types/word';
-import { useAuth } from '../../contexts/AuthContext'; // 🔥 引入 AuthContext
+import { useAuth } from '../../contexts/AuthContext';
 import { REQUIRED_FIELDS, OPTIONAL_FIELDS, ALLOWED_FIELDS } from '../../domain/validation/wordSchema';
 
 // 建立 Set 來進行快速且型別安全的檢查
@@ -23,7 +23,6 @@ function sanitizeDocId(word: string): string {
 }
 
 export const AdminPanel: React.FC = () => {
-    // 從 AuthContext 取得當前的角色與驗證狀態
     const { role, loading: authLoading } = useAuth();
 
     const [file, setFile] = useState<File | null>(null);
@@ -108,7 +107,6 @@ export const AdminPanel: React.FC = () => {
 
         const columnMap: Record<string, number> = {};
         headers.forEach((header, index) => {
-            // 🔥 使用 Set.has() 取代 Array.includes()
             if (header && ALLOWED_FIELDS_SET.has(header)) {
                 columnMap[header] = index;
             }
@@ -124,7 +122,6 @@ export const AdminPanel: React.FC = () => {
 
             for (const [field, colIndex] of Object.entries(columnMap)) {
                 const value = row[colIndex] || '';
-                // 🔥 使用 Set.has() 取代 Array.includes()
                 if (REQUIRED_FIELDS_SET.has(field) && !value) {
                     errors.push({
                         row: rowNumber,
@@ -222,12 +219,12 @@ export const AdminPanel: React.FC = () => {
             return;
         }
 
-        if (!window.confirm(`確定要發布 ${previewData.length} 筆單字到資料庫嗎？`)) {
+        if (!window.confirm(`確定要發布 ${previewData.length} 筆單字到資料庫嗎？此操作會覆蓋舊版單字庫。`)) {
             return;
         }
 
         setIsLoading(true);
-        setPublishStatus(`⏳ 準備寫入 ${previewData.length} 筆資料...`);
+        setPublishStatus(`⏳ 準備清理舊版單字庫...`);
 
         try {
             const BATCH_SIZE = 500;
@@ -237,20 +234,35 @@ export const AdminPanel: React.FC = () => {
                 )
             );
 
-            let totalCommitted = 0;
+            // 🔥 步驟 1：清空 current 集合中的所有舊文件
+            const currentWordsRef = collection(db, 'vocabulary', 'current', 'words');
+            const currentSnapshot = await getDocs(currentWordsRef);
 
+            if (!currentSnapshot.empty) {
+                setPublishStatus(`⏳ 正在刪除 ${currentSnapshot.docs.length} 筆舊單字...`);
+                // Firestore 批次刪除上限為 500 筆，需分批次刪除
+                for (let i = 0; i < currentSnapshot.docs.length; i += BATCH_SIZE) {
+                    const deleteBatch = writeBatch(db);
+                    const chunk = currentSnapshot.docs.slice(i, i + BATCH_SIZE);
+                    chunk.forEach((doc) => deleteBatch.delete(doc.ref));
+                    await deleteBatch.commit();
+                }
+                console.log(`✅ 已清空 ${currentSnapshot.docs.length} 筆舊單字`);
+            }
+
+            setPublishStatus(`⏳ 準備寫入 ${previewData.length} 筆新資料...`);
+
+            // 🔥 步驟 2：寫入新資料（只寫入 current，不再寫入 draft）
+            let totalCommitted = 0;
             for (let i = 0; i < allWords.length; i += BATCH_SIZE) {
                 const batch = writeBatch(db);
                 const chunk = allWords.slice(i, i + BATCH_SIZE);
 
                 for (const word of chunk) {
-                    // 🔥 關鍵修正：用 word 欄位當作 document ID
                     const wordId = sanitizeDocId(String(word.word || ''));
                     if (!wordId) continue;
 
-                    const draftDocRef = doc(db, 'vocabulary', 'draft', 'words', wordId);
                     const currentDocRef = doc(db, 'vocabulary', 'current', 'words', wordId);
-                    batch.set(draftDocRef, word);
                     batch.set(currentDocRef, word);
                 }
 
@@ -259,6 +271,7 @@ export const AdminPanel: React.FC = () => {
                 setPublishStatus(`✅ 已寫入 ${totalCommitted}/${allWords.length} 筆`);
             }
 
+            // 🔥 步驟 3：更新 metadata 版本號
             const version = new Date().toISOString().slice(0, 10);
             await setDoc(doc(db, 'vocabulary', 'metadata'), {
                 currentVersion: version,
@@ -310,7 +323,7 @@ export const AdminPanel: React.FC = () => {
                     style={{ fontSize: '1rem' }}
                 />
                 <p style={{ fontSize: '0.9rem', color: '#6c757d', marginTop: '0.5rem' }}>
-                    {isLoading ? '解析中...' : '支援 .xlsx, .xls, .csv 格式'}
+                    {isLoading ? '處理中...' : '支援 .xlsx, .xls, .csv 格式'}
                 </p>
             </div>
 
@@ -375,7 +388,7 @@ export const AdminPanel: React.FC = () => {
                                 cursor: (isLoading || validationErrors.length > 0) ? 'default' : 'pointer',
                             }}
                         >
-                            {isLoading ? '處理中...' : '🚀 發布至資料庫'}
+                            {isLoading ? '處理中...' : '🚀 發布至資料庫（覆蓋舊版）'}
                         </button>
                         <button
                             onClick={() => {
