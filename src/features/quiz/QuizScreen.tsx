@@ -14,7 +14,6 @@ async function callGoogleIME(trace: number[][][], language: string = 'en'): Prom
     return [xs, ys, []];
   });
 
-  console.log('📤 發送筆跡 (像素座標), 筆畫數:', scaledTrace.length);
   const data = JSON.stringify({
     options: 'enable_pre_space',
     requests: [
@@ -34,9 +33,7 @@ async function callGoogleIME(trace: number[][][], language: string = 'en'): Prom
       'https://www.google.com.tw/inputtools/request?ime=handwriting&app=mobilesearch&cs=1&oe=UTF-8',
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: data,
       }
     );
@@ -46,11 +43,9 @@ async function callGoogleIME(trace: number[][][], language: string = 'en'): Prom
     }
 
     const result = await response.json();
-    console.log('📥 Google API 完整回應:', result);
     if (result && result.length > 1 && result[1] && result[1][0]) {
       const candidates = result[1][0][1];
       if (candidates && candidates.length > 0) {
-        console.log('🏆 候選詞列表:', candidates);
         return candidates;
       }
     }
@@ -75,23 +70,31 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   const [status, setStatus] = useState<'idle' | 'answering' | 'submitted' | 'done'>('idle');
   const [result, setResult] = useState<{ correct: boolean; message: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [storageError, setStorageError] = useState<boolean>(false);
+  const [dailyProgress, setDailyProgress] = useState<{ answered: number; max: number }>({ answered: 0, max: 0 });
   const startTimeRef = useRef<number>(0);
   const timedOutRef = useRef<boolean>(false);
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const canvasRef = useRef<HandwritingCanvasRef>(null);
-  const [storageError, setStorageError] = useState<boolean>(false);
-  const [dailyProgress, setDailyProgress] = useState<{ answered: number; max: number }>({ answered: 0, max: 0 });
+  // 🔥 同步鎖：避免連點提交導致重複 loadNext
+  const submitLockRef = useRef<boolean>(false);
 
   const activeAssignment = orchestrator.getActiveAssignment();
 
   const loadNext = async () => {
+    // 🔥 關鍵：先停掉上一題的語音，避免音檔重疊
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+
     const q = await orchestrator.nextQuestion();
-    // 更新進度顯示
     setDailyProgress(orchestrator.getDailyProgress());
+
     if (!q) {
       setStatus('done');
       return;
     }
+
     setQuestion(q);
     setSnapshotUrl(undefined);
     setResult(null);
@@ -99,6 +102,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     setStatus('answering');
     startTimeRef.current = Date.now();
     timedOutRef.current = false;
+    submitLockRef.current = false; // 重置鎖
 
     if (window.speechSynthesis) {
       const utterance = new SpeechSynthesisUtterance(
@@ -121,8 +125,11 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   }, []);
 
   const handleSubmit = async () => {
-    if (status !== 'answering' || !question || isSubmitting) return;
+    // 🔥 同步鎖：立即鎖定，避免連點
+    if (submitLockRef.current) return;
+    if (status !== 'answering' || !question) return;
 
+    submitLockRef.current = true;
     setIsSubmitting(true);
     setStatus('submitted');
 
@@ -136,7 +143,6 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
             (cand) => cand.toLowerCase() === question.word.word.toLowerCase()
           );
           recognizedText = exactMatch || candidates[0] || '';
-          console.log(`✅ 選用結果: "${recognizedText}" (候選清單: ${candidates.join(', ')})`);
         }
       }
 
@@ -160,26 +166,26 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         setStorageError(true);
       }
 
-      let message = isCorrect
+      const message = isCorrect
         ? `✅ 辨識為「${recognizedText || '(空白)'}」${saveFailed ? '（儲存失敗，但辨識正確）' : '，正確！'}`
         : `❌ 辨識為「${recognizedText || '(空白)'}」，正確答案是 ${question.word.word}${saveFailed ? '（儲存失敗）' : ''}`;
-      
-      setResult({
-        correct: isCorrect,
-        message,
-      });
 
-      setTimeout(() => loadNext(), 2000);
+      setResult({ correct: isCorrect, message });
+
+      // 🔥 從 2000ms 縮短為 1200ms，使用者體驗更流暢
+      setTimeout(() => loadNext(), 1200);
     } catch (error) {
       console.error('提交錯誤:', error);
       setResult({ correct: false, message: '發生錯誤，請重試' });
       setStatus('answering');
+      submitLockRef.current = false; // 失敗時解鎖
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleTimeout = () => {
+    if (timedOutRef.current) return; // 避免重複觸發
     timedOutRef.current = true;
     if (question && status === 'answering') {
       handleSubmit();
@@ -206,7 +212,6 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
   return (
     <div style={{ maxWidth: '700px', margin: '0 auto', padding: '1rem' }}>
-      {/* 👇 新增：作業資訊橫幅 */}
       {activeAssignment && (
         <div style={{
           padding: '0.5rem 1rem',
