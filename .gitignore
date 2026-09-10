@@ -56,3 +56,7 @@ __pycache__/
 Thumbs.db
 
 .venv/
+
+.env
+.env.local
+.env*.local
