@@ -1,12 +1,11 @@
 // src/features/login/StudentLogin.tsx
 import React, { useState } from 'react';
-import { InMemoryWordRepository } from '../../services/wordRepository/InMemoryWordRepository';
 import { FirestoreWordRepository } from '../../services/wordRepository/FirestoreWordRepository';
-import { HybridProgressStore } from '../../services/storage/HybridProgressStore'; // 👈 改這個
+import { InMemoryWordRepository } from '../../services/wordRepository/InMemoryWordRepository';
+import { HybridProgressStore } from '../../services/storage/HybridProgressStore';
 import { QuizOrchestrator } from '../quiz/QuizOrchestrator';
 import type { Word } from '../../types/word';
 
-// 備用單字（當 Firestore 無資料時使用，避免白畫面）
 const FALLBACK_WORDS: Word[] = [
   { id: 'apple', word: 'apple', meaning: '蘋果', sentence: 'I eat an apple every day.' },
   { id: 'book', word: 'book', meaning: '書', sentence: 'This is my book.' },
@@ -33,7 +32,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
         window.speechSynthesis.cancel();
         console.log('✅ 語音引擎已解鎖');
       } catch (e) {
-        console.log('語音功能不可用，但文字仍會顯示');
+        console.log('語音功能不可用');
       }
     }
   };
@@ -48,29 +47,35 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
     setIsLoading(true);
 
     try {
-      // 1. 從 Firestore 讀取單字
+      // 1. 建立 WordRepository
       const firestoreRepo = new FirestoreWordRepository();
-      let words = await firestoreRepo.getAll();
-
-      // 2. 若 Firestore 無資料，使用備用單字
-      if (words.length === 0) {
-        console.warn('⚠️ Firestore 無單字資料，使用備用單字庫');
-        words = FALLBACK_WORDS;
+      let repo;
+      try {
+        const testQuery = await firestoreRepo.getNewWords(new Set(), 1);
+        if (testQuery.length === 0) {
+          console.warn('⚠️ Firestore 無單字資料，使用備用單字庫');
+          repo = new InMemoryWordRepository(FALLBACK_WORDS);
+        } else {
+          repo = firestoreRepo;
+        }
+      } catch (e) {
+        console.warn('⚠️ Firestore 連線失敗，使用備用單字庫:', e);
+        repo = new InMemoryWordRepository(FALLBACK_WORDS);
       }
 
-      console.log(`✅ 成功載入 ${words.length} 個單字`);
-
-      // 3. 建立測驗流程
-      const repo = new InMemoryWordRepository(words);
-      // 👇 換成 HybridProgressStore，傳入 studentId
+      // 2. 建立測驗流程
       const store = new HybridProgressStore(studentId.trim());
-      const orchestrator = new QuizOrchestrator(studentId.trim(), {
-        wordRepository: repo,
-        progressStore: store,
-        timeLimitMs: 15000,
-        dailyMaxQuota: 10,
-        dailyNewQuota: 3,
-      });
+      const orchestrator = new QuizOrchestrator(
+        studentId.trim(),
+        className.trim(), // 👈 傳入班級（可能為空字串）
+        {
+          wordRepository: repo,
+          progressStore: store,
+          timeLimitMs: 15000,
+          defaultDailyMaxQuota: 10,  // fallback
+          defaultDailyNewQuota: 3,   // fallback
+        }
+      );
 
       await orchestrator.init();
       onStart(orchestrator);

@@ -6,7 +6,9 @@ import { TeacherDashboard } from './features/dashboard/TeacherDashboard';
 import { QuizOrchestrator } from './features/quiz/QuizOrchestrator';
 import type { Word } from './types/word';
 import { AdminPanel } from './features/admin/AdminPanel';
+import { AssignmentManager } from './features/dashboard/AssignmentManager';
 
+const ASSIGNMENT_PASSWORD = 'admin456';
 
 // 你的單字資料
 const SAMPLE_WORDS: Word[] = [
@@ -21,7 +23,7 @@ const TEACHER_PASSWORD = 'teacher123'; // 教師密碼（可自行修改）
 
 export const App: React.FC = () => {
   const [orchestrator, setOrchestrator] = useState<QuizOrchestrator | null>(null);
-  const [mode, setMode] = useState<'login' | 'quiz' | 'dashboard' | 'admin'>('login');
+  const [mode, setMode] = useState<'login' | 'quiz' | 'dashboard' | 'admin' | 'assignments'>('login');
 
   // 處理教師後台進入
   const handleTeacherAccess = () => {
@@ -30,6 +32,26 @@ export const App: React.FC = () => {
       setMode('dashboard');
     } else if (input !== null) {
       alert('❌ 密碼錯誤，請重新嘗試。');
+    }
+  };
+
+  // 管理後台：密碼驗證
+  const handleAdminAccess = () => {
+    const input = window.prompt('請輸入管理員密碼：');
+    if (input === 'admin456') {
+      setMode('admin');
+    } else if (input !== null) {
+      alert('❌ 密碼錯誤');
+    }
+  };
+
+  // 作業管理：密碼驗證（新增）
+  const handleAssignmentAccess = () => {
+    const input = window.prompt('請輸入作業管理密碼：');
+    if (input === ASSIGNMENT_PASSWORD) {
+      setMode('assignments');
+    } else if (input !== null) {
+      alert('❌ 密碼錯誤');
     }
   };
 
@@ -46,6 +68,11 @@ export const App: React.FC = () => {
   // 在條件渲染中加入 admin 模式 (放在其他模式之前或之後皆可)
   if (mode === 'admin') {
     return <AdminPanel />;
+  }
+
+  // 條件渲染作業管理模式
+  if (mode === 'assignments') {
+    return <AssignmentManager />;
   }
 
   // 登入模式（預設）
@@ -91,6 +118,19 @@ export const App: React.FC = () => {
           }}
         >
           📊 教師後台
+        </button>
+        <button
+          onClick={handleAssignmentAccess}
+          style={{
+            padding: '0.5rem 1.5rem',
+            background: '#17a2b8',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+          }}
+        >
+          📋 作業管理
         </button>
       </div>
 
