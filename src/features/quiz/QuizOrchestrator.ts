@@ -36,6 +36,7 @@ export interface QuizOrchestratorDeps {
   defaultDailyMaxQuota: number;
   defaultDailyNewQuota: number;
   studentName?: string;
+  studentSeatNumber?: string;
   now?: () => Date;
 }
 
@@ -326,6 +327,7 @@ export class QuizOrchestrator {
         className: this.className,
         studentId: this.studentId,
         studentName: this.deps.studentName,
+        studentSeatNumber: this.deps.studentSeatNumber,
         wordId,
         isCorrect: grading.isCorrect,
       })

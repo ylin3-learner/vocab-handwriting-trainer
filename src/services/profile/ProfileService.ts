@@ -5,28 +5,36 @@ import { db } from '../../firebase';
 export interface StudentProfile {
   name: string;
   class: string;
+  seatNumber: string;
+  displayId: string; // `${class}_${seatNumber}_${name}`
   createdAt?: string;
   updatedAt?: string;
 }
 
 export class ProfileService {
-  async saveProfile(uid: string, name: string, className: string): Promise<void> {
+  async saveProfile(
+    uid: string,
+    name: string,
+    className: string,
+    seatNumber: string
+  ): Promise<void> {
     const ref = doc(db, 'students', uid);
     const snap = await getDoc(ref);
     const now = new Date().toISOString();
+    const displayId = `${className}_${seatNumber}_${name}`;
+
+    const data = {
+      name,
+      class: className,
+      seatNumber,
+      displayId,
+      updatedAt: now,
+    };
 
     if (snap.exists()) {
-      await setDoc(ref, {
-        name,
-        class: className,
-        updatedAt: now,
-      }, { merge: true });
+      await setDoc(ref, data, { merge: true });
     } else {
-      await setDoc(ref, {
-        name,
-        class: className,
-        createdAt: now,
-      });
+      await setDoc(ref, { ...data, createdAt: now });
     }
   }
 

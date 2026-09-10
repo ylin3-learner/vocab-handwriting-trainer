@@ -22,8 +22,9 @@ interface StudentLoginProps {
 }
 
 export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
-  const [studentId, setStudentId] = useState('');
+  const [studentName, setStudentName] = useState('');
   const [className, setClassName] = useState('');
+  const [seatNumber, setSeatNumber] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const unlockSpeech = () => {
@@ -41,12 +42,17 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
   };
 
   const handleStart = async () => {
-    if (!studentId.trim()) {
-      alert('請輸入姓名或座號');
+    // 🔥 三欄都必填
+    if (!studentName.trim()) {
+      alert('請輸入姓名');
       return;
     }
     if (!className.trim()) {
       alert('請輸入班級');
+      return;
+    }
+    if (!seatNumber.trim()) {
+      alert('請輸入座號');
       return;
     }
 
@@ -60,10 +66,16 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
       const uid = cred.user.uid;
       console.log(`🔐 [StudentLogin] 匿名登入成功，UID: ${uid}`);
 
-      // ===== 步驟 2：儲存學生 Profile =====
+      // ===== 步驟 2：儲存學生 Profile（含 displayId） =====
       const profileService = new ProfileService();
-      await profileService.saveProfile(uid, studentId.trim(), className.trim());
-      console.log(`✅ [StudentLogin] Profile 已儲存：${studentId.trim()} (${className.trim()})`);
+      await profileService.saveProfile(
+        uid,
+        studentName.trim(),
+        className.trim(),
+        seatNumber.trim()
+      );
+      const displayId = `${className.trim()}_${seatNumber.trim()}_${studentName.trim()}`;
+      console.log(`✅ [StudentLogin] Profile 已儲存：${displayId}`);
 
       // ===== 步驟 3：建立 WordRepository =====
       const firestoreRepo = new FirestoreWordRepository();
@@ -82,7 +94,6 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
       }
 
       // ===== 步驟 4：建立測驗流程 =====
-      // 使用 UID 作為 studentId（而非姓名）
       const store = new HybridProgressStore(uid);
       const orchestrator = new QuizOrchestrator(
         uid,
@@ -93,7 +104,8 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
           timeLimitMs: 15000,
           defaultDailyMaxQuota: 10,
           defaultDailyNewQuota: 3,
-          studentName: studentId.trim(),  // 👈 給 classStats 顯示用
+          studentName: studentName.trim(),
+          studentSeatNumber: seatNumber.trim(),
         }
       );
 
@@ -111,13 +123,13 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
     <div style={{ maxWidth: '400px', margin: '2rem auto', padding: '1rem' }}>
       <h2>📚 登入練習</h2>
       <div style={{ marginBottom: '1rem' }}>
-        <label>姓名 / 座號 *</label>
+        <label>姓名 *</label>
         <input
           type="text"
-          value={studentId}
-          onChange={(e) => setStudentId(e.target.value)}
+          value={studentName}
+          onChange={(e) => setStudentName(e.target.value)}
           style={{ width: '100%', padding: '0.5rem', fontSize: '1rem' }}
-          placeholder="例如：王小明 或 12"
+          placeholder="例如：王小明"
           disabled={isLoading}
         />
       </div>
@@ -129,6 +141,17 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
           onChange={(e) => setClassName(e.target.value)}
           style={{ width: '100%', padding: '0.5rem', fontSize: '1rem' }}
           placeholder="例如：701"
+          disabled={isLoading}
+        />
+      </div>
+      <div style={{ marginBottom: '1rem' }}>
+        <label>座號 *</label>
+        <input
+          type="text"
+          value={seatNumber}
+          onChange={(e) => setSeatNumber(e.target.value)}
+          style={{ width: '100%', padding: '0.5rem', fontSize: '1rem' }}
+          placeholder="例如：12"
           disabled={isLoading}
         />
       </div>
