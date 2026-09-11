@@ -48,6 +48,7 @@ export class FirestoreProgressStore implements ProgressStore {
     // 構建一個「安全」的 attempt 物件，確保所有欄位都存在
     const safeAttempt = {
       studentId: attempt.studentId,
+      studentDisplayId: attempt.studentDisplayId ?? null,
       wordId: attempt.wordId,
       timestamp: attempt.timestamp,
       recognizedText: attempt.recognizedText || '',

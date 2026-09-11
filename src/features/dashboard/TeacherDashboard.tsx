@@ -1,10 +1,14 @@
 // src/features/dashboard/TeacherDashboard.tsx
 import React, { useState, useEffect } from 'react';
 import { AnalyticsService, StudentStat, WeakWord } from '../../services/analytics/AnalyticsService';
+import { useStudentDetail, clearAllStudentCache } from './hooks/useStudentDetail';
 
 const analytics = new AnalyticsService();
 
 export const TeacherDashboard: React.FC = () => {
+  // ============================================================
+  // 所有 State 與 Hook 都放在元件最上方
+  // ============================================================
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState<StudentStat[]>([]);
   const [weakWords, setWeakWords] = useState<WeakWord[]>([]);
@@ -16,10 +20,21 @@ export const TeacherDashboard: React.FC = () => {
   }>({ totalStudents: 0, totalQuestions: 0, avgCorrectRate: 0, highRiskCount: 0 });
   const [dataSource, setDataSource] = useState<'aggregated' | 'raw'>('aggregated');
 
+  // 🔥 Stage 2：測試用的 state（之後 Stage 3 會整合進 Master-Detail 佈局）
+  const [testStudentId, setTestStudentId] = useState<string | null>(null);
+  const {
+    data: detail,
+    loading: detailLoading,
+    error: detailError,
+    refetch,
+  } = useStudentDetail(testStudentId);
+
+  // ============================================================
+  // 資料載入
+  // ============================================================
   const loadData = async () => {
     setLoading(true);
     try {
-      // 優先使用預聚合的 classStats
       const classStats = await analytics.getAllClassStats();
 
       if (classStats.length > 0) {
@@ -110,7 +125,7 @@ export const TeacherDashboard: React.FC = () => {
         return;
       }
 
-      // Fallback：classStats 為空，使用原本的逐筆掃描
+      // Fallback
       console.log('⚠️ [TeacherDashboard] 無預聚合統計，使用逐筆掃描（可能較慢）');
       setDataSource('raw');
       const [stats, words, summ] = await Promise.all([
@@ -132,10 +147,16 @@ export const TeacherDashboard: React.FC = () => {
     loadData();
   }, []);
 
+  // ============================================================
+  // 早期返回：Loading 畫面
+  // ============================================================
   if (loading) {
     return <div style={{ padding: '2rem', textAlign: 'center' }}>📊 載入教師數據中...</div>;
   }
 
+  // ============================================================
+  // 主畫面
+  // ============================================================
   return (
     <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto', fontFamily: 'sans-serif' }}>
       <h1 style={{ borderBottom: '3px solid #007bff', paddingBottom: '0.5rem' }}>
@@ -157,6 +178,60 @@ export const TeacherDashboard: React.FC = () => {
           {dataSource === 'aggregated' ? '⚡ 預聚合統計' : '🐢 即時掃描'}
         </span>
       </h1>
+
+      {/* ============================================================ */}
+      {/* 🔥 Stage 2 測試區：驗證 useStudentDetail Hook */}
+      {/* ============================================================ */}
+      <div style={{ background: '#fff3cd', padding: '1rem', margin: '1rem 0', borderRadius: '8px' }}>
+        <h3>🧪 Stage 2 測試區</h3>
+        <p style={{ fontSize: '0.9rem', color: '#856404' }}>
+          點擊下方學生名字，驗證 useStudentDetail 是否正常運作。
+          <strong>重複點擊同一學生應該不會觸發新的 Firestore 讀取。</strong>
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {students.slice(0, 5).map(s => (
+            <button
+              key={s.id}
+              onClick={() => setTestStudentId(s.id)}
+              style={{
+                padding: '0.3rem 0.8rem',
+                background: testStudentId === s.id ? '#007bff' : '#e9ecef',
+                color: testStudentId === s.id ? 'white' : 'black',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              {s.name}
+            </button>
+          ))}
+          <button
+            onClick={() => setTestStudentId(null)}
+            style={{ padding: '0.3rem 0.8rem', background: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+          >
+            清空
+          </button>
+          <button
+            onClick={() => { clearAllStudentCache(); refetch(); }}
+            style={{ padding: '0.3rem 0.8rem', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+          >
+            清快取 + 重讀
+          </button>
+        </div>
+
+        <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
+          {detailLoading && <span>⏳ 載入中...</span>}
+          {detailError && <span style={{ color: '#dc3545' }}>❌ {detailError}</span>}
+          {detail && (
+            <pre style={{ background: 'white', padding: '0.5rem', borderRadius: '4px', overflow: 'auto', maxHeight: '300px', fontSize: '0.8rem' }}>
+              {JSON.stringify(detail, null, 2)}
+            </pre>
+          )}
+          {!detail && !detailLoading && !detailError && testStudentId && (
+            <span>（尚無資料）</span>
+          )}
+        </div>
+      </div>
 
       {/* 摘要卡片 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', margin: '2rem 0' }}>
