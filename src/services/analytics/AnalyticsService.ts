@@ -1,8 +1,13 @@
 // src/services/analytics/AnalyticsService.ts
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { AttemptRecord } from '../storage/ProgressStore';
 import { ClassStatsService, ClassStats } from './ClassStatsService';
+
+import { FirestoreWordRepository } from '../wordRepository/FirestoreWordRepository';
+import { analyzeStudent } from '../../domain/analytics/studentAnalyzer';
+import { StudentAnalytics } from '../../types/analytics';
+import { Word } from '../../types/word';
 
 // 定義學生統計資料結構
 export interface StudentStat {
@@ -26,6 +31,9 @@ export interface WeakWord {
 
 export class AnalyticsService {
     private classStatsService = new ClassStatsService();
+
+    // 新增：用於把 wordId 轉成 Word
+    private wordRepository = new FirestoreWordRepository();
 
     // 新增：取得所有班級預聚合統計（推薦使用）
     async getAllClassStats(): Promise<ClassStats[]> {
@@ -146,5 +154,51 @@ export class AnalyticsService {
             id: doc.id,
             ...doc.data()
         }));
+    }
+
+    /**
+     * 🔥 Stage 1 新增：取得單一學生的完整個人化分析
+     *
+     * 讀取策略：
+     *   - 1 次讀取：students/{studentId}（取得 name / class）
+     *   - 1 次讀取：attempts where studentId == studentId（取得所有作答）
+     *   - 1 次讀取：vocabulary/current/words（批次取弱點單字，只在需要時）
+     *
+     * 總計：2~3 次 Firestore 讀取（O(1)，與班級人數無關）
+     */
+    async getStudentDetail(studentId: string): Promise<StudentAnalytics> {
+        // 1. 取得學生 profile
+        const studentDoc = await getDoc(doc(db, 'students', studentId));
+        const profile = studentDoc.exists()
+            ? {
+                studentId,
+                name: studentDoc.data().name || studentId,
+                className: studentDoc.data().class || '未分類',
+            }
+            : { studentId, name: studentId, className: '未分類' };
+
+        // 2. 取得該學生的所有 attempts
+        const attemptsRef = collection(db, 'attempts');
+        const q = query(attemptsRef, where('studentId', '==', studentId));
+        const attemptsSnap = await getDocs(q);
+        const attempts = attemptsSnap.docs.map(d => d.data() as AttemptRecord);
+
+        // 3. 先做一次「不帶 word 的」分析，取得 wordId 清單
+        const preAnalysis = analyzeStudent(attempts, profile, new Map());
+
+        // 4. 批次取得弱點單字的 Word 物件（最多 5 個）
+        const weakWordIds = preAnalysis.weakestWords.map(w => w.wordId);
+        let wordMap = new Map<string, Word>();
+        if (weakWordIds.length > 0) {
+            try {
+                const words = await this.wordRepository.getWordsByIds(weakWordIds);
+                wordMap = new Map(words.map(w => [w.id, w]));
+            } catch (e) {
+                console.warn('⚠️ [AnalyticsService] 取得弱點單字失敗，使用 wordId 顯示:', e);
+            }
+        }
+
+        // 5. 用完整的 wordMap 重新分析
+        return analyzeStudent(attempts, profile, wordMap);
     }
 }
