@@ -1,5 +1,4 @@
 word,level,meaning,sentence
-a/an,1,一個,I saw a dog and an owl.
 ability,1,能力；才能,She has the ability to solve problems.
 able,1,能；有能力的,He is able to swim.
 about,1,關於,We talked about the movie.
@@ -8,7 +7,7 @@ abroad,1,在(到)國外,She wants to study abroad.
 across,1,橫越,We walked across the street.
 act,1,行動；表演,He decided to act quickly.
 action,1,行動；作用,Action is better than words.
-actor/actress,1,男演員,The actor performed very well.
+actor,1,男演員,The actor performed very well.
 add,1,增加,Add some sugar to the tea.
 afraid,1,害怕的,She is afraid of dogs.
 after,1,在…之後；以後的,We went home after dinner.
@@ -16,9 +15,9 @@ afternoon,1,下午,I have a class this afternoon.
 again,1,再一次,Please say that again.
 age,1,年齡；使變老,He started school at the age of six.
 ago,1,在～以前,They moved here two years ago.
-agree(ment),1,同意,I agree with your idea.
+agree,1,同意,I agree with your idea.
 air,1,空氣；大氣；天空,The air is fresh in the mountains.
-airplane/plane,1,飛機,The airplane landed safely.
+airplane,1,飛機,The airplane landed safely.
 airport,1,機場；航空站,We met at the airport.
 all,1,全部的；全體,All the students passed.
 allow,1,允許,My parents allow me to go.
@@ -28,7 +27,6 @@ already,1,已經；先前,He has already finished.
 also,1,同樣地,She also likes music.
 although,1,雖然；然而,"Although it rained, we went out."
 always,1,總是；永遠,He is always kind.
-am/a.m.,1,上午,I wake up at 7 a.m.
 and,1,和；然後,I like tea and coffee.
 angry,1,生氣的,She was angry with me.
 animal,1,動物,The zoo has many animals.
@@ -36,7 +34,7 @@ another,1,另一個,Would you like another cup?
 answer,1,答案,Please give me an answer.
 ant,1,螞蟻,An ant crawled on the ground.
 any,1,任何的；若干,Do you have any questions?
-anybody/anyone,1,任何人,Is anybody home?
+anybody,1,任何人,Is anybody home?
 anything,1,任何事物,Do you need anything?
 apartment,1,公寓大樓,They live in a small apartment.
 appear,1,出現；顯露,A star appeared in the sky.
@@ -89,7 +87,7 @@ bench,1,長板凳,They sat on a park bench.
 beside,1,在旁邊,She sat beside me.
 best,1,最好的,This is the best day ever.
 between,1,介於…之間,The bank is between two stores.
-bicycle/bike,1,腳踏車,He rides his bicycle to school.
+bicycle,1,腳踏車,He rides his bicycle to school.
 big,1,大的,That is a big dog.
 bird,1,鳥,A bird sang in the tree.
 bite,1,一口之量；咬,Do not bite your nails.
@@ -230,7 +228,7 @@ dinner,1,晚餐,We had dinner at six.
 dirty,1,污穢的,His shoes are dirty.
 dish,1,碟；菜餚,This dish tastes good.
 do,1,做（助動詞/動詞）,What do you do?
-doctor/doc,1,醫生；博士,The doctor helped me.
+doctor,1,醫生；博士,The doctor helped me.
 dog,1,狗,The dog is friendly.
 doll,1,洋娃娃,She played with a doll.
 dollar,1,美、加等國)元,It costs one dollar.
@@ -262,7 +260,7 @@ else,1,其他；另外,Do you want anything else?
 email,1,電子郵件；發電子郵件,I sent you an email.
 end,1,結束,The movie will end soon.
 engineer,1,工程師,My father is an engineer.
-enjoy(ment),1,享受,I enjoy reading books.
+enjoy,1,享受,I enjoy reading books.
 enough,1,足夠的,We have enough food.
 enter,1,進入；參加,Please enter the room.
 envelope,1,信封,Put the letter in the envelope.
@@ -272,7 +270,7 @@ even,1,甚至；連,Even a child can do it.
 evening,1,晚上,We met in the evening.
 ever,1,永遠,Have you ever been to Japan?
 every,1,每個,Every student has a desk.
-everyone/everybody,1,每個人,Everyone is here.
+everyone,1,每個人,Everyone is here.
 everything,1,每件事；一切,Everything is fine.
 example,1,例子；樣品,Give me an example.
 excellent,1,傑出的；卓越的,Your work is excellent.
@@ -350,9 +348,9 @@ give,1,給；送給,Give me a hand.
 glad,1,高興的,I am glad to see you.
 glass,1,玻璃；玻璃杯,He drank a glass of milk.
 glasses,1,眼鏡,She wears glasses.
-glove(s),1,手套,Put on your gloves.
+glove,1,手套,Put on your gloves.
 go,1,去；從事,Let's go home.
-god/goddess,1,上帝；造物主,They prayed to God.
+god,1,上帝；造物主,They prayed to God.
 good,1,好的；利益,This is a good book.
 goodbye,1,再見,"Goodbye, see you tomorrow."
 grade,1,級別；評分,She got a good grade.
@@ -380,7 +378,6 @@ hard,1,硬的；艱難的,This work is hard.
 hat,1,帽子,He wore a black hat.
 hate,1,憎恨,I hate cold weather.
 have,1,有；擁有（助動詞/動詞）,I have a book.
-"he (him, his, himself)",1,他（受格：他；所有格：他的；反身代名詞：他自己）,He hurt himself.
 head,1,頭,She nodded her head.
 headache,1,頭痛,I have a headache.
 health,1,健康,Health is important.
@@ -421,7 +418,6 @@ hundred,1,一百,There are one hundred books.
 hungry,1,飢餓的；渴求的,I am hungry.
 hurt,1,受傷,My leg hurts.
 husband,1,丈夫,Her husband is a doctor.
-"I (me, my, mine, myself)",1,我（受格：我；所有格：我的；反身代名詞：我自己）,I hurt myself.
 ice,1,冰,The ice is cold.
 idea,1,主意；觀念,That is a good idea.
 if,1,如果,"If it rains, stay home."
@@ -437,7 +433,6 @@ interview,1,會見；面試,She has a job interview.
 into,1,進入……之內,He went into the room.
 invite,1,邀請,I invite you to my party.
 island,1,島,The island is beautiful.
-"it (its, itself)",1,它（所有格：它的；反身代名詞：它自己）,The cat licked itself.
 item,1,項目,Check each item.
 jacket,1,夾克,He wore a warm jacket.
 jeans,1,牛仔褲,She likes blue jeans.
@@ -522,7 +517,7 @@ map,1,地圖,Look at the map.
 mark,1,痕跡；記號,There is a mark on the wall.
 market,1,市場,We buy food at the market.
 married,1,已婚的,They are married.
-mathematics/math,1,數學,Math is my favorite subject.
+math,1,數學,Math is my favorite subject.
 matter,1,事情；問題,What is the matter?
 may,1,五月,May is a warm month.
 maybe,1,可能,Maybe he is right.
@@ -531,7 +526,6 @@ mean,1,吝嗇的,He is mean with money.
 meat,1,食用的)肉,She does not eat meat.
 media,1,媒體,The media reported the news.
 medicine,1,藥；醫學,Take your medicine.
-medium,1,中間；媒介,He is of medium height.
 meet,1,遇見,Nice to meet you.
 meeting,1,會議,The meeting starts at ten.
 member,1,成員,She is a club member.
@@ -557,9 +551,9 @@ mother,1,母親；媽媽,My mother is kind.
 mountain,1,山,The mountain is high.
 mouse,1,鼠；滑鼠,The mouse is small.
 mouth,1,嘴；口,Open your mouth.
-move(ment),1,使移動；使感動,Please move your car.
-movie/film,1,電影,We watched a movie.
-Mr./Mister,1,先生,Mr. Brown is here.
+move,1,使移動；使感動,Please move your car.
+movie,1,電影,We watched a movie.
+Mr.,1,先生,Mr. Brown is here.
 Mrs.,1,太太,Mrs. Wang is my teacher.
 Ms.,1,女士,Ms. Lee is our teacher.
 much,1,許多的,I do not have much time.
@@ -581,7 +575,7 @@ newspaper,1,報紙,He reads a newspaper.
 next,1,下一個的,See you next week.
 nice,1,好的,You are very nice.
 night,1,夜,Good night.
-no/nope,1,不；沒有,"No, thank you."
+no,1,不；沒有,"No, thank you."
 nobody,1,沒有人,Nobody knows.
 noise,1,噪音,The noise woke me up.
 noisy,1,吵鬧的,The class is noisy.
@@ -595,7 +589,7 @@ notice,1,公告；注意；通知,I did not notice him.
 now,1,現在,We must go now.
 number,1,數字；給…號碼,What is your phone number?
 nurse,1,護士,The nurse is kind.
-O.K./OK/okay,1,好的；可以,"O.K., I agree."
+O.K.,1,好的；可以,"O.K., I agree."
 o’clock,1,……點鐘,It is five o’clock.
 of,1,……的,This is the color of the sky.
 off,1,離開；關掉,Turn off the light.
@@ -624,20 +618,20 @@ paint,1,油漆；顏料,They paint the wall.
 pair,1,一對,I bought a pair of shoes.
 pants,1,褲子,He wears black pants.
 paper,1,紙,Give me a sheet of paper.
-parent(s),1,父母,My parents are kind.
+parent,1,父母,My parents are kind.
 park,1,公園,We played in the park.
 part,1,一部分,This is my favorite part.
 party,1,派對,We had a birthday party.
 pass,1,通行許可；經過,Please pass the salt.
 past,1,過去的,"In the past, life was simple."
-pay(ment),1,付錢,I will pay for dinner.
+pay,1,付錢,I will pay for dinner.
 pen,1,筆,May I borrow your pen?
 pencil,1,鉛筆,Write with a pencil.
 people,1,人們,Many people live here.
 perhaps,1,也許,Perhaps he will come.
 person,1,人,She is a good person.
 pet,1,寵物；愛撫,I have a pet dog.
-photograph/photo,1,照片,This photo is old.
+photo,1,照片,This photo is old.
 piano,1,鋼琴,She plays the piano.
 pick,1,十字鎬；挑選,Pick a card.
 picnic,1,野餐；去郊遊野餐,We had a picnic.
@@ -657,7 +651,7 @@ play,1,玩耍；玩,Children play outside.
 player,1,玩家；選手,He is a good player.
 please,1,使)高興,Please sit down.
 pleasure,1,愉快,It is a pleasure to meet you.
-pm/p.m.,1,下午,The class starts at 3 p.m.
+p.m.,1,下午,The class starts at 3 p.m.
 pocket,1,口袋,The key is in my pocket.
 point,1,尖端；持向,Do not point at people.
 police,1,警察,The police came quickly.
@@ -760,11 +754,10 @@ shall,1,將；會（助動詞）,Shall we go now?
 shape,1,形狀；做成,What shape is it?
 share,1,分擔；分配,Share the cake.
 sharp,1,尖銳的,The knife is sharp.
-"she (her, hers, herself)",1,她（受格：她；所有格：她的；反身代名詞：她自己）,She made it herself.
 sheep,1,羊,The sheep eats grass.
 ship,1,船,The ship is large.
 shirt,1,襯衫,He wore a white shirt.
-shoe(s),1,鞋,My shoes are new.
+shoe,1,鞋,My shoes are new.
 shop,1,商店,The shop is open.
 short,1,短的,The rope is short.
 shorts,1,短褲,He wears shorts in summer.
@@ -800,7 +793,7 @@ so,1,所以,"It rained, so we stayed home."
 sofa,1,沙發,He sat on the sofa.
 soldier,1,軍人,The soldier stood still.
 some,1,一些,I need some water.
-someone/somebody,1,某人,Someone is at the door.
+someone,1,某人,Someone is at the door.
 something,1,某物,I want something to eat.
 sometimes,1,有時,Sometimes I walk to school.
 somewhere,1,某處,Let's go somewhere quiet.
@@ -855,14 +848,14 @@ talk,1,說話；談話,We need to talk.
 tall,1,高的,He is tall.
 tape,1,錄音帶,I listened to the tape.
 taste,1,味覺；品嚐,Taste the soup.
-taxicab/taxi/cab,1,計程車,We took a taxi.
+taxi,1,計程車,We took a taxi.
 tea,1,茶,I drink tea.
 teach,1,教導,She teaches English.
 teacher,1,教師,My teacher is kind.
 team,1,隊,Our team won.
 teenager,1,青少年,The teenager likes music.
-telephone/phone,1,電話,Answer the telephone.
-television/TV,1,電視機,We watch television.
+telephone,1,電話,Answer the telephone.
+television,1,電視機,We watch television.
 tell,1,告訴,Tell me the truth.
 temple,1,廟宇,We visited a temple.
 tennis,1,網球(運動),They play tennis.
@@ -876,7 +869,6 @@ theater,1,戲院,We went to the theater.
 then,1,那時,Then we went home.
 there,1,那裡,Look over there.
 these,1,這些,These books are mine.
-"they (them, their, theirs, themselves)",1,他們（受格：他們；所有格：他們的；反身代名詞：他們自己）,They enjoyed themselves.
 thick,1,厚的,The book is thick.
 thin,1,薄的,The paper is thin.
 thing,1,束西,What is that thing?
@@ -916,7 +908,7 @@ town,1,城鎮,He lives in a small town.
 toy,1,玩具；玩弄,The child played with a toy.
 traffic,1,交通,The traffic is heavy.
 train,1,火車,We took the train.
-treat(ment),1,請客；對待,He treated me to lunch.
+treat,1,請客；對待,He treated me to lunch.
 tree,1,樹,The tree is tall.
 trip,1,旅行,We went on a trip.
 trouble,1,憂慮,He is in trouble.
@@ -951,7 +943,6 @@ watch,1,手錶,My watch is new.
 water,1,水,Drink more water.
 wave,1,波；揮動,He waved his hand.
 way,1,路,This is the way home.
-"we (us, our, ours, ourselves)",1,我們（受格：我們；所有格：我們的；反身代名詞：我們自己）,We enjoyed ourselves.
 weak,1,虛弱的,He is weak.
 wear,1,穿；戴,She wears a hat.
 weather,1,天氣,The weather is nice.
@@ -994,14 +985,13 @@ wrong,1,錯誤的,This answer is wrong.
 yard,1,碼,The yard is clean.
 year,1,年,This year is good.
 yellow,1,黃色的,The sun is yellow.
-yes/yeah,1,是的,"Yes, I agree."
+yes,1,是的,"Yes, I agree."
 yesterday,1,昨天,Yesterday was rainy.
 yet,1,但是；還,I am not ready yet.
-"you (your, yours, yourself, yourselves)",1,你（所有格：你的；反身代名詞：你自己）,You should be proud of yourself.
 young,1,年輕的,She is young.
 zero,1,零,The score is zero.
 zoo,1,動物園,We went to the zoo.
-1,2,真實的,The story is true.
+true,2,真實的,The story is true.
 absence,2,缺席；缺少,His absence from class was noticed.
 absent,2,缺席的,She was absent from school yesterday.
 accept,2,接受,I accept your apology.
@@ -1038,16 +1028,16 @@ angle,2,角度；立場,Try looking at it from another angle.
 ankle,2,足踝,She hurt her ankle while running.
 anytime,2,任何時候,You can call me anytime.
 anyway,2,無論如何,"It was late, but we went anyway."
-anywhere/anyplace,2,任何地方,I cannot find it anywhere.
+anywhere,2,任何地方,I cannot find it anywhere.
 ape,2,大猩猩,The ape climbed the tree.
 appearance,2,外貌；顯露,He cares about his appearance.
 appetite,2,胃口；食慾,Exercise gives me a good appetite.
 apply,2,應用；申請,I will apply for the job.
 appreciate,2,欣賞；感激,I appreciate your help.
 approach,2,接近；著手處理,Winter is approaching fast.
-argue(argument),2,爭論；主張,They often argue about money.
+argue,2,爭論；主張,They often argue about money.
 army,2,軍隊；團體,He joined the army last year.
-arrange(ment),2,安排,We arranged a meeting for Friday.
+arrange,2,安排,We arranged a meeting for Friday.
 arrival,2,到達；到達者,Her arrival surprised everyone.
 arrow,2,箭,The arrow hit the target.
 article,2,文章；冠詞,I read an interesting article.
@@ -1062,7 +1052,6 @@ average,2,平均的,His grades are above average.
 avoid,2,避免；躲開,Try to avoid heavy traffic.
 backpack,2,背包；打包旅行,He carried a heavy backpack.
 backward,2,反方向地,He took a step backward.
-backward/backwards,2,反方向地,She looked backwards for a moment.
 badminton,2,羽毛球,They play badminton after school.
 bake,2,烘；烤,My mother likes to bake bread.
 bakery,2,麵包店,We bought fresh bread at the bakery.
@@ -1121,7 +1110,7 @@ burn,2,燃燒；燒傷,Be careful not to burn the rice.
 burst,2,爆發；爆炸,The balloon burst with a loud noise.
 businessman,2,商人,The businessman made a deal.
 cabbage,2,甘藍菜,She cooked cabbage with meat.
-café/cafe,2,咖啡館,We met at a small café.
+café,2,咖啡館,We met at a small café.
 cage,2,籠子；監牢,The bird sang in its cage.
 calendar,2,日曆；行事曆,I marked the date on my calendar.
 calm,2,鎮靜的,Stay calm and think clearly.
@@ -1157,7 +1146,7 @@ chief,2,主要的；首領,The chief problem is money.
 childhood,2,童年時期,She had a happy childhood.
 childish,2,孩子氣的,Stop acting childish.
 china,2,瓷器,The cup is made of china.
-chopstick(s),2,筷子,He ate rice with chopsticks.
+chopstick,2,筷子,He ate rice with chopsticks.
 claim,2,要求；聲稱,He claims that he saw a UFO.
 clap,2,拍手,The audience clapped loudly.
 classic,2,經典的；名著,This book is a classic.
@@ -1171,14 +1160,14 @@ clothing,2,衣服；覆蓋物,Warm clothing is needed in winter.
 cloudy,2,多雲的,The sky is cloudy today.
 coal,2,煤礦；煤塊,Coal was used to heat the house.
 coast,2,海岸；沿海地區,We drove along the coast.
-cockroach/roach,2,蟑蚣卜；油蟲,A cockroach ran under the table.
+cockroach,2,蟑蚣卜；油蟲,A cockroach ran under the table.
 cocoa,2,可可,She drank hot cocoa.
 coin,2,硬幣,He found a coin on the floor.
-cola/Coke,2,可樂類飲料,She drank a can of cola.
+cola,2,可樂類飲料,She drank a can of cola.
 college,2,大學；學院,He plans to go to college.
 comb,2,梳子；梳頭,She combed her hair.
 combine,2,結合,Combine the flour and water.
-comic(s),2,滑稽的,He reads comic books.
+comic,2,滑稽的,He reads comic books.
 command,2,命令；控制,The officer gave a command.
 commercial,2,商業的,The movie was a commercial success.
 company,2,公司；同伴,She works for a small company.
@@ -1190,7 +1179,7 @@ conclude,2,結束；斷定,We concluded the meeting early.
 condition,2,情況；決定,The car is in good condition.
 confident,2,有自信的,She feels confident about the test.
 conflict,2,衝突,The conflict caused many problems.
-congratulation(s),2,恭喜,Congratulations on your success!
+congratulation,2,恭喜,Congratulations on your success!
 connection,2,連接；關聯,There is a connection between the two.
 consider,2,認為；考慮,Please consider my idea.
 consideration,2,考慮；動機,Thank you for your consideration.
@@ -1247,7 +1236,7 @@ description,2,描寫；說明?,Write a short description of the room.
 desert,2,沙漠,The desert is hot and dry.
 design,2,設計,She studies fashion design.
 detail,2,細節,Please give me more details.
-develop(ment),2,發展,The child is developing quickly.
+develop,2,發展,The child is developing quickly.
 dial,2,撥號；刻度盤,Dial the number carefully.
 dialogue,2,對話,The two leaders had a dialogue.
 diamond,2,鑽石,She wore a diamond ring.
@@ -1258,7 +1247,7 @@ difficulty,2,困難,He had difficulty finding the address.
 direct,2,直接的；指向,This is a direct flight.
 direction,2,方向,We walked in the wrong direction.
 director,2,主管；導演,The director made a new movie.
-disagree(ment),2,不同意,I disagree with your opinion.
+disagree,2,不同意,I disagree with your opinion.
 disappear,2,消失,The sun disappeared behind the clouds.
 discover,2,發現,Scientists discovered a new planet.
 discovery,2,發現,The discovery changed medicine.
@@ -1288,7 +1277,7 @@ dull,2,單調的；遲鈍的,The movie was dull and long.
 duty,2,義務；稅,It is your duty to help.
 eagle,2,鷹,An eagle flew high above.
 earn,2,賺取；贏得,He earns money by teaching.
-earring(s),2,耳環,She wore silver earrings.
+earring,2,耳環,She wore silver earrings.
 earthquake,2,地震,The earthquake shook the city.
 ease,2,容易；減輕,This medicine will ease the pain.
 eastern,2,東方的,They live in the eastern part.
@@ -1303,11 +1292,11 @@ electric,2,電的,We bought an electric fan.
 electrical,2,電的；電力的,The electrical system failed.
 emotion,2,情感；激動,She spoke with strong emotion.
 emphasize,2,強調,The teacher emphasized the main point.
-employ(ment),2,雇用,The company employs many workers.
+employ,2,雇用,The company employs many workers.
 employee,2,雇員,The employee asked for a raise.
 employer,2,雇主,My employer is very kind.
 empty,2,空的,The bottle is empty.
-encourage(ment),2,鼓勵,My parents encourage me to study.
+encourage,2,鼓勵,My parents encourage me to study.
 ending,2,結局；結尾,The movie has a happy ending.
 enemy,2,敵人,The army attacked the enemy.
 energy,2,活力,Children have a lot of energy.
@@ -1324,9 +1313,9 @@ eve,2,前夕,We met on New Year's Eve.
 event,2,事件,The event was a great success.
 evil,2,邪惡的,He has an evil plan.
 exact,2,精確的,Tell me the exact time.
-examination/exam,2,考試,The final exam is next week.
+exam,2,考試,The final exam is next week.
 examine,2,檢查；調查,The doctor examined the patient.
-excite(ment),2,使興奮,The news excited everyone.
+excite,2,使興奮,The news excited everyone.
 excuse,2,藉口；原諒,That is not a good excuse.
 exist,2,存在；生存,Do ghosts really exist?
 existence,2,存在,The existence of aliens is unproven.
@@ -1336,7 +1325,7 @@ expert,2,熟練的；專家,She is an expert in math.
 express,2,表達,Words cannot express my thanks.
 expression,2,表情；表示,He had a happy expression.
 extra,2,額外的,We need an extra chair.
-eyebrow/brow,2,眉毛,He raised one eyebrow.
+eyebrow,2,眉毛,He raised one eyebrow.
 factor,2,因素；代理人,Cost is an important factor.
 failure,2,失敗,Failure is part of learning.
 fair,2,公平的,The game was fair.
@@ -1355,7 +1344,7 @@ fever,2,發燒；狂熱,The child has a high fever.
 field,2,原野；欄位,The farmer worked in the field.
 figure,2,數字；身材；認為,She has a slim figure.
 final,2,最後的,This is your final chance.
-fireman/firewoman,2,消防員,The fireman saved the child.
+fireman,2,消防員,The fireman saved the child.
 firm,2,堅決的；使穩固,She was firm in her decision.
 fisherman,2,漁民；漁夫,The fisherman caught a big fish.
 fit,2,適合的,These shoes fit me well.
@@ -1379,7 +1368,6 @@ formal,2,正式的,He wore formal clothes.
 former,2,先前的；從前的,The former president visited us.
 forth,2,向前,He went forth with courage.
 forward,2,向前；今後,Move forward slowly.
-forward/forwards,2,向前；今後,She stepped forwards.
 found,2,創立,They founded the school in 1950.
 fox,2,狐狸,A fox ran into the woods.
 freedom,2,自由；獨立自主,Freedom is precious.
@@ -1419,24 +1407,24 @@ guava,2,芭樂,Guava is a common fruit in Taiwan.
 guest,2,客人,We have a guest for dinner.
 guide,2,導遊；指南；引導,The guide showed us the city.
 gun,2,槍；砲,The police officer carried a gun.
-gymnasium/gym,2,體育館,We played basketball in the gym.
+gym,2,體育館,We played basketball in the gym.
 haircut,2,理髮,He needs a haircut.
 hall,2,大廳；走廊,The meeting was in the main hall.
-hamburger/burger,2,漢堡,I ate a hamburger for lunch.
+hamburger,2,漢堡,I ate a hamburger for lunch.
 handle,2,柄；把手,Hold the handle carefully.
 handsome,2,英俊的,He is a handsome young man.
 hardly,2,幾乎不,I hardly know him.
 heaven,2,天國；極樂之地,This place feels like heaven.
-hero/heroine,2,英雄；女英雄,The pilot was a hero.
+hero,2,英雄；女英雄,The pilot was a hero.
 highly,2,非常；高度地,She is highly respected.
 highway,2,公路,We drove on the highway.
 hike,2,健行,We went for a hike in the mountains.
 hip,2,臀部,She hurt her hip.
-hippopotamus/hippo,2,河馬,The hippo stayed in the water.
+hippo,2,河馬,The hippo stayed in the water.
 historical,2,歷史的’,We visited a historical site.
 hole,2,孔；漏洞,There is a hole in my sock.
 hop,2,跳過；跳躍,The rabbit hopped across the grass.
-host/hostess,2,主人,The host welcomed the guests.
+host,2,主人,The host welcomed the guests.
 huge,2,龐大的,They live in a huge house.
 human,2,人類的,Human kindness is powerful.
 humble,2,謙恭的,He is humble about his success.
@@ -1471,7 +1459,7 @@ instruction,2,教導；指示,Read the instructions first.
 instrument,2,儀器；樂器,The violin is a musical instrument.
 internal,2,內部的,The internal problem is serious.
 international,2,國際的,This is an international event.
-Internet/internet,2,網際網路,I found the answer on the Internet.
+Internet,2,網際網路,I found the answer on the Internet.
 introduce,2,介紹；提出,Let me introduce my friend.
 introduction,2,介紹；引言,The book has a short introduction.
 iron,2,鐵；熨斗,The gate is made of iron.
@@ -1480,7 +1468,7 @@ jog,2,輕搖；慢跑,I jog in the park every morning.
 joint,2,共同的；關節,They made a joint decision.
 journal,2,雜誌；期刊,He writes for a medical journal.
 judge,2,法官,The judge listened carefully.
-judgment/judgement,2,判斷；判斷力,Trust your own judgment.
+judgment,2,判斷；判斷力,Trust your own judgment.
 justice,2,公平；正義,We all want justice.
 keeper,2,看守者；保管人,The zookeeper fed the animals.
 ketchup,2,調味蕃茄醬,He put ketchup on his fries.
@@ -1521,7 +1509,7 @@ magazine,2,雜誌；期刊,She reads a fashion magazine.
 maintain,2,保持,Maintain a healthy lifestyle.
 major,2,主要的；主修,This is a major problem.
 male,2,男性的；雄的,A male nurse helped him.
-manage(ment),2,管理,She manages the team well.
+manage,2,管理,She manages the team well.
 manager,2,經理；管理人,The manager approved my leave.
 mango,2,芒果,Mango is sweet and juicy.
 manner,2,方法；態度,He spoke in a polite manner.
@@ -1537,7 +1525,7 @@ material,2,材料,This material is soft.
 mature,2,成熟的,She is mature for her age.
 meaning,2,意義；重要性,What is the meaning of this word?
 means,2,手段；方法,The bus is a cheap means of travel.
-measure(ment),2,測量,Measure the table carefully.
+measure,2,測量,Measure the table carefully.
 medical,2,醫學的,She needs medical help.
 melody,2,旋律,The melody is beautiful.
 membership,2,會員(資格),My gym membership expires soon.
@@ -1643,7 +1631,7 @@ poem,2,詩,He wrote a short poem.
 poet,2,詩人,The poet read his work aloud.
 poetry,2,詩,She enjoys reading poetry.
 poison,2,毒藥,The bottle contains poison.
-policeman/cop,2,警察,The policeman helped the lost child.
+policeman,2,警察,The policeman helped the lost child.
 policy,2,政策,The school has a new policy.
 pop,2,砰然(聲),The balloon went pop.
 population,2,人口,The population is growing.
@@ -1667,7 +1655,7 @@ pressure,2,壓；按,He felt pressure at work.
 pride,2,自豪,She felt pride in her son.
 priest,2,神父；牧師,The priest led the service.
 primary,2,主要的,Our primary goal is safety.
-prince/princess,2,王子,The prince rode a white horse.
+prince,2,王子,The prince rode a white horse.
 principal,2,主要的,The principal spoke to the students.
 principle,2,原則,Honesty is an important principle.
 print,2,印刷；字體,Please print your name clearly.
@@ -1689,7 +1677,7 @@ prove,2,證明,Can you prove your story?
 provide,2,提供,The hotel provides free breakfast.
 pudding,2,布丁,We had chocolate pudding.
 pumpkin,2,南瓜,We made pumpkin soup.
-punish(ment),2,處罰,The teacher punished the noisy students.
+punish,2,處罰,The teacher punished the noisy students.
 pupil,2,小學生,The pupil raised his hand.
 puppy,2,小狗,The puppy is playful.
 purple,2,紫色的,She wore a purple dress.
@@ -1698,7 +1686,7 @@ puzzle,2,難題；困惑,The puzzle was hard to solve.
 quality,2,質量,This product is of high quality.
 quantity,2,數量,We need a large quantity of paper.
 quiz,2,問答比賽,We had a short quiz today.
-railroad/railway,2,鐵路,The railroad runs along the coast.
+railroad,2,鐵路,The railroad runs along the coast.
 raincoat,2,雨衣,Put on your raincoat.
 range,2,區域,The price range is wide.
 rapid,2,快的,There was rapid growth.
@@ -1711,7 +1699,7 @@ receive,2,收到,I received your letter.
 recent,2,最近的,Recent news is good.
 record,2,記錄,Keep a record of your spending.
 recover,2,恢復,He is recovering from the flu.
-refrigerator/fridge,2,冰箱,Put the milk in the refrigerator.
+refrigerator,2,冰箱,Put the milk in the refrigerator.
 refuse,2,拒絕,She refused to answer.
 regard,2,注目；注意,I regard him as a friend.
 region,2,地區,This region is known for tea.
@@ -1725,7 +1713,7 @@ remove,2,除去,Please remove your shoes.
 rent,2,地租；承租,We rent a small apartment.
 repair,2,修理,He repaired the broken chair.
 reply,2,答覆,She did not reply to my email.
-require(ment),2,需求,This job requires patience.
+require,2,需求,This job requires patience.
 respect,2,尊敬,We should respect our elders.
 respond,2,回答,He responded quickly.
 responsible,2,負責的,She is responsible for the project.
@@ -1746,7 +1734,7 @@ runner,2,奔跑的人,The runner won the race.
 safety,2,安全性,Safety comes first.
 sail,2,船；坐船旅行,We sail every summer.
 sailor,2,水手,The sailor tied the rope.
-salesperson/salesman/saleswoman,2,銷售員,The salesperson helped us choose.
+salesperson,2,銷售員,The salesperson helped us choose.
 salty,2,鹹的,The soup is too salty.
 sample,2,樣品,They gave us a free sample.
 sand,2,沙,The children played in the sand.
@@ -1778,7 +1766,7 @@ sensitive,2,敏感的,She is sensitive to criticism.
 separate,2,分開的,They sleep in separate rooms.
 servant,2,僕人,The servant opened the door.
 serve,2,侍候,They serve breakfast at seven.
-settle(ment),2,決定,They settled the dispute.
+settle,2,決定,They settled the dispute.
 sex,2,性(別),Please state your sex.
 shame,2,恥辱,It is a shame that you cannot come.
 shark,2,鯊魚,A shark swam near the boat.
@@ -1807,7 +1795,7 @@ skin,2,皮膚；剝…的皮,Protect your skin from the sun.
 sleepy,2,想睡的,The warm room made me sleepy.
 slide,2,打滑,The car slid on the ice.
 slip,2,滑倒,Be careful not to slip.
-slipper(s),2,拖鞋,She wore slippers at home.
+slipper,2,拖鞋,She wore slippers at home.
 smooth,2,光滑的,The table is smooth.
 snack,2,點心,I had a quick snack.
 snail,2,牛,The snail moved slowly.
@@ -1816,7 +1804,7 @@ soap,2,肥皂,Wash your hands with soap.
 soccer,2,足球,They play soccer after school.
 social,2,社會的,Social media is popular.
 society,2,社會,Society is changing fast.
-sock(s),2,短襪,He wore white socks.
+sock,2,短襪,He wore white socks.
 soda,2,蘇打水,She drank a glass of soda.
 soft,2,柔軟的,The pillow is very soft.
 soil,2,土壤；弄髒,The soil is good for farming.
@@ -1842,7 +1830,7 @@ spread,2,擴展,The news spread quickly.
 stage,2,舞臺；上演,She stood on the stage.
 stamp,2,郵票；跺腳,He put a stamp on the letter.
 standard,2,標準,This is the standard size.
-state(ment),2,狀態,Please state your name.
+state,2,狀態,Please state your name.
 steak,2,牛排,We had steak for dinner.
 steel,2,鋼鐵,The bridge is made of steel.
 step,2,腳步；走,Take one step forward.
@@ -1859,7 +1847,7 @@ strict,2,嚴格的,My father is strict.
 strike,2,罷工；猛然攻擊,The workers went on strike.
 struggle,2,掙扎；努力,They struggle to make ends meet.
 style,2,風格,I like her writing style.
-subway/underground/metro,2,地鐵,We took the subway downtown.
+subway,2,地鐵,We took the subway downtown.
 succeed,2,達成,She succeeded in passing the exam.
 success,2,成功,Hard work leads to success.
 such,2,如此的,I have never seen such a big fish.
@@ -1918,7 +1906,7 @@ tongue,2,舌(頭),She burned her tongue.
 toothache,2,牙痛,I have a bad toothache.
 toothbrush,2,牙刷,I need a new toothbrush.
 tour,2,旅遊,We took a tour of the city.
-toward/towards,2,向,He walked toward the door.
+toward,2,向,He walked toward the door.
 track,2,軌道；追蹤,The train left the track.
 trade,2,貿易,Trade between the countries grew.
 tradition,2,傳統,It is a family tradition.
@@ -1959,7 +1947,7 @@ view,2,景色；看,The view from the hill is beautiful.
 village,2,村莊,He grew up in a small village.
 vote,2,投票,Please vote in the election.
 waist,2,腰,He hurt his waist.
-waiter/waitress,2,侍者,The waiter brought the menu.
+waiter,2,侍者,The waiter brought the menu.
 wallet,2,皮夾子,He lost his wallet.
 war,2,戰爭,The war ended in 1945.
 wash,2,洗滌,Wash your hands before eating.
@@ -1990,7 +1978,7 @@ wire,2,金屬線,The wire is made of copper.
 within,2,在…之內,Please reply within three days.
 wolf,2,狼,A wolf howled in the night.
 wonder,2,想要知道,I wonder why he left.
-wood(s),2,樹林,We walked through the woods.
+wood,2,樹林,We walked through the woods.
 wooden,2,木製的,The chair is wooden.
 wool,2,羊毛,This sweater is made of wool.
 workbook,2,作業簿；練習本,Open your workbook to page five.
@@ -2006,28 +1994,28 @@ aboard,3,在(船、飛機、車)上,All passengers are now aboard the ship.
 acceptable,3,可以接受的,Your explanation is acceptable to everyone.
 accurate,3,準確的,The clock is very accurate.
 ache,3,疼痛,My legs ache after the long walk.
-achieve(ment),3,完成；達到,She worked hard to achieve her goal.
+achieve,3,完成；達到,She worked hard to achieve her goal.
 additional,3,附加的,We need additional chairs for the guests.
 admire,3,欽佩；欣賞,I admire her courage and honesty.
 advanced,3,先進的；高等的,This is a very advanced computer system.
 advantage,3,有利條件；優勢,Speaking two languages is a great advantage.
 adventure,3,冒險,They went on an exciting adventure in the mountains.
-advertise(ment)/ad,3,為…做廣告,The company will advertise its new product on TV.
+ad,3,為…做廣告,The company will advertise its new product on TV.
 advise,3,勸告；忠告；通知,I advise you to see a doctor.
-adviser/advisor,3,顧問,She works as a financial adviser.
+adviser,3,顧問,She works as a financial adviser.
 afford,3,類得起；承擔得起,We cannot afford a new car this year.
-afterward/afterwards,3,以後,We had dinner and went for a walk afterward.
+afterward,3,以後,We had dinner and went for a walk afterward.
 agriculture,3,農業,Agriculture is important to the local economy.
 airline,3,航線；航空公司,The airline lost my luggage.
 alley,3,小巷子；小徑,The cat ran into a narrow alley.
 almond,3,杏仁,She added almonds to the salad.
 alphabet,3,字母系統,Children learn the alphabet in school.
-amaze(ment),3,使驚愕,The magician's trick amazed the audience.
+amaze,3,使驚愕,The magician's trick amazed the audience.
 ambassador,3,大使；使節,The ambassador met with the president.
 ambition,3,抱負；志向,Her ambition is to become a doctor.
 ambulance,3,救護車,The ambulance arrived in five minutes.
 angel,3,天使,She looks like an angel in that dress.
-announce(ment),3,宣布,The school will announce the winners tomorrow.
+announce,3,宣布,The school will announce the winners tomorrow.
 anxious,3,焦慮的,She felt anxious about the exam.
 anyhow,3,無論如何,It was raining but we went out anyhow.
 apart,3,分開的,The two houses are far apart.
@@ -2048,7 +2036,7 @@ attract,3,吸引；引誘,The flower attracts many bees.
 attractive,3,有吸引力的,She is an attractive young woman.
 audience,3,觀眾；聽眾,The audience clapped loudly.
 automatic,3,自動的,The door is automatic and opens by itself.
-automobile/auto,3,汽車,He bought a new automobile last week.
+automobile,3,汽車,He bought a new automobile last week.
 avenue,3,大道,They walked down a wide avenue.
 awake,3,清醒的；喚醒,I was awake all night.
 awaken,3,意識到；使覺醒,The noise awakened the baby.
@@ -2247,7 +2235,7 @@ dip,3,浸；泡,She dipped her hand in the water.
 dirt,3,污物；泥土,His shoes were covered with dirt.
 discount,3,折扣,We got a ten percent discount.
 dishonest,3,不誠實的,It is dishonest to lie.
-disk/disc,3,圓盤；磁碟片,Save the file on a disk.
+disk,3,圓盤；磁碟片,Save the file on a disk.
 dislike,3,不喜歡,I dislike cold weather.
 ditch,3,水道；渠道,The car ran off the road into a ditch.
 dive,3,跳水；潛水,He dived into the pool.
@@ -2291,7 +2279,7 @@ emotional,3,感情上的,She gave an emotional speech.
 emperor,3,統治者；皇帝,The emperor ruled the country.
 enable,3,使能夠,This ticket enables you to enter.
 energetic,3,充滿活力的,The children are very energetic.
-engage(ment),3,使從事；訂婚,They announced their engagement.
+engage,3,使從事；訂婚,They announced their engagement.
 enjoyable,3,有樂趣的,We had an enjoyable afternoon.
 entry,3,進入,The entry to the building is on the left.
 envy,3,嫉妒；羨慕,She envied her friend's success.
@@ -2355,7 +2343,7 @@ gamble,3,賭博；投機,He likes to gamble at the casino.
 gang,3,惡少幫；阿飛黨,A gang of youths caused trouble.
 gap,3,缺口；峽谷；隔閡,There is a gap in the fence.
 garage,3,車庫,He parked the car in the garage.
-gasoline/gas,3,汽油,We need to buy gasoline.
+gasoline,3,汽油,We need to buy gasoline.
 geography,3,地理學；地形,She teaches geography at school.
 gesture,3,做手勢；手勢,He made a friendly gesture.
 glance,3,一瞥；掃視,She gave him a quick glance.
@@ -2518,7 +2506,7 @@ magnet,3,磁鐵,The magnet attracted the nails.
 maid,3,少女,The maid cleaned the room.
 majority,3,多數,The majority of students passed.
 mall,3,大規模購物中心,We went to the mall to shop.
-mankind/humankind,3,人類,Mankind has always dreamed of flying.
+mankind,3,人類,Mankind has always dreamed of flying.
 marble,3,大理石,The statue is made of marble.
 march,3,三月,My birthday is in March.
 marker,3,馬克筆；標記,He used a marker to write.
@@ -2529,14 +2517,14 @@ meadow,3,草地,The sheep grazed in the meadow.
 meaningful,3,意味深長的,It was a meaningful conversation.
 meanwhile,3,其問；同時,Meanwhile I will prepare dinner.
 medal,3,獎章；紀念章,She won a gold medal.
-medium/media,3,中間；媒介,He is of medium height.
+medium,3,中間；媒介,He is of medium height.
 melon,3,甜瓜,The melon is sweet and juicy.
 melt,3,融化,The ice will melt in the sun.
 mend,3,修補,She mended the torn shirt.
 mental,3,精神的,He has a mental illness.
 merry,3,歡樂的,We wish you a merry Christmas.
 mess,3,紊亂,The room was in a mess.
-microphone/mike,3,麥克風,Speak into the microphone.
+microphone,3,麥克風,Speak into the microphone.
 microwave,3,微波,Heat the food in the microwave.
 mighty,3,強大的；偉大的,The mighty river flows to the sea.
 minus,3,負的,The temperature is minus five degrees.
@@ -2622,7 +2610,7 @@ passport,3,護照,Do not forget your passport.
 pat,3,拍,He patted the dog on the head.
 patience,3,耐心,Teaching requires patience.
 pause,3,暫停,He paused before answering.
-pave(ment),3,鋪(用於被動),The road is paved with stones.
+pave,3,鋪(用於被動),The road is paved with stones.
 pea,3,豌豆,She ate peas for dinner.
 peanut,3,花生,He is allergic to peanuts.
 pearl,3,珍珠,The necklace is made of pearls.
@@ -2661,7 +2649,7 @@ porcelain,3,瓷器,The vase is made of porcelain.
 portion,3,一部分,Give me a small portion of rice.
 portrait,3,肖畫像,He painted a portrait of his wife.
 poster,3,海報,She put a poster on the wall.
-postpone(ment),3,延期,They postponed the meeting.
+postpone,3,延期,They postponed the meeting.
 pottery,3,陶器,She makes pottery in her free time.
 pour,3,灌 v.注 v.倒,Pour the milk into the glass.
 poverty,3,貧窮,Many families live in poverty.
@@ -2720,7 +2708,7 @@ rely,3,信賴,You can rely on me.
 remain,3,殘留,Only a few pieces remain.
 remind,3,使想起,Please remind me to call her.
 remote,3,遠離的,The village is remote and quiet.
-replace(ment),3,取代；替換,We need to replace the old computer.
+replace,3,取代；替換,We need to replace the old computer.
 represent,3,描寫,The painting represents a battle.
 representative,3,象徵的；例子,He is a representative of the company.
 republic,3,共和國,France is a republic.
@@ -2759,8 +2747,8 @@ satisfactory,3,滿意的,The result was satisfactory.
 sauce,3,醬料,She made tomato sauce.
 saucer,3,茶碟,She put the cup on the saucer.
 sausage,3,香腸,He ate a sausage for breakfast.
-saving(s),3,存款,She used her savings to buy a car.
-scale(s),3,標準,The scale shows your weight.
+saving,3,存款,She used her savings to buy a car.
+scale,3,標準,The scale shows your weight.
 scarce,3,稀少的,Water is scarce in the desert.
 scarf,3,領巾,She wore a warm scarf.
 scary,3,可怕的,The movie was too scary for children.
@@ -2973,7 +2961,7 @@ vocabulary,3,詞彙,Reading improves your vocabulary.
 volleyball,3,排球,We played volleyball on the beach.
 volume,3,音量,Turn down the volume.
 voter,3,選民,Every voter should cast a ballot.
-wage(s),3,工資,The workers demanded higher wages.
+wage,3,工資,The workers demanded higher wages.
 wagon,3,四輪運貨馬車,The wagon was pulled by horses.
 wander,3,徘徊(於),He wandered through the streets.
 warmth,3,溫暖,The warmth of the fire felt good.
@@ -3014,7 +3002,7 @@ acceptance,4,接受,His acceptance of the offer surprised us.
 access,4,進入；使用權；存取,Students have access to the library.
 accidental,4,偶然的；意外的,The fire was accidental not deliberate.
 accompany,4,陪同,I will accompany you to the station.
-accomplish(ment),4,完成,She worked hard to accomplish her goal.
+accomplish,4,完成,She worked hard to accomplish her goal.
 accountant,4,會計師,The accountant checked all the numbers.
 accuracy,4,正確(性),The accuracy of the report is important.
 accuse,4,把…歸咎(於)；指控,They accuse him of stealing the money.
@@ -3024,7 +3012,7 @@ acquire,4,取得,She hopes to acquire new skills.
 adapt,4,使適應,Animals adapt to their environment.
 addict,4,對～有癮的人,He is a video game addict.
 adequate,4,足夠的；適當的,We have adequate food for everyone.
-adjust(ment),4,調整,You need to adjust the seat height.
+adjust,4,調整,You need to adjust the seat height.
 admirable,4,令人欽佩的,Her courage is truly admirable.
 admiration,4,欽佩,He looked at the painting with admiration.
 admission,4,加入許可；承認,Admission to the museum is free.
@@ -3040,7 +3028,7 @@ alternative,4,替代的；二擇一的,We need an alternative plan.
 amateur,4,業餘從事者；業餘的,He is an amateur photographer.
 ambiguous,4,含糊的,His answer was ambiguous and unclear.
 ambitious,4,野心勃勃的,She is an ambitious young lawyer.
-amuse(ment),4,給～提供娛樂,The clown amused the children.
+amuse,4,給～提供娛樂,The clown amused the children.
 analysis,4,分析,The analysis showed a clear trend.
 analyze,4,分析,Scientists analyze the data carefully.
 ancestor,4,祖先,My ancestors came from China.
@@ -3052,7 +3040,7 @@ apology,4,道歉,He offered a sincere apology.
 apparent,4,明顯的,It was apparent that she was tired.
 applicant,4,申請人,The applicant filled out the form.
 application,4,應用；申請書,I sent my application by email.
-appoint(ment),4,任命；指派,They appointed her as manager.
+appoint,4,任命；指派,They appointed her as manager.
 appreciation,4,欣賞；感謝,I showed my appreciation with a gift.
 appropriate,4,適當的,Please wear appropriate clothes.
 approval,4,同意；認可,The plan got final approval.
@@ -3067,7 +3055,7 @@ aspect,4,方面；觀點,We discussed every aspect of the plan.
 aspirin,4,阿斯匹靈,She took an aspirin for her headache.
 assemble,4,集合,The students assembled in the hall.
 assembly,4,與會者；議會,The assembly lasted one hour.
-assign(ment),4,指派,The teacher assigned us homework.
+assign,4,指派,The teacher assigned us homework.
 assistance,4,協助,She needs assistance with her bags.
 associate,4,關聯,I associate that song with summer.
 association,4,協會；聯想；合作,He joined a sports association.
@@ -3077,7 +3065,7 @@ athletic,4,運動的,He is very athletic.
 atmosphere,4,氣壓；氣氛,The restaurant has a warm atmosphere.
 atom,4,原子,An atom is the smallest unit of matter.
 atomic,4,原子的,The atomic bomb changed history.
-attach(ment),4,裝上；附加,Please attach the file to the email.
+attach,4,裝上；附加,Please attach the file to the email.
 attraction,4,吸引力,The main attraction is the castle.
 audio,4,可聽頻率的,The audio quality is very clear.
 authentic,4,真正的；可靠的,This is an authentic Italian restaurant.
@@ -3109,7 +3097,7 @@ bond,4,聯結；契約；債券,There is a strong bond between them.
 bounce,4,跳，躍；使反彈,The ball bounced off the wall.
 bracelet,4,手鐲；手鍊,She wore a silver bracelet.
 breed,4,繁衍；滋生,They breed dogs on the farm.
-bridegroom/groom,4,新郎,The bridegroom looked very happy.
+bridegroom,4,新郎,The bridegroom looked very happy.
 broke,4,身無分文的,He was completely broke after the trip.
 broom,4,掃帚,She swept the floor with a broom.
 brutal,4,殘忍的,The brutal attack shocked the town.
@@ -3124,7 +3112,6 @@ candidate,4,候選人,She is a candidate for mayor.
 cane,4,藤條；甘蔗,The old man walked with a cane.
 canoe,4,獨木舟；划獨木舟,They paddled a canoe down the river.
 capacity,4,容量；能力,The hall has a capacity of 500 people.
-capital(ism),4,主要的；首都；資本,Paris is the capital of France.
 capitalist,4,資本家,He is a successful capitalist.
 cargo,4,貨物,The ship carried heavy cargo.
 carrier,4,運送人；航空母艦,The aircraft carrier sailed into port.
@@ -3205,7 +3192,6 @@ consume,4,消耗；花費,The car consumes a lot of fuel.
 consumer,4,消費者,The consumer has many choices.
 container,4,容器,Put the rice in a plastic container.
 content,4,滿足的,He felt content with his life.
-content(ment),4,滿足的,She smiled with contentment.
 contest,4,比賽；競爭,She won the singing contest.
 context,4,上下文,The word has a different meaning in this context.
 continual,4,不間斷的,The continual noise annoyed me.
@@ -3296,10 +3282,10 @@ diploma,4,學位證書,He received his diploma last June.
 diplomat,4,外交官,The diplomat spoke three languages.
 disability,4,無能,The building is accessible to people with a disability.
 disadvantage,4,不利之條件,The main disadvantage is the high cost.
-disappoint(ment),4,使失望,The result will disappoint many fans.
+disappoint,4,使失望,The result will disappoint many fans.
 disaster,4,災難,The flood was a terrible disaster.
 discipline,4,紀律,Good discipline is important in class.
-discourage(ment),4,使洩氣；使沮喪,Do not let failure discourage you.
+discourage,4,使洩氣；使沮喪,Do not let failure discourage you.
 disguise,4,偽裝,He wore a disguise to avoid attention.
 disgust,4,嫌惡；使厭惡,The dirty kitchen filled her with disgust.
 dismiss,4,解散,The teacher dismissed the class early.
@@ -3343,7 +3329,7 @@ elegant,4,優雅的,She wore an elegant black dress.
 elementary,4,基本的；初級的,He teaches at an elementary school.
 eliminate,4,消滅；排除,We must eliminate waste in the process.
 elsewhere,4,在別處,If you cannot find it here look elsewhere.
-embarrass(ment),4,使出糢,His mistake caused him great embarrassment.
+embarrass,4,使出糢,His mistake caused him great embarrassment.
 embassy,4,大使館,She went to the embassy for a visa.
 emerge,4,浮現；顯露,The sun emerged from behind the clouds.
 emphasis,4,強調,The school puts emphasis on reading.
@@ -3352,18 +3338,18 @@ enclose,4,圍住；把(公文等)封入,Please enclose a photo with your applica
 encounter,4,遭遇；衝突,We encountered many problems on the trip.
 endanger,4,使瀕臨危機,Pollution can endanger wildlife.
 endure,4,忍受,She had to endure great pain.
-enforce(ment),4,實施,The police enforce traffic laws.
+enforce,4,實施,The police enforce traffic laws.
 engineering,4,工程,He studies electrical engineering.
-enlarge(ment),4,擴大,They plan to enlarge the kitchen.
+enlarge,4,擴大,They plan to enlarge the kitchen.
 enormous,4,巨大的,The elephant has an enormous body.
 ensure,4,確保,Please ensure that the door is locked.
-entertain(ment),4,娛樂,The show provided great entertainment.
+entertain,4,娛樂,The show provided great entertainment.
 enthusiasm,4,熱心,She showed great enthusiasm for the project.
 equality,4,相等；平等；均等,We believe in equality for all people.
-equip(ment),4,裝備以,The lab is equipped with modern equipment.
+equip,4,裝備以,The lab is equipped with modern equipment.
 era,4,年代,We live in the era of technology.
 essential,4,必要的；精華的,Water is essential for life.
-establish(ment),4,建立,They established a new company.
+establish,4,建立,They established a new company.
 estimate,4,估計；預計,We estimate the cost at one thousand dollars.
 ethnic,4,種族的,The city has many ethnic groups.
 evaluate,4,評估,Teachers evaluate students' progress.
@@ -3430,7 +3416,7 @@ frost,4,霜；凍,The frost covered the grass.
 frown,4,皺眉；表示不滿,She began to frown at his words.
 frustrate,4,使挫敗,The bad weather frustrated our plans.
 frustration,4,挫折；沮喪,He felt frustration after failing again.
-fulfill(ment),4,實現,She worked hard to fulfill her dream.
+fulfill,4,實現,She worked hard to fulfill her dream.
 functional,4,起作用的,The machine is still functional.
 fundamental,4,基礎的,Reading is a fundamental skill.
 funeral,4,葬儀,Many people attended the funeral.
@@ -3467,7 +3453,7 @@ grateful,4,感謝的,I am grateful for your help.
 gratitude,4,感激,He expressed his gratitude with a letter.
 grave,4,重大的；嚴肅的,The situation is very grave.
 greasy,4,油膩的,The food was too greasy for me.
-greeting(s),4,問候語,She sent warm greetings to everyone.
+greeting,4,問候語,She sent warm greetings to everyone.
 grief,4,悲傷；不幸,He was overcome with grief.
 grind,4,磨；碾；壓,She used a machine to grind coffee beans.
 guarantee,4,保證；擔保品,We guarantee the quality of our products.
@@ -3566,9 +3552,9 @@ intuition,4,直覺,Her intuition told her something was wrong.
 invade,4,侵略；侵犯,The army invaded the neighboring country.
 invasion,4,入侵,The invasion caused a long war.
 invention,4,發明；創造力,The telephone was a great invention.
-invest(ment),4,投資；投入,He made a wise investment.
+invest,4,投資；投入,He made a wise investment.
 investigation,4,調查；研究,The police started an investigation.
-involve(ment),4,使捲入,The job involves a lot of travel.
+involve,4,使捲入,The job involves a lot of travel.
 isolate,4,使孤立,The village was isolated by snow.
 isolation,4,隔離,He lived in isolation for years.
 issue,4,議題；發行,Climate change is a global issue.
@@ -3578,7 +3564,7 @@ kettle,4,水壺,Put the kettle on for tea.
 kneel,4,跪下,He had to kneel down to pray.
 knob,4,節；瘤,Turn the knob to open the door.
 labor,4,勞動；勞工,The workers provided cheap labor.
-laboratory/lab,4,實驗室,We did the experiment in the lab.
+lab,4,實驗室,We did the experiment in the lab.
 lag,4,落後；延遲,The project began to lag behind schedule.
 landmark,4,陸標,The tower is a famous landmark.
 landscape,4,風景；景觀,The landscape was green and beautiful.
@@ -3624,7 +3610,6 @@ margin,4,邊綠,Write your notes in the margin.
 maturity,4,成熟；完成,He shows great maturity for his age.
 maximum,4,最大限度,The maximum speed is 60 miles per hour.
 measurable,4,可測量的,The improvement was measurable.
-measure(s),4,測量,We need to measure the room.
 mechanic,4,技工；機械工,The mechanic fixed my car.
 mechanical,4,機械的,The mechanical problem was fixed.
 memorable,4,值得紀念的,It was a memorable trip.
@@ -3854,7 +3839,7 @@ respectful,4,尊重的,Be respectful to your elders.
 restore,4,歸還,They restored the old church.
 restriction,4,限制,There are restrictions on water use.
 retain,4,保留；維持,The company hopes to retain its best workers.
-retire(ment),4,退休,He plans to retire next year.
+retire,4,退休,He plans to retire next year.
 retreat,4,後退；撒退,The army was forced to retreat.
 reunion,4,重新結合；聚會,We had a family reunion last summer.
 revenge,4,報復,He wanted revenge for the insult.
@@ -3915,12 +3900,12 @@ splendid,4,輝煌的,The palace looked splendid.
 split,4,裂縫；(使)裂開,The board split in two.
 sprinkle,4,灑；撒,Sprinkle some salt on the potatoes.
 stab,4,刺；戳,He was stabbed in the arm.
-statistic(s),4,統計數字；統計學,The statistics show a clear increase.
+statistic,4,統計數字；統計學,The statistics show a clear increase.
 status,4,社會地位,Her status in the company has risen.
 stem,4,莖；起源於,The problem stems from poor planning.
 stereo,4,立體聲；立體音響器材,He bought a new stereo system.
 stingy,4,小氣的,He is too stingy to buy a gift.
-stocking(s),4,長襪,She hung stockings by the fireplace.
+stocking,4,長襪,She hung stockings by the fireplace.
 strengthen,4,加強,Exercise can strengthen your muscles.
 stripe,4,條紋,The zebra has black and white stripes.
 strive,4,奮鬥,We must strive for a better future.
@@ -3998,7 +3983,7 @@ website,4,網站,You can find more information on our website.
 welfare,4,福利,The government protects child welfare.
 wink,4,眨眼,He gave me a friendly wink.
 wit,4,機智；智慧,She is known for her quick wit.
-witch/wizard,4,女巫,The witch flew on a broom.
+witch,4,女巫,The witch flew on a broom.
 withdraw,4,撤回；提款,He decided to withdraw from the race.
 witness,4,目擊者,The witness told the police what happened.
 workout,4,運動；健身,I do a short workout every morning.
@@ -4019,7 +4004,7 @@ accommodate,5,容納；提供住宿,The hotel can accommodate up to 500 guests.
 accommodation,5,住所,We found cheap accommodation near the station.
 accord,5,符合,His actions accord with his words.
 accounting,5,會計學,She is studying accounting at college.
-acknowledge(ment),5,承認；致謝,She acknowledged her mistake at once.
+acknowledge,5,承認；致謝,She acknowledged her mistake at once.
 acquaint,5,使熟悉；使認識,Please acquaint yourself with the new rules.
 acquisition,5,取得；獲得物,The company announced the acquisition of a rival firm.
 activist,5,行動主義者；積極分子,She is a well-known environmental activist.
@@ -4066,10 +4051,10 @@ articulate,5,清楚的表達,She can articulate her ideas clearly.
 ass,5,驢；蠢人,The farmer led the ass to the field.
 assault,5,攻擊,He was charged with assault.
 assert,5,斷言；主張,She asserted that the report was wrong.
-assess(ment),5,評估,Teachers assess student progress every month.
+assess,5,評估,Teachers assess student progress every month.
 asset,5,資產,Good health is a great asset.
 assumption,5,假設,Your argument is based on a false assumption.
-astonish(ment),5,使驚訝,The result will astonish everyone.
+astonish,5,使驚訝,The result will astonish everyone.
 athletics,5,田徑運動,He won a medal in athletics.
 attendance,5,出席；出席人數,Attendance at the meeting was very high.
 attic,5,閣樓,We stored old boxes in the attic.
@@ -4249,7 +4234,7 @@ coverage,5,報導；某事所包含的範圍,The news gave wide coverage to the 
 credibility,5,可信性,The scandal damaged his credibility.
 creek,5,小溪,We walked along a small creek.
 cripple,5,肢體殘障者,The accident crippled his left leg.
-criterion/criteria,5,標準,Price is not the only criterion for choosing a car.
+criterion,5,標準,Price is not the only criterion for choosing a car.
 crucial,5,關鍵的；重要的,Sleep is crucial for good health.
 crude,5,未加工製造的,They used crude tools to build it.
 cruise,5,乘船遊覽,We took a cruise in the Caribbean.
@@ -4333,7 +4318,7 @@ eligible,5,有資格的,She is eligible for the scholarship.
 eloquent,5,雄辯的,He gave an eloquent speech.
 embrace,5,擁抱；欣然接受,She embraced the chance to study abroad.
 emission,5,散發,The factory reduced its carbon emission.
-endorse(ment),5,贊同,The star endorsed the new product.
+endorse,5,贊同,The star endorsed the new product.
 enterprise,5,企業；事業,He started a small business enterprise.
 enthusiastic,5,有熱忱的,She is enthusiastic about teaching.
 entitle,5,給……權利；命名,This ticket entitles you to a free drink.
@@ -4353,7 +4338,7 @@ escalator,5,電扶梯,Take the escalator to the second floor.
 essence,5,本質；精華,Trust is the essence of friendship.
 estate,5,地產；莊園,He inherited a large estate from his uncle.
 eternal,5,永恆的,They promised each other eternal love.
-ethic(s),5,倫理,Work ethic is important in business.
+ethic,5,倫理,Work ethic is important in business.
 ethical,5,道德的；倫理的,The doctor made an ethical decision.
 evolution,5,演化(論),The theory of evolution changed science.
 evolve,5,使逐漸發展,The company evolved into a global brand.
@@ -4891,7 +4876,7 @@ symbolic,5,象徵性的,The gift was symbolic of their friendship.
 symptom,5,症狀,Fever is a common symptom of flu.
 syndrome,5,症候群,The patient has a rare syndrome.
 tackle,5,處理,We must tackle this problem together.
-tactic(s),5,戰術；策略,The coach changed his tactics.
+tactic,5,戰術；策略,The coach changed his tactics.
 tangle,5,使纏繞；糾結,The wires began to tangle.
 tempt,5,慫恿,The smell of cake tempted me to eat.
 temptation,5,誘惑,She gave in to temptation and bought the dress.
@@ -5028,7 +5013,7 @@ acne,6,痤瘡；青春痘,Many teenagers suffer from acne.
 acre,6,英畝,They bought a ten-acre farm in the countryside.
 adaptation,6,適應；改編(本),The movie is an adaptation of a famous novel.
 addiction,6,耽溺,He is receiving treatment for his addiction to gambling.
-administer/administrate,6,管理；執行,He administers the company's finances.
+administer,6,管理；執行,He administers the company's finances.
 admiral,6,海軍將官,The admiral commanded the fleet in the Pacific.
 adolescence,6,青春期,Many changes happen during adolescence.
 advisory,6,提供忠告的,The company issued an advisory about the storm.
@@ -5046,7 +5031,7 @@ alligator,6,短吻鱷,An alligator was seen in the swamp.
 altitude,6,高度,The plane is flying at a high altitude.
 aluminum,6,鋁,The cans are made of aluminum.
 ambiguity,6,意義含糊,The ambiguity of his answer confused us.
-amid/amidst,6,在…當中,She smiled amid the noisy crowd.
+amid,6,在…當中,She smiled amid the noisy crowd.
 amplify,6,擴大；放大,The microphone amplifies the speaker's voice.
 analogy,6,相似,He drew an analogy between the heart and a pump.
 analytical,6,分析的,She has an analytical mind.
@@ -5072,7 +5057,7 @@ astray,6,誤入歧途地,The guide led us astray.
 astronaut,6,太空人,The astronaut walked on the moon.
 astronomer,6,天文學家,The astronomer studied the stars.
 astronomy,6,天文學,He has been interested in astronomy since childhood.
-attain(ment),6,達到；獲得,She attained her goal through hard work.
+attain,6,達到；獲得,She attained her goal through hard work.
 attendant,6,服務員,The flight attendant served us drinks.
 audit,6,稽核；審計,The company's accounts were audited.
 auditorium,6,禮堂,The concert was held in the school auditorium.
@@ -5094,7 +5079,7 @@ beverage,6,飲料,Coffee is a popular beverage around the world.
 bilateral,6,雙邊的,The two countries signed a bilateral agreement.
 blaze,6,烈火；光輝,The blaze destroyed the old barn.
 bleach,6,漂白劑；漂白,She used bleach to clean the bathroom.
-blond/blonde,6,金髮的；金髮碧眼的人,The blonde woman smiled at me.
+blond,6,金髮的；金髮碧眼的人,The blonde woman smiled at me.
 blot,6,污漬；弄髒,There was an ink blot on the paper.
 blunt,6,鈍的；直率的,He gave a blunt answer.
 bodily,6,身體的,He suffered bodily harm in the accident.
@@ -5104,7 +5089,7 @@ boulevard,6,林蔭大道,They walked along a wide boulevard.
 boxing,6,拳擊,Boxing is a tough and dangerous sport.
 boycott,6,抵制,The group decided to boycott the company's products.
 brace,6,支撐物,He wore a brace on his injured knee.
-brassiere/bra,6,胸罩,She bought a new bra.
+bra,6,胸罩,She bought a new bra.
 breadth,6,寬度；廣度,The breadth of his knowledge impressed us.
 breakdown,6,故障,The car had a breakdown on the highway.
 breakup,6,分手；解散,The breakup of their marriage was sad.
@@ -5145,7 +5130,7 @@ cement,6,水泥；黏合,The workers mixed cement for the foundation.
 census,6,調查,The government takes a census every ten years.
 ceramic,6,陶器(藝)的,She bought a set of ceramic cups.
 certify,6,證明；發證書,The doctor certified that he was fit to work.
-chairperson/chair/chairman/chairwoman,6,主席；董事長,The chairperson opened the meeting.
+chairperson,6,主席；董事長,The chairperson opened the meeting.
 champagne,6,香檳,They celebrated with a bottle of champagne.
 chant,6,反覆吟誦；聖歌,The crowd chanted the team's name.
 charitable,6,仁慈的,She is charitable to those in need.
@@ -5186,7 +5171,7 @@ concession,6,讓步,Both sides made concessions to reach an agreement.
 concise,6,簡潔的,Please give a concise answer.
 condense,6,使凝結(濃縮),You can condense the report into two pages.
 confederation,6,同盟,The tribes formed a confederation for mutual protection.
-congressman/congresswoman,6,國會議員,The congressman voted for the bill.
+congressman,6,國會議員,The congressman voted for the bill.
 conquest,6,征服,The conquest of the city took three months.
 conscientious,6,盡責的,She is a conscientious worker who never misses a deadline.
 conserve,6,節約；保育,We must conserve water during the drought.
@@ -5284,9 +5269,8 @@ diversion,6,轉換,The road diversion took us through a small town.
 divert,6,使轉向；轉移,The traffic was diverted to another road.
 dividend,6,股息,The company paid a generous dividend to its shareholders.
 doom,6,厄運；注定,The plan was doomed to fail from the beginning.
-dormitory/dorm,6,學生宿舍,He lives in a university dormitory.
+dormitory,6,學生宿舍,He lives in a university dormitory.
 downward,6,向下的,The path led downward to the river.
-downward/downwards,6,向下地,He looked downwards at his shoes.
 doze,6,打瞌睡,He began to doze in front of the TV.
 drastic,6,激烈的,The company had to take drastic measures to survive.
 draught,6,草圖；草擬,The architect showed us the first draught of the building.
@@ -5312,10 +5296,10 @@ encyclopedia,6,百科全書,She looked up the word in an encyclopedia.
 endeavor,6,努力；盡力,He endeavored to finish the work on time.
 endowment,6,天資,He has a natural endowment for music.
 endurance,6,耐力,Running a marathon requires great endurance.
-enhance(ment),6,增加,The new paint enhanced the beauty of the room.
-enlighten(ment),6,敵發,The book enlightened me about many things.
-enrich(ment),6,使富裕,Travel can enrich your life in many ways.
-enroll(ment),6,使加入；註冊,She decided to enroll in a French class.
+enhance,6,增加,The new paint enhanced the beauty of the room.
+enlighten,6,敵發,The book enlightened me about many things.
+enrich,6,使富裕,Travel can enrich your life in many ways.
+enroll,6,使加入；註冊,She decided to enroll in a French class.
 equalize,6,使平等；使相等,The government tried to equalize opportunities.
 equate,6,使相等；視為同等,People often equate money with happiness.
 escort,6,護衛(者),The police escorted the witness to the court.
@@ -5337,7 +5321,7 @@ expiration,6,期滿；截止,The expiration date is on the label.
 expire,6,期滿,My passport will expire next year.
 extract,6,拔出；摘錄,The dentist had to extract the bad tooth.
 extracurricular,6,課外的,She takes part in many extracurricular activities.
-eyelash/lash,6,睫毛,She has long eyelashes.
+eyelash,6,睫毛,She has long eyelashes.
 eyelid,6,眼皮,The eyelid protects the eye.
 eyesight,6,視力,His eyesight has gotten worse over the years.
 fable,6,寓言；虛構的故事,The story of the tortoise and the hare is a fable.
@@ -5351,7 +5335,7 @@ feeble,6,虛弱的,The old man was feeble and needed help.
 feminine,6,女性的；女性化的,The dress has a feminine style.
 fertility,6,肥沃；生育力,The soil's fertility is important for farming.
 fertilizer,6,肥料；促進發展者,The farmer spread fertilizer on the field.
-fiancé/fiance,6,未婚夫（妻）,She introduced her fiancé to her parents.
+fiancé,6,未婚夫（妻）,She introduced her fiancé to her parents.
 fin,6,魚鰭,The fish uses its fins to swim.
 finite,6,有限的,We have a finite amount of time.
 firecracker,6,鞭炮,The children set off firecrackers.
@@ -5409,12 +5393,12 @@ hail,6,歡迎,The crowd hailed the returning hero.
 hamper,6,阻礙；妨礙,The bad weather hampered our progress.
 handicap,6,障礙；不利條件,His lack of experience is a serious handicap.
 handicraft,6,手工藝,She sells handicraft at the market.
-harass(ment),6,騷擾,He was accused of sexual harassment.
+harass,6,騷擾,He was accused of sexual harassment.
 harden,6,使變硬；使堅強,The cold weather hardened the ground.
 harmonica,6,口琴,He played a tune on his harmonica.
 harness,6,馬具,The horse was fitted with a leather harness.
 haunt,6,常出沒於；縈繞心頭,The old house is said to be haunted.
-headphone(s),6,耳機,She put on her headphones and listened to music.
+headphone,6,耳機,She put on her headphones and listened to music.
 healthful,6,有益健康的,A healthful diet includes fruits and vegetables.
 hearty,6,衷心的；豐盛的,We had a hearty meal.
 hedge,6,樹籬,They planted a hedge around the garden.
@@ -5446,7 +5430,7 @@ imperative,6,必要的；命令的,It is imperative that we leave now.
 imperial,6,帝國的,The imperial palace is a major tourist attraction.
 implicit,6,暗示的,There was an implicit warning in his words.
 imposing,6,氣勢雄偉的,The imposing building dominated the skyline.
-imprison(ment),6,監禁,He was sentenced to life imprisonment.
+imprison,6,監禁,He was sentenced to life imprisonment.
 incline,6,傾向；使傾斜,I incline to agree with you.
 inclusive,6,包含的；包容的,The price is inclusive of tax.
 incur,6,招致,His careless remarks incurred the anger of his boss.
@@ -5541,7 +5525,7 @@ lullaby,6,搖籃曲,She sang a lullaby to the baby.
 lunar,6,陰曆的；月亮的,The Lunar New Year is an important holiday.
 lure,6,誘惑；誘餌,The store uses discounts to lure customers.
 lush,6,茂盛的,The garden is lush and green.
-madam/ma’am,6,夫人；太太；小姐,"May I help you, madam?"
+madam,6,夫人；太太；小姐,"May I help you, madam?"
 magnify,6,擴大；誇大；誇獎,A microscope can magnify small objects.
 maiden,6,少女,The maiden wore a beautiful white dress.
 mainland,6,大陸,They traveled from the island to the mainland.
@@ -5600,7 +5584,7 @@ nickel,6,鎳,The coin is made of nickel.
 nostril,6,鼻孔,The smell entered his nostrils.
 notable,6,顯著的,She made a notable contribution to science.
 notorious,6,惡名昭彰的,The criminal was notorious for his cruelty.
-nourish(ment),6,滋養,A balanced diet provides good nourishment.
+nourish,6,滋養,A balanced diet provides good nourishment.
 novice,6,新手,He is a novice at skiing.
 nucleus,6,中心；核心,The nucleus is the center of an atom.
 nude,6,裸體的,The artist painted a nude figure.
@@ -5641,7 +5625,6 @@ outright,6,完全的；直接地,He denied the charge outright.
 outset,6,開始,"From the outset, the plan was doomed."
 outskirts,6,邊界；市郊,They live on the outskirts of the city.
 outward,6,外面的；肉體的,He showed no outward sign of emotion.
-outward/outwards,6,外面的；肉體的,The door opens outwards.
 overdo,6,做太多或過份,Don't overdo the exercise at first.
 overflow,6,氾濫；溢出,The river overflowed after the heavy rain.
 overhear,6,偷聽；無意中聽到,I overheard them talking about the surprise.
@@ -5745,10 +5728,10 @@ redundancy,6,冗餘；裁員,The company announced redundancies.
 reef,6,礁；暗礁,The boat hit a coral reef.
 referee,6,裁判,The referee blew the whistle.
 referendum,6,公民投票,The issue was decided by a referendum.
-refine(ment),6,提煉,The oil is refined before it is used.
+refine,6,提煉,The oil is refined before it is used.
 reflective,6,反射的；沉思的,He is in a reflective mood.
-refresh(ment),6,使給予活力,A cool drink will refresh you.
-refreshment(s),6,精神恢復,Refreshments will be served after the meeting.
+refresh,6,使給予活力,A cool drink will refresh you.
+refreshment,6,精神恢復,Refreshments will be served after the meeting.
 refute,6,反駁,She refuted his argument with facts.
 rehabilitate,6,使恢復,The program helps rehabilitate drug addicts.
 rehearse,6,詳述；排演,The actors rehearsed the play many times.
@@ -5764,7 +5747,7 @@ reminiscent,6,使人憶起…的,The smell was reminiscent of my grandmother's k
 renowned,6,著名的,He is a renowned scientist.
 reproduce,6,繁殖；複製,Bacteria reproduce quickly.
 reptile,6,爬蟲類,Snakes are reptiles.
-resent(ment),6,不滿,She felt resentment toward her boss.
+resent,6,不滿,She felt resentment toward her boss.
 reside,6,居住,He resides in a small town.
 resistant,6,抵抗的；有抵抗力的,This material is resistant to heat.
 respective,6,個別的,They went back to their respective homes.
@@ -5800,7 +5783,7 @@ screwdriver,6,螺絲起子,He used a screwdriver to open the box.
 scroll,6,捲軸；捲動,Scroll down to see more.
 scrutiny,6,細查,The plan came under close scrutiny.
 sculptor,6,雕刻家,The sculptor created a beautiful statue.
-seagull/gull,6,海鷗,A seagull flew over the beach.
+seagull,6,海鷗,A seagull flew over the beach.
 seduce,6,慫恿；引誘,He tried to seduce her with sweet words.
 selective,6,選擇性的；挑剔的,She is very selective about her friends.
 serene,6,寧靜的；平靜的,The lake was serene and peaceful.
@@ -5833,7 +5816,7 @@ slum,6,貧民窟,The city has several poor slums.
 slump,6,暴跌；萎靡,Sales slumped last quarter.
 sly,6,狡猾的,He gave a sly smile.
 smuggle,6,走私,They tried to smuggle goods across the border.
-sneaker(s),6,鬼鬼祟祟做事的人,He wore white sneakers to the party.
+sneaker,6,鬼鬼祟祟做事的人,He wore white sneakers to the party.
 sneaky,6,鬼鬼祟祟的,She was sneaky about reading his diary.
 sneeze,6,打噴嚏,She sneezed loudly during the movie.
 snore,6,打鼾,He snores loudly.
@@ -5849,15 +5832,15 @@ solitude,6,孤獨,She enjoyed the solitude of the early morning.
 soothe,6,安撫；緩和,The music soothed her nerves.
 sorrowful,6,悲傷的,She had a sorrowful expression.
 sovereign,6,元首,The sovereign ruled the kingdom.
-spacecraft/spaceship,6,太空船,The spacecraft landed on Mars.
+spacecraft,6,太空船,The spacecraft landed on Mars.
 span,6,跨度；持續時間,The bridge has a span of one mile.
 sparrow,6,麻雀,A sparrow landed on the fence.
 spectacle,6,奇觀；壯觀場面,The parade was a grand spectacle.
 spiral,6,螺旋的；螺旋狀物,The staircase spirals upward.
 splendor,6,壯麗；光輝,The splendor of the palace amazed us.
-spokesperson/spokesman/spokeswoman,6,發言人,The spokesperson gave a brief statement.
+spokesperson,6,發言人,The spokesperson gave a brief statement.
 spontaneous,6,自發的,The audience gave a spontaneous applause.
-sportsman/sportswoman,6,運動員,He is a true sportsman.
+sportsman,6,運動員,He is a true sportsman.
 sportsmanship,6,運動家精神,He showed good sportsmanship.
 spotlight,6,聚光燈；使受矚目,The spotlight was on the singer.
 spur,6,馬刺；激勵,The news spurred him to work harder.
@@ -5954,8 +5937,7 @@ unify,6,統一,The leader tried to unify the divided nation.
 unveil,6,揭幕；揭露,The company will unveil its new product.
 upright,6,直立的；正直的,He is an upright citizen.
 uprising,6,起義；暴動,The uprising was quickly suppressed.
-upward,6,向上的,The path led upward to the top.
-upward/upwards,6,向上地,She looked upwards at the sky.
+upward,6,向上地,She looked upwards at the sky.
 urgency,6,緊急,The matter was treated with great urgency.
 usher,6,迎賓員,The usher showed us to our seats.
 utensil,6,器皿,Kitchen utensils are used for cooking.
@@ -5967,7 +5949,7 @@ vapor,6,水蒸氣,Water turns into vapor when it boils.
 veil,6,面紗,The bride wore a white veil.
 velvet,6,天鵝絨,The dress is made of red velvet.
 versatile,6,多才多藝的,She is a versatile actress.
-veterinarian/vet,6,獸醫,The vet treated the sick dog.
+vet,6,獸醫,The vet treated the sick dog.
 veto,6,否決；否決權,The president exercised his veto power.
 vibrate,6,振動,The phone vibrates when it rings.
 vibration,6,振動,The vibration of the machine shook the floor.
@@ -5994,10 +5976,10 @@ warranty,6,保固；保證書,The computer has a two-year warranty.
 waterproof,6,防水的,This watch is waterproof.
 weary,6,筋疲力竭的,He felt weary after the long journey.
 wharf,6,碼頭,The ship docked at the wharf.
-whiskey/whisky,6,威士忌,He drank a glass of whiskey.
+whiskey,6,威士忌,He drank a glass of whiskey.
 wholesale,6,批發；大批的,They buy goods at wholesale prices.
 wholesome,6,有益健康的,Wholesome food is good for you.
-widow/widower,6,寡婦（鰥夫）,The widow lived alone.
+widow,6,寡婦（鰥夫）,The widow lived alone.
 withhold,6,保留,He decided to withhold the information.
 woe,6,悲傷,She told him all her woes.
 woodpecker,6,啄木鳥,A woodpecker was pecking at the tree.

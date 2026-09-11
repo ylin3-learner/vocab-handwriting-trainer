@@ -109,6 +109,15 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
         }
       );
 
+      // Stage 3：初始化學習狀態（若不存在）
+      try {
+        const { StudentStateService } = await import('../../services/progression/StudentStateService');
+        const stateService = new StudentStateService();
+        await stateService.initializeIfNeeded(uid, 1);
+      } catch (e) {
+        console.warn('⚠️ 初始化學習狀態失敗（不影響測驗）:', e);
+      }
+
       await orchestrator.init();
       onStart(orchestrator);
     } catch (error) {

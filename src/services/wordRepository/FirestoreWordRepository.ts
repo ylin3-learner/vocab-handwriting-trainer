@@ -110,6 +110,57 @@ export class FirestoreWordRepository implements WordRepository {
     }
   }
 
+  /**
+   * Stage 3 新增：依 level 清單取得新單字
+   *
+   * Firestore 的 `in` 查詢最多支援 30 個值，但 level 只有 1~6，遠低於限制。
+   */
+  async getNewWordsByLevels(
+    excludeIds: Set<string>,
+    levels: number[],
+    limitCount: number
+  ): Promise<Word[]> {
+    if (levels.length === 0) return [];
+
+    // Firestore 的 in 查詢要求值為字串
+    const levelStrings = levels.map((l) => String(l));
+
+    // 每次最多讀取 limitCount * 3 筆（避免一次拉太多），用分頁方式累積
+    const BATCH_SIZE = Math.min(300, limitCount * 3);
+    const results: Word[] = [];
+    let lastDoc: any = null;
+
+    while (results.length < limitCount) {
+      const baseQuery = query(
+        collection(db, 'vocabulary', 'current', 'words'),
+        where('level', 'in', levelStrings),
+        orderBy('word'),
+        limit(BATCH_SIZE)
+      );
+
+      // 分頁游標（下一輪從這裡繼續）
+      const q = lastDoc
+        ? query(baseQuery, startAfter(lastDoc))
+        : baseQuery;
+
+      const snap = await getDocs(q);
+      if (snap.empty) break;
+
+      for (const docSnap of snap.docs) {
+        if (results.length >= limitCount) break;
+        const word = { id: docSnap.id, ...docSnap.data() } as Word;
+        if (!excludeIds.has(word.id)) {
+          results.push(word);
+        }
+      }
+
+      lastDoc = snap.docs[snap.docs.length - 1];
+      if (snap.docs.length < BATCH_SIZE) break; // 資料已讀完
+    }
+
+    return results;
+  }
+
   // 內部輔助函式：將 Firestore 文件轉為 Word
   private docToWord(d: any): Word {
     const data = d.data();

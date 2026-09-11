@@ -17,4 +17,16 @@ export class InMemoryWordRepository implements WordRepository {
   async getNewWords(excludeIds: Set<string>, limit: number): Promise<Word[]> {
     return this.words.filter(w => !excludeIds.has(w.id)).slice(0, limit);
   }
+
+  async getNewWordsByLevels(
+    excludeIds: Set<string>,
+    levels: number[],
+    limit: number
+  ): Promise<Word[]> {
+    const levelSet = new Set(levels.map((l) => String(l)));
+    return this.words
+      .filter((w) => !excludeIds.has(w.id))
+      .filter((w) => w.level && levelSet.has(w.level))
+      .slice(0, limit);
+  }
 }
