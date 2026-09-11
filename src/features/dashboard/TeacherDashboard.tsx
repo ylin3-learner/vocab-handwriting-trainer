@@ -1,13 +1,14 @@
 // src/features/dashboard/TeacherDashboard.tsx
 import React, { useState, useEffect } from 'react';
 import { AnalyticsService, StudentStat, WeakWord } from '../../services/analytics/AnalyticsService';
-import { useStudentDetail, clearAllStudentCache } from './hooks/useStudentDetail';
+import { useStudentDetail } from './hooks/useStudentDetail';
+import { StudentDetailPanel } from './components/StudentDetailPanel';
 
 const analytics = new AnalyticsService();
 
 export const TeacherDashboard: React.FC = () => {
   // ============================================================
-  // 所有 State 與 Hook 都放在元件最上方
+  // 班級層級 state
   // ============================================================
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState<StudentStat[]>([]);
@@ -20,17 +21,18 @@ export const TeacherDashboard: React.FC = () => {
   }>({ totalStudents: 0, totalQuestions: 0, avgCorrectRate: 0, highRiskCount: 0 });
   const [dataSource, setDataSource] = useState<'aggregated' | 'raw'>('aggregated');
 
-  // 🔥 Stage 2：測試用的 state（之後 Stage 3 會整合進 Master-Detail 佈局）
-  const [testStudentId, setTestStudentId] = useState<string | null>(null);
+  // ============================================================
+  // 🔥 Master-Detail：選中的學生 ID
+  // ============================================================
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const {
     data: detail,
     loading: detailLoading,
     error: detailError,
-    refetch,
-  } = useStudentDetail(testStudentId);
+  } = useStudentDetail(selectedStudentId);
 
   // ============================================================
-  // 資料載入
+  // 資料載入（班級層級）
   // ============================================================
   const loadData = async () => {
     setLoading(true);
@@ -101,6 +103,9 @@ export const TeacherDashboard: React.FC = () => {
           });
         });
 
+        // 依正確率由低到高排序（需要關注的排前面）
+        studentsArr.sort((a, b) => a.correctRate - b.correctRate);
+
         const weakWordsArr: WeakWord[] = [];
         wordErrorMap.forEach((w, wordId) => {
           weakWordsArr.push({
@@ -148,7 +153,7 @@ export const TeacherDashboard: React.FC = () => {
   }, []);
 
   // ============================================================
-  // 早期返回：Loading 畫面
+  // 早期返回
   // ============================================================
   if (loading) {
     return <div style={{ padding: '2rem', textAlign: 'center' }}>📊 載入教師數據中...</div>;
@@ -158,7 +163,7 @@ export const TeacherDashboard: React.FC = () => {
   // 主畫面
   // ============================================================
   return (
-    <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: '2rem', maxWidth: '1600px', margin: '0 auto', fontFamily: 'sans-serif' }}>
       <h1 style={{ borderBottom: '3px solid #007bff', paddingBottom: '0.5rem' }}>
         📊 教師數據總覽
         <button
@@ -178,60 +183,6 @@ export const TeacherDashboard: React.FC = () => {
           {dataSource === 'aggregated' ? '⚡ 預聚合統計' : '🐢 即時掃描'}
         </span>
       </h1>
-
-      {/* ============================================================ */}
-      {/* 🔥 Stage 2 測試區：驗證 useStudentDetail Hook */}
-      {/* ============================================================ */}
-      <div style={{ background: '#fff3cd', padding: '1rem', margin: '1rem 0', borderRadius: '8px' }}>
-        <h3>🧪 Stage 2 測試區</h3>
-        <p style={{ fontSize: '0.9rem', color: '#856404' }}>
-          點擊下方學生名字，驗證 useStudentDetail 是否正常運作。
-          <strong>重複點擊同一學生應該不會觸發新的 Firestore 讀取。</strong>
-        </p>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {students.slice(0, 5).map(s => (
-            <button
-              key={s.id}
-              onClick={() => setTestStudentId(s.id)}
-              style={{
-                padding: '0.3rem 0.8rem',
-                background: testStudentId === s.id ? '#007bff' : '#e9ecef',
-                color: testStudentId === s.id ? 'white' : 'black',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-              }}
-            >
-              {s.name}
-            </button>
-          ))}
-          <button
-            onClick={() => setTestStudentId(null)}
-            style={{ padding: '0.3rem 0.8rem', background: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-          >
-            清空
-          </button>
-          <button
-            onClick={() => { clearAllStudentCache(); refetch(); }}
-            style={{ padding: '0.3rem 0.8rem', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-          >
-            清快取 + 重讀
-          </button>
-        </div>
-
-        <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
-          {detailLoading && <span>⏳ 載入中...</span>}
-          {detailError && <span style={{ color: '#dc3545' }}>❌ {detailError}</span>}
-          {detail && (
-            <pre style={{ background: 'white', padding: '0.5rem', borderRadius: '4px', overflow: 'auto', maxHeight: '300px', fontSize: '0.8rem' }}>
-              {JSON.stringify(detail, null, 2)}
-            </pre>
-          )}
-          {!detail && !detailLoading && !detailError && testStudentId && (
-            <span>（尚無資料）</span>
-          )}
-        </div>
-      </div>
 
       {/* 摘要卡片 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', margin: '2rem 0' }}>
@@ -255,82 +206,118 @@ export const TeacherDashboard: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }}>
-        {/* 左欄：學生總覽表格 */}
-        <div style={{ background: 'white', padding: '1rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-          <h2>📋 學生表現總覽</h2>
+      {/* ============================================================ */}
+      {/* 🔥 Master-Detail 佈局 */}
+      {/* ============================================================ */}
+      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '1.5rem' }}>
+
+        {/* 左欄：學生列表（Master） */}
+        <div style={{
+          background: 'white',
+          padding: '1rem',
+          borderRadius: '8px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          maxHeight: 'calc(100vh - 200px)',
+          overflowY: 'auto',
+        }}>
+          <h2 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem' }}>📋 學生列表</h2>
+
           {students.length === 0 ? (
-            <p style={{ color: '#6c757d', padding: '1rem' }}>
-              尚無學生資料。學生登入並作答後，資料會自動出現在這裡。
+            <p style={{ color: '#6c757d', fontSize: '0.9rem' }}>
+              尚無學生資料。
             </p>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f1f3f5', textAlign: 'left' }}>
-                    <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>姓名</th>
-                    <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>班級</th>
-                    <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>答題數</th>
-                    <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>正確率</th>
-                    <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>狀態</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {students.map((s) => (
-                    <tr key={s.id} style={{ borderBottom: '1px solid #f1f3f5' }}>
-                      <td style={{ padding: '10px' }}><strong>{s.name}</strong></td>
-                      <td style={{ padding: '10px' }}>{s.class}</td>
-                      <td style={{ padding: '10px' }}>{s.totalAttempts}</td>
-                      <td style={{ padding: '10px' }}>{s.correctRate}%</td>
-                      <td style={{ padding: '10px' }}>
-                        {s.riskLevel === 'high' && <span style={{ background: '#dc3545', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>⚠️ 需輔導</span>}
-                        {s.riskLevel === 'medium' && <span style={{ background: '#ffc107', color: 'black', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>📈 可加強</span>}
-                        {s.riskLevel === 'low' && s.totalAttempts > 0 && <span style={{ background: '#28a745', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>✅ 表現良好</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {students.map((s) => {
+                const isSelected = selectedStudentId === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => setSelectedStudentId(s.id)}
+                    style={{
+                      textAlign: 'left',
+                      padding: '0.75rem',
+                      background: isSelected ? '#e7f3ff' : '#f8f9fa',
+                      border: isSelected ? '2px solid #007bff' : '1px solid #dee2e6',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <strong style={{ fontSize: '0.95rem' }}>{s.name}</strong>
+                      <span style={{
+                        fontSize: '0.85rem',
+                        fontWeight: 'bold',
+                        color: s.correctRate >= 80 ? '#28a745' : s.correctRate >= 60 ? '#ffc107' : '#dc3545',
+                      }}>
+                        {s.correctRate}%
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#6c757d', marginTop: '0.25rem' }}>
+                      {s.class} ・ {s.totalAttempts} 題
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
-        </div>
 
-        {/* 右欄：弱點分析 */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div style={{ background: 'white', padding: '1rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-            <h2>🔍 Top-5 弱點單字</h2>
-            {weakWords.length === 0 ? (
-              <p style={{ color: '#6c757d' }}>尚無作答數據，或學生表現都很好！</p>
-            ) : (
-              <ul style={{ listStyle: 'none', padding: 0 }}>
-                {weakWords.map((w, idx) => (
-                  <li key={w.wordId} style={{ padding: '8px 0', borderBottom: '1px solid #eee' }}>
-                    <span style={{ fontWeight: 'bold', marginRight: '8px' }}>#{idx + 1}</span>
-                    <span style={{ background: '#e9ecef', padding: '2px 8px', borderRadius: '4px' }}>{w.wordText}</span>
-                    <span style={{ float: 'right', color: w.errorRate > 60 ? '#dc3545' : '#ffc107' }}>
-                      錯誤率 {w.errorRate}% ({w.errorCount}/{w.totalAttempts})
+          {/* 弱點單字（放在列表下方） */}
+          {weakWords.length > 0 && (
+            <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #dee2e6' }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem' }}>🔍 全班弱點單字</h3>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {weakWords.map((w) => (
+                  <li key={w.wordId} style={{
+                    padding: '0.4rem 0',
+                    borderBottom: '1px solid #f1f3f5',
+                    fontSize: '0.85rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                  }}>
+                    <span style={{ background: '#e9ecef', padding: '1px 6px', borderRadius: '3px' }}>{w.wordText}</span>
+                    <span style={{ color: w.errorRate > 60 ? '#dc3545' : '#ffc107' }}>
+                      {w.errorRate}%
                     </span>
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
+            </div>
+          )}
+        </div>
 
-          <div style={{ background: '#e9ecef', padding: '1rem', borderRadius: '8px' }}>
-            <h4 style={{ margin: '0 0 0.5rem 0' }}>ℹ️ 關於資料同步</h4>
-            <p style={{ fontSize: '0.9rem', color: '#495057', margin: 0 }}>
-              學生的作答資料會先在他們的裝置上保存，然後自動背景同步到雲端。
-              這個過程無需老師介入。如果學生剛答完題，資料可能需要 30 秒內才會出現在這裡。
-            </p>
-          </div>
+        {/* 右欄：學生詳情（Detail） */}
+        <div>
+          {!selectedStudentId && (
+            <div style={{
+              background: '#f8f9fa',
+              padding: '4rem 2rem',
+              borderRadius: '8px',
+              textAlign: 'center',
+              color: '#6c757d',
+            }}>
+              <h2 style={{ fontSize: '1.5rem' }}>👈 請從左側選擇一位學生</h2>
+              <p>點擊學生名字即可查看個人化的學習診斷報告。</p>
+            </div>
+          )}
 
-          <div style={{ background: '#fff3cd', padding: '1rem', borderRadius: '8px', border: '1px solid #ffeeba' }}>
-            <h4 style={{ margin: '0 0 0.5rem 0', color: '#856404' }}>💡 小提醒</h4>
-            <p style={{ fontSize: '0.85rem', color: '#856404', margin: 0 }}>
-              學生換裝置登入時，只要輸入相同的姓名、班級、座號，
-              統計資料就會自動合併。複習進度則依裝置分開儲存。
-            </p>
-          </div>
+          {selectedStudentId && detailLoading && (
+            <div style={{ background: '#f8f9fa', padding: '4rem 2rem', borderRadius: '8px', textAlign: 'center' }}>
+              <p>⏳ 正在載入學生分析...</p>
+            </div>
+          )}
+
+          {selectedStudentId && detailError && (
+            <div style={{ background: '#f8d7da', padding: '2rem', borderRadius: '8px', color: '#721c24' }}>
+              <h3>❌ 載入失敗</h3>
+              <p>{detailError}</p>
+            </div>
+          )}
+
+          {selectedStudentId && detail && !detailLoading && !detailError && (
+            <StudentDetailPanel analytics={detail} />
+          )}
         </div>
       </div>
     </div>
