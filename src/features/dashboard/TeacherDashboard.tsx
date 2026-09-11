@@ -1,43 +1,49 @@
 // src/features/dashboard/TeacherDashboard.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AnalyticsService, StudentStat, WeakWord } from '../../services/analytics/AnalyticsService';
 import { useStudentDetail } from './hooks/useStudentDetail';
 import { StudentDetailPanel } from './components/StudentDetailPanel';
+import { ArchivedStudentsService } from '../../services/analytics/ArchivedStudentsService';
 
 const analytics = new AnalyticsService();
+const archivedService = new ArchivedStudentsService();
 
 export const TeacherDashboard: React.FC = () => {
-  // ============================================================
-  // 班級層級 state
-  // ============================================================
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState<StudentStat[]>([]);
   const [weakWords, setWeakWords] = useState<WeakWord[]>([]);
-  const [summary, setSummary] = useState<{
-    totalStudents: number;
-    totalQuestions: number;
-    avgCorrectRate: number;
-    highRiskCount: number;
-  }>({ totalStudents: 0, totalQuestions: 0, avgCorrectRate: 0, highRiskCount: 0 });
+  const [summary, setSummary] = useState({
+    totalStudents: 0,
+    totalQuestions: 0,
+    avgCorrectRate: 0,
+    highRiskCount: 0,
+  });
   const [dataSource, setDataSource] = useState<'aggregated' | 'raw'>('aggregated');
 
-  // ============================================================
-  // 🔥 Master-Detail：選中的學生 ID
-  // ============================================================
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
-  const {
-    data: detail,
-    loading: detailLoading,
-    error: detailError,
-  } = useStudentDetail(selectedStudentId);
+  const [archivedIds, setArchivedIds] = useState<Set<string>>(new Set());
+  const [showArchived, setShowArchived] = useState(false);
 
-  // ============================================================
-  // 資料載入（班級層級）
-  // ============================================================
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const { data: detail, loading: detailLoading, error: detailError } = useStudentDetail(selectedStudentId);
+
+  const displayedStudents = useMemo(() => {
+    return students.filter(s => {
+      const isArchived = archivedIds.has(s.id);
+      return showArchived ? true : !isArchived;
+    });
+  }, [students, archivedIds, showArchived]);
+
+  const archivedCount = students.filter(s => archivedIds.has(s.id)).length;
+
   const loadData = async () => {
     setLoading(true);
     try {
-      const classStats = await analytics.getAllClassStats();
+      const [classStats, archivedSet] = await Promise.all([
+        analytics.getAllClassStats(),
+        archivedService.getAllArchivedIds(),
+      ]);
+
+      setArchivedIds(archivedSet);
 
       if (classStats.length > 0) {
         console.log(`✅ [TeacherDashboard] 使用預聚合統計（${classStats.length} 個班級）`);
@@ -80,10 +86,7 @@ export const TeacherDashboard: React.FC = () => {
                 existing.errorCount += w.errorCount;
                 existing.totalCount += w.totalCount;
               } else {
-                wordErrorMap.set(wordId, {
-                  errorCount: w.errorCount,
-                  totalCount: w.totalCount,
-                });
+                wordErrorMap.set(wordId, { errorCount: w.errorCount, totalCount: w.totalCount });
               }
             }
           }
@@ -103,7 +106,6 @@ export const TeacherDashboard: React.FC = () => {
           });
         });
 
-        // 依正確率由低到高排序（需要關注的排前面）
         studentsArr.sort((a, b) => a.correctRate - b.correctRate);
 
         const weakWordsArr: WeakWord[] = [];
@@ -130,8 +132,7 @@ export const TeacherDashboard: React.FC = () => {
         return;
       }
 
-      // Fallback
-      console.log('⚠️ [TeacherDashboard] 無預聚合統計，使用逐筆掃描（可能較慢）');
+      console.log('⚠️ [TeacherDashboard] 無預聚合統計，使用逐筆掃描');
       setDataSource('raw');
       const [stats, words, summ] = await Promise.all([
         analytics.getAllStudentsStats(),
@@ -152,16 +153,35 @@ export const TeacherDashboard: React.FC = () => {
     loadData();
   }, []);
 
-  // ============================================================
-  // 早期返回
-  // ============================================================
+  const handleArchiveToggle = async (
+    displayId: string,
+    studentName: string,
+    className: string,
+    isCurrentlyArchived: boolean,
+    archivedBy: string
+  ) => {
+    try {
+      if (isCurrentlyArchived) {
+        await archivedService.unarchiveStudent(displayId);
+        setArchivedIds(prev => {
+          const next = new Set(prev);
+          next.delete(displayId);
+          return next;
+        });
+      } else {
+        await archivedService.archiveStudent(displayId, studentName, className, archivedBy);
+        setArchivedIds(prev => new Set(prev).add(displayId));
+      }
+    } catch (e) {
+      console.error('歸檔操作失敗:', e);
+      alert('操作失敗，請稍後再試');
+    }
+  };
+
   if (loading) {
     return <div style={{ padding: '2rem', textAlign: 'center' }}>📊 載入教師數據中...</div>;
   }
 
-  // ============================================================
-  // 主畫面
-  // ============================================================
   return (
     <div style={{ padding: '2rem', maxWidth: '1600px', margin: '0 auto', fontFamily: 'sans-serif' }}>
       <h1 style={{ borderBottom: '3px solid #007bff', paddingBottom: '0.5rem' }}>
@@ -184,7 +204,6 @@ export const TeacherDashboard: React.FC = () => {
         </span>
       </h1>
 
-      {/* 摘要卡片 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', margin: '2rem 0' }}>
         <div style={{ background: '#f8f9fa', padding: '1.5rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
           <h3 style={{ margin: 0, color: '#6c757d', fontSize: '0.9rem' }}>👨‍🎓 學生總數</h3>
@@ -206,12 +225,7 @@ export const TeacherDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ============================================================ */}
-      {/* 🔥 Master-Detail 佈局 */}
-      {/* ============================================================ */}
       <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '1.5rem' }}>
-
-        {/* 左欄：學生列表（Master） */}
         <div style={{
           background: 'white',
           padding: '1rem',
@@ -220,16 +234,35 @@ export const TeacherDashboard: React.FC = () => {
           maxHeight: 'calc(100vh - 200px)',
           overflowY: 'auto',
         }}>
-          <h2 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem' }}>📋 學生列表</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>📋 學生列表</h2>
+            {archivedCount > 0 && (
+              <button
+                onClick={() => setShowArchived(v => !v)}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.2rem 0.6rem',
+                  background: showArchived ? '#6c757d' : '#f8f9fa',
+                  color: showArchived ? 'white' : '#6c757d',
+                  border: '1px solid #dee2e6',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+              >
+                {showArchived ? '✓ 顯示歸檔' : `📦 歸檔 (${archivedCount})`}
+              </button>
+            )}
+          </div>
 
-          {students.length === 0 ? (
+          {displayedStudents.length === 0 ? (
             <p style={{ color: '#6c757d', fontSize: '0.9rem' }}>
-              尚無學生資料。
+              {students.length === 0 ? '尚無學生資料。' : '所有學生都已歸檔。'}
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {students.map((s) => {
+              {displayedStudents.map((s) => {
                 const isSelected = selectedStudentId === s.id;
+                const isArchived = archivedIds.has(s.id);
                 return (
                   <button
                     key={s.id}
@@ -241,11 +274,14 @@ export const TeacherDashboard: React.FC = () => {
                       border: isSelected ? '2px solid #007bff' : '1px solid #dee2e6',
                       borderRadius: '6px',
                       cursor: 'pointer',
+                      opacity: isArchived ? 0.5 : 1,
                       transition: 'all 0.15s ease',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <strong style={{ fontSize: '0.95rem' }}>{s.name}</strong>
+                      <strong style={{ fontSize: '0.95rem' }}>
+                        {isArchived && '📦 '}{s.name}
+                      </strong>
                       <span style={{
                         fontSize: '0.85rem',
                         fontWeight: 'bold',
@@ -263,7 +299,6 @@ export const TeacherDashboard: React.FC = () => {
             </div>
           )}
 
-          {/* 弱點單字（放在列表下方） */}
           {weakWords.length > 0 && (
             <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #dee2e6' }}>
               <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem' }}>🔍 全班弱點單字</h3>
@@ -277,9 +312,7 @@ export const TeacherDashboard: React.FC = () => {
                     justifyContent: 'space-between',
                   }}>
                     <span style={{ background: '#e9ecef', padding: '1px 6px', borderRadius: '3px' }}>{w.wordText}</span>
-                    <span style={{ color: w.errorRate > 60 ? '#dc3545' : '#ffc107' }}>
-                      {w.errorRate}%
-                    </span>
+                    <span style={{ color: w.errorRate > 60 ? '#dc3545' : '#ffc107' }}>{w.errorRate}%</span>
                   </li>
                 ))}
               </ul>
@@ -287,16 +320,9 @@ export const TeacherDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* 右欄：學生詳情（Detail） */}
         <div>
           {!selectedStudentId && (
-            <div style={{
-              background: '#f8f9fa',
-              padding: '4rem 2rem',
-              borderRadius: '8px',
-              textAlign: 'center',
-              color: '#6c757d',
-            }}>
+            <div style={{ background: '#f8f9fa', padding: '4rem 2rem', borderRadius: '8px', textAlign: 'center', color: '#6c757d' }}>
               <h2 style={{ fontSize: '1.5rem' }}>👈 請從左側選擇一位學生</h2>
               <p>點擊學生名字即可查看個人化的學習診斷報告。</p>
             </div>
@@ -316,7 +342,11 @@ export const TeacherDashboard: React.FC = () => {
           )}
 
           {selectedStudentId && detail && !detailLoading && !detailError && (
-            <StudentDetailPanel analytics={detail} />
+            <StudentDetailPanel
+              analytics={detail}
+              isArchived={archivedIds.has(selectedStudentId)}
+              onArchiveToggle={handleArchiveToggle}
+            />
           )}
         </div>
       </div>
