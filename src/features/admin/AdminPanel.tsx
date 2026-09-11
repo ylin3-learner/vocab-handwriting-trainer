@@ -213,48 +213,92 @@ export const AdminPanel: React.FC = () => {
         }
     };
 
-    const handlePublish = async () => {
+        const handlePublish = async () => {
         if (previewData.length === 0) {
             alert('沒有可發布的資料');
             return;
         }
 
-        if (!window.confirm(`確定要發布 ${previewData.length} 筆單字到資料庫嗎？此操作會覆蓋舊版單字庫。`)) {
+        const oldCount = await (async () => {
+            try {
+                const snap = await getDocs(collection(db, 'vocabulary', 'current', 'words'));
+                return snap.docs.length;
+            } catch {
+                return -1;
+            }
+        })();
+
+        const confirmMsg = oldCount >= 0
+            ? `確定要發布 ${previewData.length} 筆單字嗎？\n\n` +
+              `此操作會：\n` +
+              `1. 刪除現有 ${oldCount} 筆舊單字\n` +
+              `2. 寫入 ${previewData.length} 筆新單字\n\n` +
+              `⚠️ 為避免觸發 Firestore 配額限制，每批次之間會延遲 1 秒。\n` +
+              `預估耗時：${Math.ceil((oldCount + previewData.length) / 400) * 1.5} 秒`
+            : `確定要發布 ${previewData.length} 筆單字嗎？`;
+
+        if (!window.confirm(confirmMsg)) {
             return;
         }
 
         setIsLoading(true);
         setPublishStatus(`⏳ 準備清理舊版單字庫...`);
 
+        // 🔥 可調整參數
+        const BATCH_SIZE = 400;             // 批次大小（Firestore 上限 500，留緩衝）
+        const DELAY_MS = 1000;              // 每批次之間延遲（毫秒）
+        const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
         try {
-            const BATCH_SIZE = 500;
             const allWords = previewData.map(word =>
                 Object.fromEntries(
                     Object.entries(word).filter(([_, value]) => value !== undefined)
                 )
             );
 
-            // 🔥 步驟 1：清空 current 集合中的所有舊文件
+            // ============================================================
+            // 步驟 1：批次刪除舊文件（含延遲）
+            // ============================================================
             const currentWordsRef = collection(db, 'vocabulary', 'current', 'words');
             const currentSnapshot = await getDocs(currentWordsRef);
 
             if (!currentSnapshot.empty) {
-                setPublishStatus(`⏳ 正在刪除 ${currentSnapshot.docs.length} 筆舊單字...`);
-                // Firestore 批次刪除上限為 500 筆，需分批次刪除
+                const totalDeleteBatches = Math.ceil(currentSnapshot.docs.length / BATCH_SIZE);
+                setPublishStatus(`⏳ 正在刪除 ${currentSnapshot.docs.length} 筆舊單字（共 ${totalDeleteBatches} 批）...`);
+
                 for (let i = 0; i < currentSnapshot.docs.length; i += BATCH_SIZE) {
+                    const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
                     const deleteBatch = writeBatch(db);
                     const chunk = currentSnapshot.docs.slice(i, i + BATCH_SIZE);
                     chunk.forEach((doc) => deleteBatch.delete(doc.ref));
-                    await deleteBatch.commit();
+
+                    try {
+                        await deleteBatch.commit();
+                    } catch (e) {
+                        throw new Error(`刪除第 ${batchNumber}/${totalDeleteBatches} 批失敗（已刪除 ${i} 筆）: ${e instanceof Error ? e.message : '未知錯誤'}`);
+                    }
+
+                    setPublishStatus(`🗑️ 刪除進度 ${batchNumber}/${totalDeleteBatches}（${Math.min(i + BATCH_SIZE, currentSnapshot.docs.length)}/${currentSnapshot.docs.length} 筆）`);
+
+                    // 🔥 批次之間延遲
+                    if (i + BATCH_SIZE < currentSnapshot.docs.length) {
+                        await sleep(DELAY_MS);
+                    }
                 }
                 console.log(`✅ 已清空 ${currentSnapshot.docs.length} 筆舊單字`);
+            } else {
+                console.log('ℹ️ 舊單字庫為空，跳過刪除步驟');
             }
 
-            setPublishStatus(`⏳ 準備寫入 ${previewData.length} 筆新資料...`);
+            // ============================================================
+            // 步驟 2：批次寫入新資料（含延遲）
+            // ============================================================
+            const totalWriteBatches = Math.ceil(allWords.length / BATCH_SIZE);
+            setPublishStatus(`⏳ 準備寫入 ${allWords.length} 筆新資料（共 ${totalWriteBatches} 批）...`);
 
-            // 🔥 步驟 2：寫入新資料（只寫入 current，不再寫入 draft）
             let totalCommitted = 0;
             for (let i = 0; i < allWords.length; i += BATCH_SIZE) {
+                const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
                 const batch = writeBatch(db);
                 const chunk = allWords.slice(i, i + BATCH_SIZE);
 
@@ -266,12 +310,25 @@ export const AdminPanel: React.FC = () => {
                     batch.set(currentDocRef, word);
                 }
 
-                await batch.commit();
+                try {
+                    await batch.commit();
+                } catch (e) {
+                    throw new Error(`寫入第 ${batchNumber}/${totalWriteBatches} 批失敗（已寫入 ${totalCommitted} 筆）: ${e instanceof Error ? e.message : '未知錯誤'}`);
+                }
+
                 totalCommitted += chunk.length;
-                setPublishStatus(`✅ 已寫入 ${totalCommitted}/${allWords.length} 筆`);
+                setPublishStatus(`📝 寫入進度 ${batchNumber}/${totalWriteBatches}（${totalCommitted}/${allWords.length} 筆）`);
+
+                // 🔥 批次之間延遲
+                if (i + BATCH_SIZE < allWords.length) {
+                    await sleep(DELAY_MS);
+                }
             }
 
-            // 🔥 步驟 3：更新 metadata 版本號
+            // ============================================================
+            // 步驟 3：更新 metadata 版本號
+            // ============================================================
+            setPublishStatus(`⏳ 更新版本資訊...`);
             const version = new Date().toISOString().slice(0, 10);
             await setDoc(doc(db, 'vocabulary', 'metadata'), {
                 currentVersion: version,
@@ -279,12 +336,14 @@ export const AdminPanel: React.FC = () => {
                 wordCount: allWords.length,
             });
 
-            setPublishStatus(`✅ 成功發布 ${allWords.length} 筆單字 (版本 ${version})`);
+            setPublishStatus(`✅ 成功發布 ${allWords.length} 筆單字（版本 ${version}）`);
             setPreviewData([]);
             setFile(null);
         } catch (error) {
-            console.error('發布失敗:', error);
-            setPublishStatus('❌ 發布失敗，請查看控制台錯誤訊息');
+            console.error('❌ 發布失敗:', error);
+            const message = error instanceof Error ? error.message : '未知錯誤';
+            setPublishStatus(`❌ 發布失敗：${message}`);
+            alert(`發布失敗：\n\n${message}\n\n請等待配額重置後再試，或改用 Admin SDK 腳本。`);
         } finally {
             setIsLoading(false);
         }

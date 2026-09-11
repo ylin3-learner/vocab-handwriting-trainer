@@ -10,10 +10,15 @@ import { pickNextWordId, WordEntry } from '../../domain/selection/questionSelect
 import { levenshteinDistance, normalizedSimilarity } from '../../domain/string/similarity';
 import { AssignmentService, ActiveAssignment } from '../../services/assignment/AssignmentService';
 import { ClassStatsService } from '../../services/analytics/ClassStatsService';
+import { StudentStateService } from '../../services/progression/StudentStateService';
+import { LevelProgressionService } from '../../services/progression/LevelProgressionService';
+import { ProgressionDecision } from '../../types/progression';
 
 export interface QuizQuestion {
   word: Word;
   timeLimitMs: number;
+  /** 🔥 這題是不是「探針題」（來自 L+1） */
+  isProbe?: boolean;
 }
 
 export interface AnswerSubmission {
@@ -27,6 +32,8 @@ export interface SubmitAnswerResult {
   grading: GradingResult;
   scheduling: SM2Result;
   nextState: ReviewState;
+  /** 🔥 若觸發了等級調整，這裡會帶回決策結果 */
+  progressionDecision?: ProgressionDecision | null;
 }
 
 export interface QuizOrchestratorDeps {
@@ -55,12 +62,25 @@ export class QuizOrchestrator {
   private classStatsService: ClassStatsService;
   private askedToday = new Set<string>();
 
+  // 🔥 Stage 3 新增
+  private studentStateService: StudentStateService;
+  private levelProgressionService: LevelProgressionService;
+  private currentLevel: number = 1;
+  private sessionAttempts: number = 0; // 本 session 累計的作答數
+
   constructor(studentId: string, className: string, deps: QuizOrchestratorDeps) {
     this.studentId = studentId;
     this.className = className;
     this.deps = deps;
     this.classStatsService = new ClassStatsService();
     this.assignmentService = new AssignmentService();
+    this.studentStateService = new StudentStateService();
+    this.levelProgressionService = new LevelProgressionService();
+  }
+
+  /** 🔥 取得當前等級（供 UI 顯示） */
+  getCurrentLevel(): number {
+    return this.currentLevel;
   }
 
   async init(): Promise<void> {
@@ -68,6 +88,18 @@ export class QuizOrchestrator {
     console.log(`🚀 [QuizOrchestrator.init] 開始初始化`);
     console.log(`   學生：${this.studentId}，班級：${this.className || '（未填）'}`);
     console.log('═══════════════════════════════════════');
+
+    // ===== 步驟 0：讀取學習狀態（🔥 Stage 3 新增） =====
+    console.log('📋 [步驟 0] 讀取學習狀態...');
+    try {
+      await this.studentStateService.initializeIfNeeded(this.studentId, 1);
+      const learningState = await this.studentStateService.getState(this.studentId);
+      this.currentLevel = learningState.currentLevel;
+      console.log(`   ✅ 當前等級：L${this.currentLevel}`);
+    } catch (e) {
+      console.warn('⚠️ 讀取學習狀態失敗，使用預設 L1:', e);
+      this.currentLevel = 1;
+    }
 
     // ===== 步驟 1：讀取作業設定 =====
     console.log('📋 [步驟 1] 讀取作業設定...');
@@ -94,7 +126,7 @@ export class QuizOrchestrator {
     this.stateCache = await this.deps.progressStore.getAllStates(this.studentId);
     console.log(`   ✅ 已載入 ${this.stateCache.size} 個單字的進度狀態`);
 
-    // ===== 步驟 3：計算池子大小（倍數化） =====
+    // ===== 步驟 3：計算池子大小 =====
     const K2 = this.dailyNewQuotaRemaining;
     const K1 = Math.max(0, this.dailyMaxQuota - K2);
 
@@ -107,9 +139,8 @@ export class QuizOrchestrator {
     const newPoolSize = Math.max(K2 * NEW_POOL_MULTIPLIER, MIN_NEW_POOL);
 
     console.log(`📊 [步驟 3] 池子大小：複習目標 ${reviewPoolSize}，新詞目標 ${newPoolSize}`);
-    console.log(`   （配額：K1=${K1}, K2=${K2}）`);
 
-    // ===== 步驟 4：挑選複習候選（已到期 + 最近學過） =====
+    // ===== 步驟 4：挑選複習候選（🔥 Stage 3：只取當前 level 的到期字） =====
     const allStates = Array.from(this.stateCache.entries());
 
     // 4.1 已到期的複習單字（依 nextReviewDate 由舊到新）
@@ -140,7 +171,6 @@ export class QuizOrchestrator {
     const finalReviewIds = [...dueWordIds, ...supplementIds];
     console.log(`   - 已到期複習：${dueWordIds.length} 個`);
     console.log(`   - 補充最近學過：${supplementIds.length} 個`);
-    console.log(`   - 複習池總計：${finalReviewIds.length} 個`);
 
     // ===== 步驟 5：批次載入複習候選 =====
     let reviewWords: Word[] = [];
@@ -148,22 +178,52 @@ export class QuizOrchestrator {
       console.log('📋 [步驟 5] 批次載入複習候選...');
       reviewWords = await this.deps.wordRepository.getWordsByIds(finalReviewIds);
       console.log(`   ✅ 載入 ${reviewWords.length} 個複習單字`);
-
-      // 🔥 檢查是否所有 ID 都被載入（防禦：舊格式 wordId 會找不到）
-      if (reviewWords.length < finalReviewIds.length) {
-        const loadedIds = new Set(reviewWords.map(w => w.id));
-        const missingIds = finalReviewIds.filter(id => !loadedIds.has(id));
-        console.warn(`   ⚠️ ${missingIds.length} 個複習候選的 wordId 在單字庫中找不到`);
-        console.warn(`      遺失的 ID 前 5 個：${missingIds.slice(0, 5).join(', ')}`);
-        console.warn(`      → 這些是舊格式資料（Firestore 自動 ID），請清除 students 集合後重新開始`);
-      }
     }
 
-    // ===== 步驟 6：載入新詞候選 =====
+    // ===== 步驟 6：載入新詞候選（🔥 Stage 3：按 level 分配） =====
     console.log('📋 [步驟 6] 載入新詞候選...');
     const excludeIds = new Set(this.stateCache.keys());
-    const newWords = await this.deps.wordRepository.getNewWords(excludeIds, newPoolSize);
-    console.log(`   ✅ 載入 ${newWords.length} 個新單字`);
+
+    // 🔥 探針題比例：10%
+    const probeRatio = 0.1;
+    const probeCount = Math.floor(newPoolSize * probeRatio);
+    const mainCount = newPoolSize - probeCount;
+
+    // 主體：當前 level
+    const mainLevels = [this.currentLevel];
+    const mainWords = await this.deps.wordRepository.getNewWordsByLevels(
+      excludeIds,
+      mainLevels,
+      mainCount
+    );
+
+    // 探針：當前 level + 1（若已是最高等，往下探）
+    const probeLevel = this.currentLevel < 6 ? this.currentLevel + 1 : this.currentLevel;
+    const probeExclude = new Set([...excludeIds, ...mainWords.map((w) => w.id)]);
+    const probeWords = await this.deps.wordRepository.getNewWordsByLevels(
+      probeExclude,
+      [probeLevel],
+      probeCount
+    );
+
+    // 保底：若主體不足，用當前 level - 1 補
+    let fallbackWords: Word[] = [];
+    if (mainWords.length + probeWords.length < newPoolSize && this.currentLevel > 1) {
+      const fallbackExclude = new Set([
+        ...excludeIds,
+        ...mainWords.map((w) => w.id),
+        ...probeWords.map((w) => w.id),
+      ]);
+      const need = newPoolSize - mainWords.length - probeWords.length;
+      fallbackWords = await this.deps.wordRepository.getNewWordsByLevels(
+        fallbackExclude,
+        [this.currentLevel - 1],
+        need
+      );
+    }
+
+    const newWords = [...mainWords, ...probeWords, ...fallbackWords];
+    console.log(`   ✅ 載入 ${mainWords.length} (L${this.currentLevel}) + ${probeWords.length} (L${probeLevel}) + ${fallbackWords.length} (L${this.currentLevel - 1}) = ${newWords.length} 個新單字`);
 
     // ===== 步驟 7：合併成最終單字池 =====
     this.words = [...reviewWords, ...newWords];
@@ -174,7 +234,7 @@ export class QuizOrchestrator {
     console.log('═══════════════════════════════════════');
     console.log(`✅ [QuizOrchestrator.init] 完成！`);
     console.log(`   單字池：${reviewWords.length} 複習 + ${newWords.length} 新詞 = ${this.words.length} 個`);
-    console.log(`   （配額 ${this.dailyMaxQuota} 題，池子 ${this.words.length} 個，比例 1:${(this.words.length / this.dailyMaxQuota).toFixed(1)}）`);
+    console.log(`   當前等級：L${this.currentLevel}`);
     console.log('═══════════════════════════════════════');
   }
 
@@ -199,8 +259,8 @@ export class QuizOrchestrator {
       return null;
     }
 
-    // 🔥 優先從「今天還沒出過」的單字中選
-    const availableWords = this.words.filter(w => !this.askedToday.has(w.id));
+    // 優先從「今天還沒出過」的單字中選
+    const availableWords = this.words.filter((w) => !this.askedToday.has(w.id));
     const usingPool = availableWords.length > 0 ? availableWords : this.words;
     const isReusing = availableWords.length === 0;
 
@@ -235,11 +295,16 @@ export class QuizOrchestrator {
 
     this.askedToday.add(selectedId);
 
-    console.log(`📌 [nextQuestion] 選中「${word.word}」（進度 ${this.dailyAnsweredCount + 1}/${this.dailyMaxQuota}，池中剩 ${availableWords.length - 1} 個未出）`);
+    // 🔥 判斷是否為探針題（來自 L+1）
+    const wordLevel = Number(word.level ?? '0');
+    const isProbe = wordLevel > this.currentLevel;
+
+    console.log(`📌 [nextQuestion] 選中「${word.word}」(L${wordLevel}${isProbe ? ' 探針' : ''})（進度 ${this.dailyAnsweredCount + 1}/${this.dailyMaxQuota}）`);
 
     return {
       word,
       timeLimitMs: this.deps.timeLimitMs,
+      isProbe,
     };
   }
 
@@ -291,17 +356,16 @@ export class QuizOrchestrator {
 
     const nextState = mergeSM2ResultWithState(currentState, scheduling, now);
 
-    // 🔥 儲存進度：fire-and-forget（不阻塞判分回傳）
+    // 儲存進度（fire-and-forget）
     this.deps.progressStore
       .saveState(this.studentId, wordId, nextState)
       .then(() => this.stateCache?.set(wordId, nextState))
       .catch((error) => {
-        console.warn('⚠️ 儲存進度失敗（已加入同步佇列）:', error);
+        console.warn('⚠️ 儲存進度失敗:', error);
         this.stateCache?.set(wordId, nextState);
       });
 
-    // 新增：計算 studentDisplayId
-    // 只有 className、studentName、studentSeatNumber 都存在時才建立
+    // 記錄作答（fire-and-forget）
     const studentDisplayId =
       this.className &&
       this.deps.studentName &&
@@ -309,7 +373,6 @@ export class QuizOrchestrator {
         ? `${this.className}_${this.deps.studentSeatNumber}_${this.deps.studentName}`
         : undefined;
 
-    // 記錄作答：fire-and-forget
     const attempt: AttemptRecord = {
       studentId: this.studentId,
       studentDisplayId,
@@ -328,10 +391,10 @@ export class QuizOrchestrator {
     this.deps.progressStore
       .recordAttempt(attempt)
       .catch((error) => {
-        console.warn('⚠️ 記錄作答失敗（已加入同步佇列）:', error);
+        console.warn('⚠️ 記錄作答失敗:', error);
       });
 
-    // 🔥 班級統計：fire-and-forget
+    // 班級統計（fire-and-forget）
     this.classStatsService
       .recordAttempt({
         className: this.className,
@@ -346,15 +409,35 @@ export class QuizOrchestrator {
       });
 
     this.dailyAnsweredCount += 1;
+    this.sessionAttempts += 1;
     if (grading.isCorrect) {
-      const stateBefore = currentState;
-      if (stateBefore.reviewCount === 0 && !stateBefore.lastReviewed) {
+      if (currentState.reviewCount === 0 && !currentState.lastReviewed) {
         this.dailyNewQuotaRemaining = Math.max(0, this.dailyNewQuotaRemaining - 1);
       }
     }
 
-    console.log(`✍️ [submitAnswer]「${word.word}」→ ${grading.isCorrect ? '✅ 正確' : '❌ 錯誤'}（quality=${grading.quality}），剩餘新詞配額：${this.dailyNewQuotaRemaining}`);
+    console.log(`✍️ [submitAnswer]「${word.word}」→ ${grading.isCorrect ? '✅ 正確' : '❌ 錯誤'}（quality=${grading.quality}）`);
 
-    return { grading, scheduling, nextState };
+    // ============================================================
+    // 🔥 Stage 3：每 10 題觸發一次等級評估
+    // ============================================================
+    let progressionDecision: ProgressionDecision | null = null;
+    if (this.sessionAttempts > 0 && this.sessionAttempts % 10 === 0) {
+      try {
+        progressionDecision = await this.levelProgressionService.evaluate(
+          this.studentId,
+          this.sessionAttempts
+        );
+        if (progressionDecision && progressionDecision.action !== 'hold') {
+          console.log(`🎉 [submitAnswer] 等級調整：${progressionDecision.action} → L${progressionDecision.newLevel}`);
+          // 更新本地快取
+          this.currentLevel = progressionDecision.newLevel;
+        }
+      } catch (e) {
+        console.warn('⚠️ 等級評估失敗（不影響測驗）:', e);
+      }
+    }
+
+    return { grading, scheduling, nextState, progressionDecision };
   }
 }
