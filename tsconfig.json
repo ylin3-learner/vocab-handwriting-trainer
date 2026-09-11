@@ -10,7 +10,8 @@
     "skipLibCheck": true,
     "declaration": true,
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "types": ["node", "vite/client"]
   },
   "include": ["src"]
 }
