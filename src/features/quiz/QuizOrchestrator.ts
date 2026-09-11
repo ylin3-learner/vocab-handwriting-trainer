@@ -300,9 +300,19 @@ export class QuizOrchestrator {
         this.stateCache?.set(wordId, nextState);
       });
 
-    // 🔥 記錄作答：fire-and-forget
+    // 新增：計算 studentDisplayId
+    // 只有 className、studentName、studentSeatNumber 都存在時才建立
+    const studentDisplayId =
+      this.className &&
+      this.deps.studentName &&
+      this.deps.studentSeatNumber
+        ? `${this.className}_${this.deps.studentSeatNumber}_${this.deps.studentName}`
+        : undefined;
+
+    // 記錄作答：fire-and-forget
     const attempt: AttemptRecord = {
       studentId: this.studentId,
+      studentDisplayId,
       wordId,
       timestamp: now.toISOString(),
       recognizedText: submission.recognizedText,

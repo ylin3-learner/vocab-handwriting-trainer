@@ -166,28 +166,78 @@ export class AnalyticsService {
      *
      * 總計：2~3 次 Firestore 讀取（O(1)，與班級人數無關）
      */
+     /**
+     * 🔥 Stage 2.5：取得單一學生的完整個人化分析
+     *
+     * 讀取策略：
+     *   1. 用 studentDisplayId 查 attempts（新資料）
+     *   2. 若查不到，fallback 用 studentId (UID) 查（舊資料）
+     *   3. 取得 student profile（先讀 students/{id}，失敗則從 classStats 反查）
+     *   4. 批次取得弱點單字的 Word 物件
+     *
+     * 總計：2~3 次 Firestore 讀取（O(1)，與班級人數無關）
+     */
     async getStudentDetail(studentId: string): Promise<StudentAnalytics> {
-        // 1. 取得學生 profile
-        const studentDoc = await getDoc(doc(db, 'students', studentId));
-        const profile = studentDoc.exists()
-            ? {
-                studentId,
-                name: studentDoc.data().name || studentId,
-                className: studentDoc.data().class || '未分類',
-            }
-            : { studentId, name: studentId, className: '未分類' };
-
-        // 2. 取得該學生的所有 attempts
+        // ============================================================
+        // 步驟 1：查詢 attempts（優先 studentDisplayId，fallback 到 UID）
+        // ============================================================
         const attemptsRef = collection(db, 'attempts');
-        const q = query(attemptsRef, where('studentId', '==', studentId));
-        const attemptsSnap = await getDocs(q);
-        const attempts = attemptsSnap.docs.map(d => d.data() as AttemptRecord);
+        let attempts: AttemptRecord[] = [];
 
-        // 3. 先做一次「不帶 word 的」分析，取得 wordId 清單
+        // 1.1 先嘗試用 studentDisplayId 查（新資料）
+        console.log(`🔍 [AnalyticsService] 嘗試用 displayId "${studentId}" 查詢...`);
+        const q1 = query(attemptsRef, where('studentDisplayId', '==', studentId));
+        const snap1 = await getDocs(q1);
+        attempts = snap1.docs.map(d => d.data() as AttemptRecord);
+
+        // 1.2 若查不到，改用 studentId (UID) 查（舊資料）
+        if (attempts.length === 0) {
+            console.log(`🔍 [AnalyticsService] displayId 查不到，改用 UID 查詢...`);
+            const q2 = query(attemptsRef, where('studentId', '==', studentId));
+            const snap2 = await getDocs(q2);
+            attempts = snap2.docs.map(d => d.data() as AttemptRecord);
+        }
+
+        console.log(`📊 [AnalyticsService] "${studentId}" → 找到 ${attempts.length} 筆 attempts`);
+
+        // ============================================================
+        // 步驟 2：取得 student profile
+        // ============================================================
+        let profile = { studentId, name: studentId, className: '未分類' };
+
+        const directStudentDoc = await getDoc(doc(db, 'students', studentId));
+        if (directStudentDoc.exists()) {
+            const data = directStudentDoc.data();
+            profile = {
+                studentId,
+                name: data.name || studentId,
+                className: data.class || '未分類',
+            };
+        } else {
+            // Fallback：從 classStats 反查（適用於 studentId 是 displayId 的情況）
+            const classStats = await this.classStatsService.getAllClassStats();
+            for (const cs of classStats) {
+                if (cs.students && cs.students[studentId]) {
+                    const s = cs.students[studentId];
+                    profile = {
+                        studentId,
+                        name: s.name || studentId,
+                        className: cs.className,
+                    };
+                    break;
+                }
+            }
+        }
+
+        // ============================================================
+        // 步驟 3：先做一次「不帶 word 的」分析，取得弱點單字 ID 清單
+        // ============================================================
         const preAnalysis = analyzeStudent(attempts, profile, new Map());
-
-        // 4. 批次取得弱點單字的 Word 物件（最多 5 個）
         const weakWordIds = preAnalysis.weakestWords.map(w => w.wordId);
+
+        // ============================================================
+        // 步驟 4：批次取得弱點單字的 Word 物件（最多 5 個）
+        // ============================================================
         let wordMap = new Map<string, Word>();
         if (weakWordIds.length > 0) {
             try {
@@ -198,7 +248,10 @@ export class AnalyticsService {
             }
         }
 
-        // 5. 用完整的 wordMap 重新分析
+        // ============================================================
+        // 步驟 5：用完整的 wordMap 重新分析，回傳最終結果
+        // ============================================================
         return analyzeStudent(attempts, profile, wordMap);
     }
+
 }
