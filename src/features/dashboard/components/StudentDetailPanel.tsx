@@ -7,9 +7,18 @@ import { ErrorBreakdownPie } from './ErrorBreakdownPie';
 import { ResponseTimeBar } from './ResponseTimeBar';
 import { WeakWordsTable } from './WeakWordsTable';
 import { generateStudentReportPdf } from '../../../services/export/studentReportPdf';
+import { useAuth } from '../../../contexts/AuthContext';
 
 interface Props {
   analytics: StudentAnalytics;
+  isArchived?: boolean;
+  onArchiveToggle?: (
+    displayId: string,
+    studentName: string,
+    className: string,
+    isCurrentlyArchived: boolean,
+    archivedBy: string
+  ) => Promise<void>;
 }
 
 const LEARNING_STYLE_LABELS: Record<LearningStyle, { text: string; color: string; emoji: string }> = {
@@ -20,9 +29,15 @@ const LEARNING_STYLE_LABELS: Record<LearningStyle, { text: string; color: string
   'insufficient-data': { text: '樣本不足', color: '#6c757d', emoji: '📊' },
 };
 
-export const StudentDetailPanel: React.FC<Props> = ({ analytics }) => {
+export const StudentDetailPanel: React.FC<Props> = ({
+  analytics,
+  isArchived = false,
+  onArchiveToggle,
+}) => {
   const reportRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const { user } = useAuth();
 
   const radarMetrics = useMemo(() => calculateRadarMetrics(analytics), [analytics]);
   const styleInfo = LEARNING_STYLE_LABELS[analytics.learningStyle];
@@ -40,7 +55,34 @@ export const StudentDetailPanel: React.FC<Props> = ({ analytics }) => {
     }
   };
 
-  // 邊界情境：完全沒有作答紀錄
+  const handleArchiveClick = async () => {
+    if (!onArchiveToggle) return;
+
+    const action = isArchived ? '取消歸檔' : '歸檔';
+    const message = isArchived
+      ? `確定要把「${analytics.name}」從歸檔中恢復嗎？\n他將會重新出現在學生列表中。`
+      : `確定要歸檔「${analytics.name}」嗎？\n歸檔後他會從學生列表隱藏，但資料不會被刪除。`;
+
+    if (!window.confirm(message)) return;
+
+    setIsArchiving(true);
+    try {
+      await onArchiveToggle(
+        analytics.studentId,
+        analytics.name,
+        analytics.className,
+        isArchived,
+        user?.email ?? user?.uid ?? 'unknown'
+      );
+      console.log(`✅ 已${action}「${analytics.name}」`);
+    } catch (e) {
+      console.error(`❌ ${action}失敗:`, e);
+      alert(`${action}失敗，請稍後再試`);
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
   if (analytics.totalAttempts === 0) {
     return (
       <div style={{ background: '#f8f9fa', padding: '3rem', borderRadius: '8px', textAlign: 'center' }}>
@@ -52,8 +94,31 @@ export const StudentDetailPanel: React.FC<Props> = ({ analytics }) => {
 
   return (
     <div>
-      {/* ===== 匯出按鈕（在截圖區域外面） ===== */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+      {/* ===== 按鈕列：歸檔 + 匯出 PDF ===== */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        {onArchiveToggle && (
+          <button
+            onClick={handleArchiveClick}
+            disabled={isArchiving}
+            style={{
+              padding: '0.5rem 1.25rem',
+              background: isArchiving ? '#adb5bd' : isArchived ? '#17a2b8' : '#6c757d',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: isArchiving ? 'default' : 'pointer',
+              fontSize: '0.9rem',
+              fontWeight: 'bold',
+            }}
+          >
+            {isArchiving
+              ? '⏳ 處理中...'
+              : isArchived
+                ? '📤 取消歸檔'
+                : '📦 歸檔此學生'}
+          </button>
+        )}
+
         <button
           onClick={handleExportPdf}
           disabled={isExporting}
@@ -72,7 +137,22 @@ export const StudentDetailPanel: React.FC<Props> = ({ analytics }) => {
         </button>
       </div>
 
-      {/* ===== 截圖區域（含列印專用標題 + 頁尾） ===== */}
+      {/* 若已歸檔，顯示提示橫幅 */}
+      {isArchived && (
+        <div style={{
+          background: '#fff3cd',
+          border: '1px solid #ffeeba',
+          borderRadius: '6px',
+          padding: '0.5rem 1rem',
+          marginBottom: '0.75rem',
+          fontSize: '0.85rem',
+          color: '#856404',
+        }}>
+          📦 此學生已被歸檔，目前從學生列表中隱藏。
+        </div>
+      )}
+
+      {/* ===== 截圖區域 ===== */}
       <div
         ref={reportRef}
         style={{
@@ -82,7 +162,7 @@ export const StudentDetailPanel: React.FC<Props> = ({ analytics }) => {
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         }}
       >
-        {/* 🔥 列印用標題 */}
+        {/* 列印用標題 */}
         <div style={{
           textAlign: 'center',
           borderBottom: '3px solid #007bff',
@@ -141,7 +221,7 @@ export const StudentDetailPanel: React.FC<Props> = ({ analytics }) => {
           <WeakWordsTable words={analytics.weakestWords} />
         </div>
 
-        {/* 🔥 列印用頁尾：老師建議 + 簽名欄 */}
+        {/* 列印用頁尾 */}
         <div style={{
           marginTop: '1.5rem',
           paddingTop: '1rem',
@@ -152,7 +232,6 @@ export const StudentDetailPanel: React.FC<Props> = ({ analytics }) => {
             <div style={{ fontSize: '0.9rem', color: '#495057', marginBottom: '0.5rem', fontWeight: 'bold' }}>
               ✏️ 老師建議：
             </div>
-            {/* 手寫用空白線 */}
             {[1, 2, 3].map(i => (
               <div
                 key={i}
