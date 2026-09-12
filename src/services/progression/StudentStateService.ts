@@ -4,6 +4,7 @@ import { db } from '../../firebase';
 import {
   StudentLearningState,
   LevelHistoryEntry,
+  PlacementHistoryEntry,
   createInitialLearningState,
 } from '../../types/progression';
 
@@ -36,17 +37,20 @@ export class StudentStateService {
     const state = data?.learningState as StudentLearningState | undefined;
 
     if (!state) {
-      // 欄位不存在（舊資料）→ 回傳初始狀態，但不寫入
+      // 欄位不存在 → 回傳初始狀態，但不寫入
       return createInitialLearningState(1);
     }
 
-    // 防禦：確保欄位完整性
+    // 防禦：確保欄位完整性（含 Stage 2 新增的 placementDone）
     return {
       currentLevel: state.currentLevel ?? 1,
       totalAttempts: state.totalAttempts ?? 0,
       levelLockedUntilTotalAttempts: state.levelLockedUntilTotalAttempts ?? 0,
       lastEvaluatedAtTotalAttempts: state.lastEvaluatedAtTotalAttempts ?? 0,
       levelHistory: state.levelHistory ?? [],
+      // 🔥 Stage 2：placementDone 若未設定，視為 false（需鑑定）
+      placementDone: state.placementDone === true,
+      placementHistory: state.placementHistory,
     };
   }
 
@@ -64,12 +68,59 @@ export class StudentStateService {
     if (data?.learningState) return;
 
     // 用 setDoc + merge 避免覆蓋其他欄位
+    // 🔥 Stage 2：新學生的 placementDone = false，需要鑑定
     await setDoc(
       ref,
-      { learningState: createInitialLearningState(startLevel) },
+      { learningState: createInitialLearningState(startLevel, false) },
       { merge: true }
     );
     console.log(`🌱 [StudentStateService] 已初始化 ${studentId} 的 learningState`);
+  }
+
+  /**
+   * 🔥 Stage 2 新增：查詢鑑定狀態
+   *
+   * @returns needsPlacement: 是否需要鑑定
+   *          currentLevel: 當前等級（未鑑定時為初始值）
+   */
+  async getPlacementStatus(studentId: string): Promise<{
+    needsPlacement: boolean;
+    currentLevel: number;
+  }> {
+    const state = await this.getState(studentId);
+    return {
+      needsPlacement: state.placementDone !== true,
+      currentLevel: state.currentLevel,
+    };
+  }
+
+  /**
+   * 🔥 Stage 2 新增：標記鑑定完成（用於 fallback）
+   *
+   * ⚠️ 這是「獨立寫入」，不是原子性操作。
+   *
+   * 主要用途：
+   *   PlacementOrchestrator.finalize() 會用 writeBatch 一次寫入所有東西。
+   *   但若 batch 失敗（例如配額耗盡），可用這個方法至少把關鍵狀態寫入，
+   *   避免學生下次登入又要重新鑑定。
+   *
+   * @param finalLevel 鑑定結果的等級
+   * @param history 完整鑑定紀錄
+   */
+  async markPlacementDone(
+    studentId: string,
+    finalLevel: number,
+    history: PlacementHistoryEntry
+  ): Promise<void> {
+    const ref = this.getDocRef(studentId);
+    await updateDoc(ref, {
+      'learningState.currentLevel': finalLevel,
+      'learningState.placementDone': true,
+      'learningState.placementHistory': history,
+    });
+    console.log(
+      `📝 [StudentStateService] ${studentId} 鑑定完成，等級 L${finalLevel}`
+    );
   }
 
   /**
