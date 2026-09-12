@@ -1,6 +1,8 @@
 // src/types/analytics.ts
 // 學生個人化分析的資料契約
 
+import { DailySnapshot } from './dailySnapshot';
+
 export interface WeakWordDetail {
   wordId: string;
   word: string;              // 顯示用（若 wordMap 找不到則 fallback 為 wordId）
@@ -34,6 +36,9 @@ export interface StudentAnalytics {
   name: string;
   className: string;
 
+  // 🔥 需求 B：當前等級（來自 learningState.currentLevel）
+  currentLevel: number;
+
   // 學習概況
   totalAttempts: number;
   correctCount: number;
@@ -56,4 +61,7 @@ export interface StudentAnalytics {
   // 資料時間範圍
   firstAttemptAt: string | null;
   lastAttemptAt: string | null;
+
+  // 🔥 需求 C：每日快照（供成長曲線使用）
+  dailySnapshots: DailySnapshot[];
 }

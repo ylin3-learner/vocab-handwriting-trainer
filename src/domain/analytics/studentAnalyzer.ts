@@ -26,13 +26,20 @@ const THRESHOLDS = {
  * 純函式：分析單一學生的學習狀況
  *
  * @param attempts 該學生的所有作答紀錄
- * @param profile 學生的基本資料（name, class）
+ * @param profile 學生的基本資料（name, class, currentLevel）
  * @param wordMap wordId -> Word 的映射（用於顯示單字）
  * @returns StudentAnalytics
+ *
+ * 注意：dailySnapshots 由 AnalyticsService 讀取後填入，此純函式不負責。
  */
 export function analyzeStudent(
   attempts: AttemptRecord[],
-  profile: { studentId: string; name: string; className: string },
+  profile: {
+    studentId: string;
+    name: string;
+    className: string;
+    currentLevel?: number;
+  },
   wordMap: Map<string, Word>
 ): StudentAnalytics {
   // ===== 邊界情境：無作答紀錄 =====
@@ -78,6 +85,7 @@ export function analyzeStudent(
     studentId: profile.studentId,
     name: profile.name,
     className: profile.className,
+    currentLevel: profile.currentLevel ?? 1, // 🔥 需求 B
     totalAttempts,
     correctCount,
     correctRate,
@@ -89,6 +97,7 @@ export function analyzeStudent(
     learningStyle,
     firstAttemptAt,
     lastAttemptAt,
+    dailySnapshots: [], // 🔥 需求 C：由 AnalyticsService 填入
   };
 }
 
@@ -100,11 +109,13 @@ function createEmptyAnalytics(profile: {
   studentId: string;
   name: string;
   className: string;
+  currentLevel?: number;
 }): StudentAnalytics {
   return {
     studentId: profile.studentId,
     name: profile.name,
     className: profile.className,
+    currentLevel: profile.currentLevel ?? 1, // 🔥 需求 B
     totalAttempts: 0,
     correctCount: 0,
     correctRate: 0,
@@ -116,6 +127,7 @@ function createEmptyAnalytics(profile: {
     learningStyle: 'insufficient-data',
     firstAttemptAt: null,
     lastAttemptAt: null,
+    dailySnapshots: [], // 🔥 需求 C
   };
 }
 
@@ -129,7 +141,6 @@ function calculateActiveDays(attempts: AttemptRecord[], windowDays: number): num
     if (!a.timestamp) continue;
     const ts = new Date(a.timestamp).getTime();
     if (isNaN(ts) || ts < cutoff) continue;
-    // 用「日期字串」去重（同一小時內答多題只算一天）
     const dayKey = a.timestamp.slice(0, 10); // "YYYY-MM-DD"
     daysSet.add(dayKey);
   }
@@ -153,26 +164,23 @@ function calculateErrorBreakdown(attempts: AttemptRecord[]): ErrorBreakdown {
   const breakdown: ErrorBreakdown = { spelling: 0, completelyWrong: 0, timeout: 0 };
 
   for (const a of attempts) {
-    if (a.isCorrect) continue; // 只統計錯誤的
+    if (a.isCorrect) continue;
 
     const editDist = a.editDistance ?? -1;
     const sim = a.similarity ?? 0;
     const text = (a.recognizedText || '').trim();
     const time = a.responseTimeMs || 0;
 
-    // 超時：反應時間超過題目限制
     if (time > THRESHOLDS.NORMAL_MS) {
       breakdown.timeout++;
-      continue; // 超時優先歸類，不重複計算
+      continue;
     }
 
-    // 完全不會：相似度極低或辨識結果為空
     if (sim < THRESHOLDS.COMPLETELY_WRONG_SIM || text === '') {
       breakdown.completelyWrong++;
       continue;
     }
 
-    // 拼字小錯：editDistance 1~3 且 similarity 夠高
     if (
       editDist >= 1 &&
       editDist <= THRESHOLDS.SPELLING_MAX_EDIT &&
@@ -182,7 +190,6 @@ function calculateErrorBreakdown(attempts: AttemptRecord[]): ErrorBreakdown {
       continue;
     }
 
-    // 不屬於以上分類，保守歸為 completelyWrong
     breakdown.completelyWrong++;
   }
 
@@ -194,7 +201,6 @@ function calculateWeakestWords(
   wordMap: Map<string, Word>,
   limit: number
 ): WeakWordDetail[] {
-  // 1. 按 wordId 聚合
   const stats = new Map<
     string,
     { wrongCount: number; totalAttempts: number; totalTime: number }
@@ -212,21 +218,19 @@ function calculateWeakestWords(
     stats.set(a.wordId, entry);
   }
 
-  // 2. 轉成陣列，只保留「至少錯過一次」的單字
   const list: WeakWordDetail[] = [];
   stats.forEach((s, wordId) => {
     if (s.wrongCount === 0) return;
     const wordObj = wordMap.get(wordId);
     list.push({
       wordId,
-      word: wordObj?.word ?? wordId, // fallback：找不到時顯示 wordId
+      word: wordObj?.word ?? wordId,
       wrongCount: s.wrongCount,
       totalAttempts: s.totalAttempts,
       avgResponseTimeMs: Math.round(s.totalTime / s.totalAttempts),
     });
   });
 
-  // 3. 排序：先比 wrongCount 降序，再比 avgResponseTimeMs 降序
   list.sort((a, b) => {
     if (b.wrongCount !== a.wrongCount) return b.wrongCount - a.wrongCount;
     return b.avgResponseTimeMs - a.avgResponseTimeMs;
@@ -240,7 +244,6 @@ function determineLearningStyle(
   avgResponseTimeMs: number,
   correctRate: number
 ): LearningStyle {
-  // 樣本不足，不判定
   if (totalAttempts < THRESHOLDS.MIN_SAMPLES_FOR_STYLE) {
     return 'insufficient-data';
   }

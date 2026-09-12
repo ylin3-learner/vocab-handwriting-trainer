@@ -6,6 +6,7 @@ import { LearningStyleRadar } from './LearningStyleRadar';
 import { ErrorBreakdownPie } from './ErrorBreakdownPie';
 import { ResponseTimeBar } from './ResponseTimeBar';
 import { WeakWordsTable } from './WeakWordsTable';
+import { StudentGrowthChart } from './StudentGrowthChart';
 import { generateStudentReportPdf } from '../../../services/export/studentReportPdf';
 import { useAuth } from '../../../contexts/AuthContext';
 
@@ -29,6 +30,38 @@ const LEARNING_STYLE_LABELS: Record<LearningStyle, { text: string; color: string
   'insufficient-data': { text: '樣本不足', color: '#6c757d', emoji: '📊' },
 };
 
+// 🔥 需求 A：活躍狀態標籤（純函式）
+function getEngagementStatus(analytics: StudentAnalytics): {
+  label: string;
+  color: string;
+  bgColor: string;
+} {
+  const today = new Date().toISOString().slice(0, 10);
+  const lastDate = analytics.lastAttemptAt?.slice(0, 10);
+
+  if (lastDate === today) {
+    return { label: '✅ 今天有練', color: '#155724', bgColor: '#d4edda' };
+  }
+  if (analytics.activeDaysLast7 >= 5) {
+    return { label: '📈 穩定練習', color: '#0c5460', bgColor: '#d1ecf1' };
+  }
+  if (analytics.activeDaysLast7 >= 2) {
+    return { label: '📊 偶爾練習', color: '#856404', bgColor: '#fff3cd' };
+  }
+  if (analytics.activeDaysLast7 >= 1) {
+    return { label: '⚠️ 很少練習', color: '#721c24', bgColor: '#f8d7da' };
+  }
+  return { label: '❌ 7 天未練', color: '#721c24', bgColor: '#f8d7da' };
+}
+
+// 🔥 需求 B：等級徽章顏色
+function getLevelBadgeColor(level: number): string {
+  if (level >= 5) return '#28a745';  // L5~L6 綠
+  if (level >= 3) return '#17a2b8';  // L3~L4 藍
+  if (level >= 2) return '#ffc107';  // L2 黃
+  return '#6c757d';                  // L1 灰
+}
+
 export const StudentDetailPanel: React.FC<Props> = ({
   analytics,
   isArchived = false,
@@ -41,6 +74,8 @@ export const StudentDetailPanel: React.FC<Props> = ({
 
   const radarMetrics = useMemo(() => calculateRadarMetrics(analytics), [analytics]);
   const styleInfo = LEARNING_STYLE_LABELS[analytics.learningStyle];
+  const engagement = useMemo(() => getEngagementStatus(analytics), [analytics]); // 🔥 需求 A
+  const levelColor = useMemo(() => getLevelBadgeColor(analytics.currentLevel), [analytics.currentLevel]); // 🔥 需求 B
 
   const handleExportPdf = async () => {
     if (!reportRef.current) return;
@@ -195,22 +230,50 @@ export const StudentDetailPanel: React.FC<Props> = ({
               <span style={{ fontSize: '0.9rem', color: '#6c757d', marginLeft: '0.5rem' }}>
                 ({analytics.className})
               </span>
+              {/* 🔥 需求 B：等級徽章 */}
+              <span style={{
+                fontSize: '0.8rem',
+                fontWeight: 'bold',
+                marginLeft: '0.5rem',
+                padding: '2px 10px',
+                borderRadius: '12px',
+                background: levelColor,
+                color: 'white',
+              }}>
+                L{analytics.currentLevel}
+              </span>
             </h2>
             <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#6c757d' }}>
               共 {analytics.totalAttempts} 題，答對 {analytics.correctCount} 題，
               平均 {(analytics.avgResponseTimeMs / 1000).toFixed(1)} 秒
             </p>
+            {/* 🔥 需求 A：活躍天數 + 狀態標籤 */}
+            <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.8rem', color: '#6c757d' }}>
+                📅 近 7 天活躍 {analytics.activeDaysLast7} 天
+                {analytics.lastAttemptAt && (
+                  <> ・ 最後練習：{new Date(analytics.lastAttemptAt).toLocaleDateString('zh-TW')}</>
+                )}
+              </span>
+              <span style={{
+                fontSize: '0.75rem', fontWeight: 'bold', padding: '2px 8px',
+                borderRadius: '12px', background: engagement.bgColor, color: engagement.color,
+              }}>
+                {engagement.label}
+              </span>
+            </div>
           </div>
           <div style={{
-            background: styleInfo.color,
-            color: 'white',
-            padding: '0.5rem 1rem',
-            borderRadius: '20px',
-            fontWeight: 'bold',
-            fontSize: '0.9rem',
+            background: styleInfo.color, color: 'white', padding: '0.5rem 1rem',
+            borderRadius: '20px', fontWeight: 'bold', fontSize: '0.9rem',
           }}>
             {styleInfo.emoji} {styleInfo.text}
           </div>
+        </div>
+
+        {/* 🔥 需求 C：成長曲線（跨兩欄） */}
+        <div style={{ marginBottom: '1rem' }}>
+          <StudentGrowthChart snapshots={analytics.dailySnapshots} />
         </div>
 
         {/* 圖表 2x2 網格 */}
