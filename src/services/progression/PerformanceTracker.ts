@@ -15,6 +15,13 @@ import { PerformanceMetrics } from '../../types/progression';
  * - 不碰 UI
  * - 只做「資料獲取 + 委派純函式計算」
  */
+/**
+ * 職責：從 Firestore 撈取學生的作答紀錄，聚合成策略需要的指標
+ *
+ * 🔥 Key 改為 displayId：
+ *   attempts 文件同時存有 studentId（uid）和 studentDisplayId，
+ *   查詢時用 studentDisplayId 才能跨 UID 追蹤同一位學生。
+ */
 export class PerformanceTracker {
   private wordRepository = new FirestoreWordRepository();
 
@@ -24,11 +31,11 @@ export class PerformanceTracker {
   /**
    * 取得學生近期的表現指標
    *
-   * @param studentId Firebase UID
+   * @param displayId Firebase UID
    * @param currentLevel 當前等級（用於計算 attemptsInCurrentLevel）
    */
   async getRecentMetrics(
-    studentId: string,
+    displayId: string,
     currentLevel: number
   ): Promise<PerformanceMetrics> {
     // ============================================================
@@ -37,7 +44,7 @@ export class PerformanceTracker {
     const attemptsRef = collection(db, 'attempts');
     const q = query(
       attemptsRef,
-      where('studentId', '==', studentId),
+      where('displayId', '==', displayId),
       orderBy('timestamp', 'desc'),
       limit(PerformanceTracker.WINDOW_SIZE)
     );

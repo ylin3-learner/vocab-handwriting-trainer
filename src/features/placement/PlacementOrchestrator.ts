@@ -113,6 +113,18 @@ export class PlacementOrchestrator implements QuizSessionApi {
         return this.deps.now ? this.deps.now() : new Date();
     }
 
+    /**
+     * 取得學生的複合識別碼（displayId）。
+     *
+     * 用途：作為 learningState 的 key（跨 UID 持續追蹤）。
+     */
+    private getDisplayId(): string {
+        if (this.className && this.deps.studentName && this.deps.studentSeatNumber) {
+            return `${this.className}_${this.deps.studentSeatNumber}_${this.deps.studentName}`;
+        }
+        return this.studentId;
+    }
+
     // ============================================================
     // QuizSessionApi 實作
     // ============================================================
@@ -121,6 +133,7 @@ export class PlacementOrchestrator implements QuizSessionApi {
         console.log('═══════════════════════════════════════');
         console.log(`🎯 [PlacementOrchestrator.init] 開始程度鑑定`);
         console.log(`   學生：${this.studentId}，班級：${this.className || '（未填）'}`);
+        console.log(`   displayId：${this.getDisplayId()}`);
         console.log(`   起始等級：L${this.currentLevel}`);
         console.log('═══════════════════════════════════════');
 
@@ -143,7 +156,7 @@ export class PlacementOrchestrator implements QuizSessionApi {
         if (this.currentLevelAttempts >= QUESTIONS_PER_LEVEL) {
             const decision = this.decideNextStep();
 
-            // 🔥 由 newLevel 推導 action
+            // 由 newLevel 推導 action
             const stepAction: 'promote' | 'demote' | 'stop' =
                 decision.isFinal
                     ? 'stop'
@@ -167,7 +180,6 @@ export class PlacementOrchestrator implements QuizSessionApi {
             this.currentLevelCorrect = 0;
             this.currentLevelWords = [];
         }
-
 
         // 12 題上限
         if (this.pendingAttempts.length >= MAX_TOTAL_QUESTIONS) {
@@ -222,10 +234,8 @@ export class PlacementOrchestrator implements QuizSessionApi {
         const now = this.getNow();
         const currentState = this.stateCache.get(wordId) ?? createInitialReviewState();
 
-        const studentDisplayId =
-            this.className && this.deps.studentName && this.deps.studentSeatNumber
-                ? `${this.className}_${this.deps.studentSeatNumber}_${this.deps.studentName}`
-                : undefined;
+        const displayId = this.getDisplayId();
+        const studentDisplayId = displayId !== this.studentId ? displayId : undefined;
 
         // 純運算
         const processed = this.answerProcessor.process({
@@ -313,10 +323,10 @@ export class PlacementOrchestrator implements QuizSessionApi {
         } catch (e) {
             console.error('❌ [Placement] 原子性寫入失敗，嘗試 fallback:', e);
 
-            // Fallback：至少把關鍵狀態寫入（不用 batch）
+            // Fallback：至少把關鍵狀態寫入
             try {
                 await this.studentStateService.markPlacementDone(
-                    this.studentId,
+                    this.getDisplayId(),
                     finalLevel,
                     history
                 );
@@ -401,9 +411,11 @@ export class PlacementOrchestrator implements QuizSessionApi {
     ): Promise<void> {
         const batch = writeBatch(db);
         const now = this.getNow().toISOString();
+        const displayId = this.getDisplayId();
 
         // ============================================================
-        // 1. learningState
+        // 1. learningState → studentStates/{displayId}
+        //    （整個文件就是 state，沒有 learningState 外層）
         // ============================================================
         const levelHistoryEntry: LevelHistoryEntry = {
             level: finalLevel,
@@ -413,15 +425,13 @@ export class PlacementOrchestrator implements QuizSessionApi {
         };
 
         batch.set(
-            doc(db, 'students', this.studentId),
+            doc(db, 'studentStates', displayId),
             {
-                learningState: {
-                    currentLevel: finalLevel,
-                    placementDone: true,
-                    placementHistory: history,
-                    totalAttempts: increment(this.pendingAttempts.length),
-                    levelHistory: arrayUnion(levelHistoryEntry),
-                },
+                currentLevel: finalLevel,
+                placementDone: true,
+                placementHistory: history,
+                totalAttempts: increment(this.pendingAttempts.length),
+                levelHistory: arrayUnion(levelHistoryEntry),
             },
             { merge: true }
         );
@@ -437,6 +447,7 @@ export class PlacementOrchestrator implements QuizSessionApi {
         // 3. SM-2 狀態（含答對與答錯的字）
         //    答對：everWrong = false（不進複習池，但記為「已見過」）
         //    答錯：everWrong = true（進複習池）
+        //    （保留按 uid 儲存，因為 SM-2 進度本身與裝置綁定較合理）
         // ============================================================
         for (const [wordId, state] of this.stateCache) {
             batch.set(

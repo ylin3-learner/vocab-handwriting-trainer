@@ -3,7 +3,7 @@ import React, { useState, lazy, Suspense, useEffect } from 'react';
 import { StudentLogin } from './features/login/StudentLogin';
 import { TeacherLogin } from './features/login/TeacherLogin';
 import { QuizScreen } from './features/quiz/QuizScreen';
-import { QuizOrchestrator } from './features/quiz/QuizOrchestrator';
+import { QuizSessionApi } from './features/quiz/QuizSessionApi';
 import { AppHeader, AppMode } from './features/common/AppHeader';
 import { useAuth } from './contexts/AuthContext';
 import { subscribeQuotaStatus } from './services/status/quotaMonitor';
@@ -53,7 +53,7 @@ const QuotaBanner: React.FC = () => (
 );
 
 export const App: React.FC = () => {
-  const [orchestrator, setOrchestrator] = useState<QuizOrchestrator | null>(null);
+  const [orchestrator, setOrchestrator] = useState<QuizSessionApi | null>(null);
   const [mode, setMode] = useState<AppMode>('login');
   const [pendingTarget, setPendingTarget] = useState<AppMode | null>(null);
 

@@ -7,6 +7,9 @@ import { InMemoryWordRepository } from '../../services/wordRepository/InMemoryWo
 import { HybridProgressStore } from '../../services/storage/HybridProgressStore';
 import { ProfileService } from '../../services/profile/ProfileService';
 import { QuizOrchestrator } from '../quiz/QuizOrchestrator';
+import { PlacementOrchestrator } from '../placement/PlacementOrchestrator';
+import { StudentStateService } from '../../services/progression/StudentStateService';
+import { QuizSessionApi } from '../quiz/QuizSessionApi';
 import type { Word } from '../../types/word';
 import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
 
@@ -19,7 +22,7 @@ const FALLBACK_WORDS: Word[] = [
 ];
 
 interface StudentLoginProps {
-  onStart: (orchestrator: QuizOrchestrator) => void;
+  onStart: (orchestrator: QuizSessionApi) => void;
 }
 
 export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
@@ -94,24 +97,38 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
         repo = new InMemoryWordRepository(FALLBACK_WORDS);
       }
 
-      // ===== 步驟 4：建立測驗流程 =====
-      const store = new HybridProgressStore(uid);
-      const orchestrator = new QuizOrchestrator(
-        uid,
-        className.trim(),
-        {
+      // ===== 步驟 4：讀取鑑定狀態，決定使用哪個 Orchestrator =====
+      const stateService = new StudentStateService();
+      const placementStatus = await stateService.getPlacementStatus(displayId);
+      console.log(
+        `📋 [StudentLogin] 鑑定狀態：needsPlacement=${placementStatus.needsPlacement}, currentLevel=L${placementStatus.currentLevel}`
+      );
+
+      let orchestrator: QuizSessionApi;
+
+      if (placementStatus.needsPlacement) {
+        // 🔥 Placement 模式
+        console.log('🎯 [StudentLogin] 進入程度鑑定模式');
+        orchestrator = new PlacementOrchestrator(uid, className.trim(), {
+          wordRepository: repo,
+          timeLimitMs: 8000,
+          studentName: studentName.trim(),
+          studentSeatNumber: seatNumber.trim(),
+        });
+      } else {
+        // 🔥 正常練習模式
+        console.log('📚 [StudentLogin] 進入正常練習模式');
+        const store = new HybridProgressStore(uid);
+        orchestrator = new QuizOrchestrator(uid, className.trim(), {
           wordRepository: repo,
           progressStore: store,
-          timeLimitMs: 8000, // 統一 8 秒
+          timeLimitMs: 8000,
           defaultDailyMaxQuota: RECOMMENDED_MIN_QUOTA,
           defaultDailyNewQuota: 3,
           studentName: studentName.trim(),
           studentSeatNumber: seatNumber.trim(),
-        }
-      );
-
-      // 注意：learningState 的初始化已由 orchestrator.init() 內部處理，
-      // 不需要在這裡額外呼叫 StudentStateService
+        });
+      }
 
       await orchestrator.init();
       onStart(orchestrator);
