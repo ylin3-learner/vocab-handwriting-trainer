@@ -21,6 +21,7 @@ export interface ReviewState {
   totalReviews: number;
   lastReviewed: string | null;     // ISO 字串,尚未複習過為 null
   nextReviewDate: string | null;
+  everWrong?: boolean; // 是否曾被答錯過（決定是否進入複習池）
 }
 
 // 建立一個從未複習過的初始狀態,新單字第一次出現時使用
