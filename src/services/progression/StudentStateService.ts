@@ -1,5 +1,5 @@
 // src/services/progression/StudentStateService.ts
-import { doc, getDoc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, increment } from 'firebase/firestore';
 import { db } from '../../firebase';
 import {
   StudentLearningState,
@@ -103,6 +103,19 @@ export class StudentStateService {
     const ref = this.getDocRef(studentId);
     await updateDoc(ref, {
       'learningState.lastEvaluatedAtTotalAttempts': totalAttempts,
+    });
+  }
+
+  /**
+   * 學生答題後累加總題數。
+   *
+   * 這應該在每次 submitAnswer 時呼叫，確保跨 session 的題數精確累計。
+   * 使用 Firestore 的 `increment` 原子操作，避免併發覆蓋。
+   */
+  async incrementTotalAttempts(studentId: string): Promise<void> {
+    const ref = this.getDocRef(studentId);
+    await updateDoc(ref, {
+      'learningState.totalAttempts': increment(1),
     });
   }
 }
