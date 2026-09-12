@@ -8,7 +8,7 @@ import { FirestoreWordRepository } from '../wordRepository/FirestoreWordReposito
 import { analyzeStudent } from '../../domain/analytics/studentAnalyzer';
 import { StudentAnalytics } from '../../types/analytics';
 import { Word } from '../../types/word';
-import { DailySnapshot } from '../../types/dailySnapshot'; // 🔥 需求 C
+import { DailySnapshot } from '../../types/dailySnapshot';
 
 // 定義學生統計資料結構
 export interface StudentStat {
@@ -154,14 +154,16 @@ export class AnalyticsService {
     /**
      * 取得單一學生的完整個人化分析
      *
-     * 讀取策略：
-     *   1. 用 studentDisplayId 查 attempts（新資料）；查不到 fallback 用 studentId
-     *   2. 取得 student profile（含 currentLevel）
-     *   3. 批次取得弱點單字的 Word 物件
-     *   4. 🔥 需求 C：讀取 dailySnapshots
-     *   5. 用完整的 wordMap 重新分析
+     * 🔥 參數的 studentId 實際上是 displayId（例如 "709_1_林佑綸"），
+     *    因為呼叫端（TeacherDashboard）傳入的是學生列表的 id。
      *
-     * 總計：3~4 次 Firestore 讀取（O(1)，與班級人數無關）
+     * 讀取策略：
+     *   1. 用 studentDisplayId 查 attempts
+     *   2. 從 studentStates/{displayId} 讀取 currentLevel
+     *   3. 從 classStats 反查 name/class
+     *   4. 批次取得弱點單字的 Word 物件
+     *   5. 從 studentStates/{displayId}/dailySnapshots 讀取每日快照
+     *   6. 用完整的 wordMap 重新分析
      */
     async getStudentDetail(studentId: string): Promise<StudentAnalytics> {
         // ============================================================
@@ -185,40 +187,42 @@ export class AnalyticsService {
         console.log(`📊 [AnalyticsService] "${studentId}" → 找到 ${attempts.length} 筆 attempts`);
 
         // ============================================================
-        // 步驟 2：取得 student profile（含 currentLevel）
-        // 🔥 需求 B：順便取出 learningState.currentLevel
+        // 步驟 2：取得 profile
+        //   🔥 currentLevel 從 studentStates/{displayId} 讀取
+        //   🔥 name/class 從 classStats 反查（因為 students/{uid} 無法用 displayId 查）
         // ============================================================
         let profile = {
             studentId,
             name: studentId,
             className: '未分類',
-            currentLevel: 1, // 🔥
+            currentLevel: 1,
         };
 
-        const directStudentDoc = await getDoc(doc(db, 'students', studentId));
-        if (directStudentDoc.exists()) {
-            const data = directStudentDoc.data();
-            profile = {
-                studentId,
-                name: data.name || studentId,
-                className: data.class || '未分類',
-                currentLevel: data.learningState?.currentLevel ?? 1, // 🔥
-            };
-        } else {
-            // Fallback：從 classStats 反查
+        // 2.1：讀取 studentStates/{displayId}
+        try {
+            const stateDoc = await getDoc(doc(db, 'studentStates', studentId));
+            if (stateDoc.exists()) {
+                const data = stateDoc.data();
+                profile.currentLevel = data.currentLevel ?? 1;
+                console.log(`✅ [AnalyticsService] 從 studentStates 讀到 L${profile.currentLevel}`);
+            }
+        } catch (e) {
+            console.warn('⚠️ [AnalyticsService] 讀取 studentStates 失敗:', e);
+        }
+
+        // 2.2：從 classStats 反查 name/class
+        try {
             const classStats = await this.classStatsService.getAllClassStats();
             for (const cs of classStats) {
                 if (cs.students && cs.students[studentId]) {
                     const s = cs.students[studentId];
-                    profile = {
-                        studentId,
-                        name: s.name || studentId,
-                        className: cs.className,
-                        currentLevel: 1, // classStats 沒有等級，fallback
-                    };
+                    profile.name = s.name || studentId;
+                    profile.className = cs.className;
                     break;
                 }
             }
+        } catch (e) {
+            console.warn('⚠️ [AnalyticsService] 讀取 classStats 失敗:', e);
         }
 
         // ============================================================
@@ -241,15 +245,16 @@ export class AnalyticsService {
         }
 
         // ============================================================
-        // 步驟 5：🔥 需求 C：讀取每日快照
+        // 步驟 5：讀取每日快照
+        //   🔥 路徑改為 studentStates/{displayId}/dailySnapshots
         // ============================================================
         let dailySnapshots: DailySnapshot[] = [];
         try {
-            const snapshotsRef = collection(db, 'students', studentId, 'dailySnapshots');
+            const snapshotsRef = collection(db, 'studentStates', studentId, 'dailySnapshots');
             const snapshotsSnap = await getDocs(snapshotsRef);
             dailySnapshots = snapshotsSnap.docs
                 .map(d => d.data() as DailySnapshot)
-                .sort((a, b) => a.date.localeCompare(b.date)); // 按日期升序
+                .sort((a, b) => a.date.localeCompare(b.date));
             console.log(`📸 [AnalyticsService] 讀取 ${dailySnapshots.length} 筆每日快照`);
         } catch (e) {
             console.warn('⚠️ [AnalyticsService] 讀取每日快照失敗（可能尚未建立）:', e);
@@ -259,7 +264,7 @@ export class AnalyticsService {
         // 步驟 6：用完整的 wordMap 重新分析，並塞入 dailySnapshots
         // ============================================================
         const result = analyzeStudent(attempts, profile, wordMap);
-        result.dailySnapshots = dailySnapshots; // 🔥
+        result.dailySnapshots = dailySnapshots;
         return result;
     }
 }
