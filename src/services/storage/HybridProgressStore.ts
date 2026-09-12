@@ -3,6 +3,7 @@ import { ReviewState, createInitialReviewState } from '../../types/word';
 import { ProgressStore, AttemptRecord } from './ProgressStore';
 import { FirestoreProgressStore } from './FirestoreProgressStore';
 import { LocalStorageProgressStore } from './LocalStorageProgressStore';
+import { notifyQuotaExceeded } from '../status/quotaMonitor';
 
 // 待同步操作類型
 type SyncOperation =
@@ -97,6 +98,7 @@ export class HybridProgressStore implements ProgressStore {
         if (errorMessage.includes('quota') || errorMessage.includes('429') || errorCode.includes('resource-exhausted')) {
             if (!this.isCircuitBroken) {
                 console.error('🚨 偵測到 Firebase 配額耗盡！啟動熔斷器，暫停雲端同步 5 分鐘。');
+                notifyQuotaExceeded();
                 this.isCircuitBroken = true;
                 this.circuitBreakerTimeout = window.setTimeout(() => {
                     console.log('🔓 熔斷器解除，恢復雲端同步。');
