@@ -34,14 +34,14 @@ export class LevelProgressionService {
    * 注意：`state.totalAttempts` 由 `QuizOrchestrator.submitAnswer()` 每次答題時
    * 透過 `StudentStateService.incrementTotalAttempts()` 累加，是精確的跨 session 總數。
    *
-   * @param studentId Firebase UID
+   * @param displayId Firebase UID
    * @returns 決策結果（給 UI 顯示用；null 表示未評估）
    */
-  async evaluate(studentId: string): Promise<ProgressionDecision | null> {
+  async evaluate(displayId: string): Promise<ProgressionDecision | null> {
     // ============================================================
     // 步驟 1：讀取當前狀態
     // ============================================================
-    const state = await this.stateService.getState(studentId);
+    const state = await this.stateService.getState(displayId);
     const totalAttempts = state.totalAttempts;
 
     // ============================================================
@@ -66,7 +66,7 @@ export class LevelProgressionService {
     // 步驟 4：取得表現指標
     // ============================================================
     const metrics = await this.tracker.getRecentMetrics(
-      studentId,
+      displayId,
       state.currentLevel
     );
 
@@ -89,7 +89,7 @@ export class LevelProgressionService {
     // 步驟 6：寫回 Firestore
     // ============================================================
     if (decision.action === 'hold') {
-      await this.stateService.markEvaluated(studentId, totalAttempts);
+      await this.stateService.markEvaluated(displayId, totalAttempts);
       return decision;
     }
 
@@ -104,7 +104,7 @@ export class LevelProgressionService {
     };
 
     await this.stateService.updateLevel(
-      studentId,
+      displayId,
       decision.newLevel,
       historyEntry,
       decision.lockUntilAttempts,
@@ -117,12 +117,12 @@ export class LevelProgressionService {
   /**
    * 手動設定等級（例如：老師指派、程度鑑定結果）
    */
-  async setLevelManually(studentId: string, level: number, reason: string): Promise<void> {
+  async setLevelManually(displayId: string, level: number, reason: string): Promise<void> {
     if (level < LevelProgressionService.MIN_LEVEL || level > LevelProgressionService.MAX_LEVEL) {
       throw new Error(`等級必須介於 ${LevelProgressionService.MIN_LEVEL}~${LevelProgressionService.MAX_LEVEL}`);
     }
 
-    const state = await this.stateService.getState(studentId);
+    const state = await this.stateService.getState(displayId);
 
     const historyEntry: LevelHistoryEntry = {
       level,
@@ -132,7 +132,7 @@ export class LevelProgressionService {
     };
 
     await this.stateService.updateLevel(
-      studentId,
+      displayId,
       level,
       historyEntry,
       state.totalAttempts + 30, // 手動設定也鎖 30 題

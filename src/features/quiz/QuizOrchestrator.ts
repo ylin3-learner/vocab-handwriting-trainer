@@ -94,8 +94,21 @@ export class QuizOrchestrator implements QuizSessionApi {
   }
 
   // ============================================================
-  // 🔥 QuizSessionApi 實作
+  // QuizSessionApi 實作
   // ============================================================
+
+  /**
+   * 取得學生的複合識別碼（displayId）。
+   *
+   * 用途：作為 learningState 的 key（跨 UID 持續追蹤）。
+   * 若資料不完整（缺姓名或座號），退回使用 uid。
+   */
+  private getDisplayId(): string {
+    if (this.className && this.deps.studentName && this.deps.studentSeatNumber) {
+      return `${this.className}_${this.deps.studentSeatNumber}_${this.deps.studentName}`;
+    }
+    return this.studentId;
+  }
 
   getDisplayInfo(): SessionDisplayInfo {
     const assignmentName = this.activeAssignment?.assignment.name ?? '每日練習（預設配額）';
@@ -111,19 +124,22 @@ export class QuizOrchestrator implements QuizSessionApi {
   }
 
   // ============================================================
-  // init（邏輯與原本相同，僅抽出 init 步驟）
+  // init
   // ============================================================
 
   async init(): Promise<void> {
     console.log('═══════════════════════════════════════');
     console.log(`🚀 [QuizOrchestrator.init] 開始初始化`);
     console.log(`   學生：${this.studentId}，班級：${this.className || '（未填）'}`);
+    console.log(`   displayId：${this.getDisplayId()}`);
     console.log('═══════════════════════════════════════');
 
-    // 步驟 0：讀取學習狀態
+    const displayId = this.getDisplayId();
+
+    // 步驟 0：讀取學習狀態（使用 displayId）
     try {
-      await this.studentStateService.initializeIfNeeded(this.studentId, 1);
-      const learningState = await this.studentStateService.getState(this.studentId);
+      await this.studentStateService.initializeIfNeeded(displayId, 1);
+      const learningState = await this.studentStateService.getState(displayId);
       this.currentLevel = learningState.currentLevel;
       console.log(`   ✅ 當前等級：L${this.currentLevel}`);
     } catch (e) {
@@ -131,12 +147,14 @@ export class QuizOrchestrator implements QuizSessionApi {
       this.currentLevel = 1;
     }
 
-    // 步驟 0.5：檢查今日快照
+    // 步驟 0.5：檢查今日快照（路徑改為 studentStates/{displayId}）
     const today = this.getNow().toISOString().slice(0, 10);
     try {
       const { getDoc, doc } = await import('firebase/firestore');
       const { db } = await import('../../firebase');
-      const snapDoc = await getDoc(doc(db, 'students', this.studentId, 'dailySnapshots', today));
+      const snapDoc = await getDoc(
+        doc(db, 'studentStates', displayId, 'dailySnapshots', today)
+      );
       if (snapDoc.exists()) {
         this.todaySnapshotDate = today;
         console.log(`   ✅ 今日快照已存在，跳過建立`);
@@ -174,7 +192,7 @@ export class QuizOrchestrator implements QuizSessionApi {
   }
 
   // ============================================================
-  // 內部：建立單字池（從 init 抽出）
+  // 內部：建立單字池
   // ============================================================
   private async buildWordPool(): Promise<void> {
     const K2 = this.dailyNewQuotaRemaining;
@@ -345,14 +363,12 @@ export class QuizOrchestrator implements QuizSessionApi {
 
     const currentState = await this.deps.progressStore.getState(this.studentId, wordId);
 
-    const studentDisplayId =
-      this.className && this.deps.studentName && this.deps.studentSeatNumber
-        ? `${this.className}_${this.deps.studentSeatNumber}_${this.deps.studentName}`
-        : undefined;
+    const displayId = this.getDisplayId();
+    const studentDisplayId = displayId !== this.studentId ? displayId : undefined;
 
     const now = this.getNow();
 
-    // 🔥 使用 AnswerProcessor 純運算
+    // 使用 AnswerProcessor 純運算
     const processed = this.answerProcessor.process({
       word,
       submission,
@@ -414,6 +430,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     try {
       await this.attemptBatcher.commit({
         studentId: this.studentId,
+        studentDisplayId, // 🔥 傳入 displayId
         className: this.className,
         wordId,
         nextState: processed.nextState,
@@ -449,20 +466,21 @@ export class QuizOrchestrator implements QuizSessionApi {
         })
         .catch((error) => console.warn('⚠️ 班級統計更新失敗:', error));
 
+      // 🔥 Fallback 用 displayId
       this.studentStateService
-        .incrementTotalAttempts(this.studentId)
+        .incrementTotalAttempts(displayId)
         .catch((error) => console.warn('⚠️ 累加總題數失敗:', error));
     }
 
     console.log(`✍️ [submitAnswer]「${word.word}」→ ${processed.grading.isCorrect ? '✅ 正確' : '❌ 錯誤'}（quality=${processed.grading.quality}）`);
 
     // ============================================================
-    // 每 10 題評估等級
+    // 每 10 題評估等級（使用 displayId）
     // ============================================================
     let progressionDecision: ProgressionDecision | null = null;
     if (this.sessionAttempts > 0 && this.sessionAttempts % 10 === 0) {
       try {
-        progressionDecision = await this.levelProgressionService.evaluate(this.studentId);
+        progressionDecision = await this.levelProgressionService.evaluate(displayId);
         if (progressionDecision && progressionDecision.action !== 'hold') {
           console.log(`🎉 [submitAnswer] 等級調整：${progressionDecision.action} → L${progressionDecision.newLevel}`);
           this.currentLevel = progressionDecision.newLevel;
