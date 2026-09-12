@@ -1,6 +1,7 @@
 // src/features/quiz/QuizScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { QuizOrchestrator, QuizQuestion } from './QuizOrchestrator';
+import { QuizSessionApi } from './QuizSessionApi';
+import { QuizQuestion } from './QuizOrchestrator';
 import { Countdown } from './Countdown';
 import { HandwritingCanvas, HandwritingCanvasRef } from './HandwritingCanvas';
 
@@ -57,7 +58,7 @@ async function callGoogleIME(trace: number[][][], language: string = 'en'): Prom
 }
 
 interface QuizScreenProps {
-  orchestrator: QuizOrchestrator;
+  orchestrator: QuizSessionApi;
   onSessionEnd: () => void;
 }
 
@@ -79,8 +80,6 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   // 🔥 同步鎖：避免連點提交導致重複 loadNext
   const submitLockRef = useRef<boolean>(false);
 
-  const activeAssignment = orchestrator.getActiveAssignment();
-
   const loadNext = async () => {
     // 🔥 關鍵：先停掉上一題的語音，避免音檔重疊
     if (window.speechSynthesis) {
@@ -91,6 +90,16 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     setDailyProgress(orchestrator.getDailyProgress());
 
     if (!q) {
+      // 🔥 結束時呼叫 finalizeSession（若有實作）
+      // 普通模式：無需實作
+      // Placement 模式：在此執行原子性寫入
+      if (orchestrator.finalizeSession) {
+        try {
+          await orchestrator.finalizeSession();
+        } catch (e) {
+          console.warn('⚠️ finalizeSession 失敗:', e);
+        }
+      }
       setStatus('done');
       return;
     }
@@ -202,9 +211,14 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   };
 
   if (status === 'done') {
+    const displayInfo = orchestrator.getDisplayInfo();
+    const doneMessage = displayInfo.mode === 'placement'
+      ? '🎉 程度鑑定完成！'
+      : '🎉 今日配額已完成！';
+
     return (
       <div style={{ textAlign: 'center', padding: '2rem' }}>
-        <h2>🎉 今日配額已完成！</h2>
+        <h2>{doneMessage}</h2>
         {storageError && (
           <p style={{ color: '#ffc107' }}>⚠️ 部分資料儲存失敗，但已保留在本地，將自動同步</p>
         )}
@@ -219,29 +233,33 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     return <div style={{ padding: '2rem', textAlign: 'center' }}>載入中...</div>;
   }
 
+  // 🔥 用 getDisplayInfo() 驅動頂部資訊列
+  const displayInfo = orchestrator.getDisplayInfo();
+
   return (
     <div style={{ maxWidth: '700px', margin: '0 auto', padding: '1rem' }}>
-      {dailyProgress.max > 0 && (
+      {displayInfo.showProgress && (
         <div style={{
           padding: '0.5rem 1rem',
-          background: activeAssignment ? '#e7f3ff' : '#f0f0f0',
+          background: displayInfo.mode === 'placement' ? '#fff3cd' : '#e7f3ff',
           borderRadius: '6px',
           marginBottom: '1rem',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           fontSize: '0.9rem',
-          border: activeAssignment ? '1px solid #b8daff' : '1px solid #d0d0d0',
+          border: displayInfo.mode === 'placement' ? '1px solid #ffeeba' : '1px solid #b8daff',
         }}>
           <span>
-            📋 <strong>
-              {activeAssignment
-                ? activeAssignment.assignment.name
-                : '每日練習（預設配額）'}
-            </strong>
+            {displayInfo.mode === 'placement' ? '🎯' : '📋'} <strong>{displayInfo.title}</strong>
+            {displayInfo.subtitle && (
+              <span style={{ marginLeft: '0.5rem', color: '#6c757d', fontWeight: 'normal' }}>
+                {displayInfo.subtitle}
+              </span>
+            )}
           </span>
           <span style={{ color: '#6c757d' }}>
-            進度：{dailyProgress.answered} / {dailyProgress.max} 題
+            {displayInfo.progressLabel}：{displayInfo.progressCurrent} / {displayInfo.progressTotal} 題
           </span>
         </div>
       )}
@@ -252,11 +270,6 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
           key={question.word.id}
           durationMs={question.timeLimitMs}
           onTimeout={handleTimeout}
-          onTick={(rem) => {
-            if (rem <= 0 && status === 'answering') {
-              handleTimeout();
-            }
-          }}
         />
       </div>
 
