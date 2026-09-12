@@ -1,6 +1,11 @@
 // src/firebase.ts
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  memoryLocalCache,
+} from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
@@ -16,8 +21,23 @@ const firebaseConfig = {
 // 初始化 Firebase
 const app = initializeApp(firebaseConfig);
 
-// 匯出 Firestore 資料庫實例
-export const db = getFirestore(app);
+// ============================================================
+// 🔥 Firestore 離線持久化
+//
+// - 生產環境：IndexedDB 快取，重複讀取不消耗網路請求
+// - 開發環境：記憶體快取，避免 HMR 與 IndexedDB 衝突
+//
+// 影響：
+//   教師重複查看學生 → 第二次起從快取讀，0 網路請求
+//   學生重複登入     → 單字庫、進度從快取讀
+// ============================================================
+export const db = initializeFirestore(app, {
+  localCache: import.meta.env.PROD
+    ? persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      })
+    : memoryLocalCache(),
+});
 
 // 匯出 Firebase 身份驗證實例
 export const auth = getAuth(app);

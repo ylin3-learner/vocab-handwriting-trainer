@@ -1,6 +1,7 @@
 // src/services/analytics/ClassStatsService.ts
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, increment } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { sanitizeFirestoreId } from '../../domain/string/sanitizeId';
 
 export interface StudentSummary {
   name: string;
@@ -24,9 +25,9 @@ export interface ClassStats {
 
 export interface RecordAttemptParams {
   className: string;
-  studentId: string;           // 匿名 UID（fallback）
+  studentId: string;
   studentName?: string;
-  studentSeatNumber?: string;  // 👈 新增
+  studentSeatNumber?: string;
   wordId: string;
   isCorrect: boolean;
 }
@@ -48,17 +49,17 @@ export class ClassStatsService {
     return snap.docs.map(d => d.data() as ClassStats);
   }
 
-  // 學生作答時呼叫（失敗不影響主流程）
   async recordAttempt(params: RecordAttemptParams): Promise<void> {
     const { className, studentId, studentName, studentSeatNumber, wordId, isCorrect } = params;
 
-    // 班級為空時跳過（無法歸類）
     if (!className || !className.trim()) return;
 
-    // 🔥 用 displayId 當 key，實現跨裝置合併統計
+    // field path 安全化（處理 Mrs.、O.K. 等含 . 的單字）
+    const safeWordId = sanitizeFirestoreId(wordId);
+
     const studentDisplayId = studentName && studentSeatNumber
       ? `${className}_${studentSeatNumber}_${studentName}`
-      : studentId; // fallback：缺資料時用 UID
+      : studentId;
 
     const studentDisplayName = studentName || studentId;
 
@@ -69,7 +70,6 @@ export class ClassStatsService {
       const snap = await getDoc(ref);
 
       if (!snap.exists()) {
-        // 首次建立文件
         const initial: ClassStats = {
           className,
           totalAttempts: 1,
@@ -82,7 +82,7 @@ export class ClassStatsService {
             },
           },
           wordErrors: {
-            [wordId]: {
+            [safeWordId]: {          // 用 safeWordId 當 key
               errorCount: isCorrect ? 0 : 1,
               totalCount: 1,
             },
@@ -93,13 +93,12 @@ export class ClassStatsService {
         return;
       }
 
-      // 已有文件：用 dot notation + increment 原子更新
       await updateDoc(ref, {
         [`students.${studentDisplayId}.name`]: studentDisplayName,
         [`students.${studentDisplayId}.attempts`]: increment(1),
         [`students.${studentDisplayId}.correct`]: increment(isCorrect ? 1 : 0),
-        [`wordErrors.${wordId}.errorCount`]: increment(isCorrect ? 0 : 1),
-        [`wordErrors.${wordId}.totalCount`]: increment(1),
+        [`wordErrors.${safeWordId}.errorCount`]: increment(isCorrect ? 0 : 1),  // 🔥
+        [`wordErrors.${safeWordId}.totalCount`]: increment(1),                  // 🔥
         totalAttempts: increment(1),
         totalCorrect: increment(isCorrect ? 1 : 0),
         lastUpdated: now,

@@ -1,6 +1,7 @@
 // src/features/dashboard/AssignmentManager.tsx
 import React, { useState, useEffect } from 'react';
 import { AssignmentService, Assignment, ReviewFocus } from '../../services/assignment/AssignmentService';
+import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
 
 const service = new AssignmentService();
 
@@ -225,6 +226,18 @@ export const AssignmentManager: React.FC = () => {
               複習題數 K1 = {Math.max(0, form.dailyQuota - Math.floor(form.dailyQuota * form.newRatio))}，
               新詞題數 K2 = {Math.floor(form.dailyQuota * form.newRatio)}
             </small>
+            {form.dailyQuota < RECOMMENDED_MIN_QUOTA && (
+              <div style={{
+                color: '#856404',
+                background: '#fff3cd',
+                padding: '0.4rem 0.75rem',
+                borderRadius: '4px',
+                marginTop: '0.4rem',
+                fontSize: '0.85rem',
+              }}>
+                ⚠️ 每日題數低於建議值 {RECOMMENDED_MIN_QUOTA} 題，學生可能無法在合理時間內看到等級變化。
+              </div>
+            )}
           </div>
 
           <div>

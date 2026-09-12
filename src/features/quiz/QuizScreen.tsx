@@ -138,6 +138,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
       const trace = canvasRef.current?.getTrace() || [];
       if (trace.length > 0 && trace[0] && Array.isArray(trace[0][0]) && trace[0][0].length > 0) {
         const candidates = await callGoogleIME(trace, 'en');
+        console.log('🔍 [IME] 候選字：', candidates);
         if (candidates.length > 0) {
           const exactMatch = candidates.find(
             (cand) => cand.toLowerCase() === question.word.word.toLowerCase()
@@ -147,6 +148,14 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
       }
 
       const elapsedMs = Date.now() - startTimeRef.current;
+      console.log('🔍 [TIMING]', {
+        word: question.word.word,
+        recognizedText,
+        elapsedMs,
+        timedOut: timedOutRef.current,
+        startTime: new Date(startTimeRef.current).toISOString(),
+        now: new Date().toISOString(),
+      });
       const submission = {
         recognizedText,
         elapsedMs,

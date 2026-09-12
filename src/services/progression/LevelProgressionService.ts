@@ -31,19 +31,18 @@ export class LevelProgressionService {
   /**
    * 評估學生是否需要調整等級
    *
+   * 注意：`state.totalAttempts` 由 `QuizOrchestrator.submitAnswer()` 每次答題時
+   * 透過 `StudentStateService.incrementTotalAttempts()` 累加，是精確的跨 session 總數。
+   *
    * @param studentId Firebase UID
-   * @param totalAttemptsFromSession 當前 session 累計的題數
    * @returns 決策結果（給 UI 顯示用；null 表示未評估）
    */
-  async evaluate(
-    studentId: string,
-    totalAttemptsFromSession: number
-  ): Promise<ProgressionDecision | null> {
+  async evaluate(studentId: string): Promise<ProgressionDecision | null> {
     // ============================================================
     // 步驟 1：讀取當前狀態
     // ============================================================
     const state = await this.stateService.getState(studentId);
-    const totalAttempts = state.totalAttempts + totalAttemptsFromSession;
+    const totalAttempts = state.totalAttempts;
 
     // ============================================================
     // 步驟 2：檢查是否仍在鎖定期
@@ -55,7 +54,7 @@ export class LevelProgressionService {
     }
 
     // ============================================================
-    // 步驟 3：檢查是否距離上次評估不足 10 題
+    // 步驟 3：檢查距離上次評估是否足夠
     // ============================================================
     const sinceLastEval = totalAttempts - state.lastEvaluatedAtTotalAttempts;
     if (sinceLastEval < 10) {

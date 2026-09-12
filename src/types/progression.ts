@@ -2,6 +2,16 @@
 // 自適應學習的資料契約
 
 /**
+ * 建議的每日最低練習題數。
+ *
+ * 這個數字來自教學現場經驗：低於此值時，學生需要過多天數才能累積
+ * 足夠的樣本讓 LevelProgressionService 做出可靠的等級評估。
+ *
+ * ⚠️ 這是「建議值」而非「硬性限制」。老師可以設定更低，但應被告知後果。
+ */
+export const RECOMMENDED_MIN_QUOTA = 30;
+
+/**
  * 學生的學習狀態（存在 students/{uid}.learningState）
  */
 export interface StudentLearningState {

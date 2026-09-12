@@ -13,6 +13,9 @@ import { ClassStatsService } from '../../services/analytics/ClassStatsService';
 import { StudentStateService } from '../../services/progression/StudentStateService';
 import { LevelProgressionService } from '../../services/progression/LevelProgressionService';
 import { ProgressionDecision } from '../../types/progression';
+// 🔥 新增
+import { AttemptBatcher } from '../../services/storage/AttemptBatcher';
+import { LocalStorageProgressStore } from '../../services/storage/LocalStorageProgressStore';
 
 export interface QuizQuestion {
   word: Word;
@@ -68,6 +71,10 @@ export class QuizOrchestrator {
   private currentLevel: number = 1;
   private sessionAttempts: number = 0; // 本 session 累計的作答數
 
+  // 🔥 writeBatch 合併
+  private attemptBatcher: AttemptBatcher;
+  private localStore: LocalStorageProgressStore;
+
   constructor(studentId: string, className: string, deps: QuizOrchestratorDeps) {
     this.studentId = studentId;
     this.className = className;
@@ -76,6 +83,8 @@ export class QuizOrchestrator {
     this.assignmentService = new AssignmentService();
     this.studentStateService = new StudentStateService();
     this.levelProgressionService = new LevelProgressionService();
+    this.attemptBatcher = new AttemptBatcher();
+    this.localStore = new LocalStorageProgressStore();
   }
 
   /** 🔥 取得當前等級（供 UI 顯示） */
@@ -89,7 +98,7 @@ export class QuizOrchestrator {
     console.log(`   學生：${this.studentId}，班級：${this.className || '（未填）'}`);
     console.log('═══════════════════════════════════════');
 
-    // ===== 步驟 0：讀取學習狀態（🔥 Stage 3 新增） =====
+    // ===== 步驟 0：讀取學習狀態 =====
     console.log('📋 [步驟 0] 讀取學習狀態...');
     try {
       await this.studentStateService.initializeIfNeeded(this.studentId, 1);
@@ -140,10 +149,9 @@ export class QuizOrchestrator {
 
     console.log(`📊 [步驟 3] 池子大小：複習目標 ${reviewPoolSize}，新詞目標 ${newPoolSize}`);
 
-    // ===== 步驟 4：挑選複習候選（🔥 Stage 3：只取當前 level 的到期字） =====
+    // ===== 步驟 4：挑選複習候選 =====
     const allStates = Array.from(this.stateCache.entries());
 
-    // 4.1 已到期的複習單字（依 nextReviewDate 由舊到新）
     const dueStates = allStates
       .filter(([_, state]) => state.lastReviewed && state.nextReviewDate)
       .sort((a, b) => {
@@ -154,7 +162,6 @@ export class QuizOrchestrator {
 
     const dueWordIds = dueStates.slice(0, reviewPoolSize).map(([id]) => id);
 
-    // 4.2 若池子不足，補上「最近學過但未到期」的單字
     let supplementIds: string[] = [];
     if (dueWordIds.length < reviewPoolSize) {
       const supplementPool = allStates
@@ -180,16 +187,14 @@ export class QuizOrchestrator {
       console.log(`   ✅ 載入 ${reviewWords.length} 個複習單字`);
     }
 
-    // ===== 步驟 6：載入新詞候選（🔥 Stage 3：按 level 分配） =====
+    // ===== 步驟 6：載入新詞候選 =====
     console.log('📋 [步驟 6] 載入新詞候選...');
     const excludeIds = new Set(this.stateCache.keys());
 
-    // 🔥 探針題比例：10%
     const probeRatio = 0.1;
     const probeCount = Math.floor(newPoolSize * probeRatio);
     const mainCount = newPoolSize - probeCount;
 
-    // 主體：當前 level
     const mainLevels = [this.currentLevel];
     const mainWords = await this.deps.wordRepository.getNewWordsByLevels(
       excludeIds,
@@ -197,7 +202,6 @@ export class QuizOrchestrator {
       mainCount
     );
 
-    // 探針：當前 level + 1（若已是最高等，往下探）
     const probeLevel = this.currentLevel < 6 ? this.currentLevel + 1 : this.currentLevel;
     const probeExclude = new Set([...excludeIds, ...mainWords.map((w) => w.id)]);
     const probeWords = await this.deps.wordRepository.getNewWordsByLevels(
@@ -206,7 +210,6 @@ export class QuizOrchestrator {
       probeCount
     );
 
-    // 保底：若主體不足，用當前 level - 1 補
     let fallbackWords: Word[] = [];
     if (mainWords.length + probeWords.length < newPoolSize && this.currentLevel > 1) {
       const fallbackExclude = new Set([
@@ -259,7 +262,6 @@ export class QuizOrchestrator {
       return null;
     }
 
-    // 優先從「今天還沒出過」的單字中選
     const availableWords = this.words.filter((w) => !this.askedToday.has(w.id));
     const usingPool = availableWords.length > 0 ? availableWords : this.words;
     const isReusing = availableWords.length === 0;
@@ -295,7 +297,6 @@ export class QuizOrchestrator {
 
     this.askedToday.add(selectedId);
 
-    // 🔥 判斷是否為探針題（來自 L+1）
     const wordLevel = Number(word.level ?? '0');
     const isProbe = wordLevel > this.currentLevel;
 
@@ -356,20 +357,11 @@ export class QuizOrchestrator {
 
     const nextState = mergeSM2ResultWithState(currentState, scheduling, now);
 
-    // 儲存進度（fire-and-forget）
-    this.deps.progressStore
-      .saveState(this.studentId, wordId, nextState)
-      .then(() => this.stateCache?.set(wordId, nextState))
-      .catch((error) => {
-        console.warn('⚠️ 儲存進度失敗:', error);
-        this.stateCache?.set(wordId, nextState);
-      });
-
-    // 記錄作答（fire-and-forget）
+    // 建立 attempt 紀錄
     const studentDisplayId =
       this.className &&
-      this.deps.studentName &&
-      this.deps.studentSeatNumber
+        this.deps.studentName &&
+        this.deps.studentSeatNumber
         ? `${this.className}_${this.deps.studentSeatNumber}_${this.deps.studentName}`
         : undefined;
 
@@ -388,26 +380,72 @@ export class QuizOrchestrator {
       snapshotInterval: scheduling.nextInterval,
     };
 
-    this.deps.progressStore
-      .recordAttempt(attempt)
-      .catch((error) => {
-        console.warn('⚠️ 記錄作答失敗:', error);
-      });
+    // ============================================================
+    // 🔥 寫入策略：先本地 → 嘗試批次 → 失敗回退
+    // ============================================================
 
-    // 班級統計（fire-and-forget）
-    this.classStatsService
-      .recordAttempt({
-        className: this.className,
+    // Step 1：寫本地（同步、快速，確保離線可用）
+    try {
+      await this.localStore.saveState(this.studentId, wordId, nextState);
+      await this.localStore.recordAttempt(attempt);
+      this.stateCache?.set(wordId, nextState);
+    } catch (e) {
+      console.warn('⚠️ 本地寫入失敗:', e);
+    }
+
+    // Step 2：嘗試批次寫雲端（1 次網路請求完成 4 件事）
+    try {
+      await this.attemptBatcher.commit({
         studentId: this.studentId,
+        className: this.className,
+        wordId,
+        nextState,
+        attempt,
+        isCorrect: grading.isCorrect,
         studentName: this.deps.studentName,
         studentSeatNumber: this.deps.studentSeatNumber,
-        wordId,
-        isCorrect: grading.isCorrect,
-      })
-      .catch((error) => {
-        console.warn('⚠️ 班級統計更新失敗:', error);
       });
+    } catch (batchError) {
+      // Step 3：批次失敗 → 回退到個別寫入（走 HybridProgressStore，會加入同步佇列）
+      console.warn('⚠️ 批次寫入失敗，回退到個別寫入:', batchError);
 
+      this.deps.progressStore
+        .saveState(this.studentId, wordId, nextState)
+        .then(() => this.stateCache?.set(wordId, nextState))
+        .catch((error) => {
+          console.warn('⚠️ 儲存進度失敗:', error);
+          this.stateCache?.set(wordId, nextState);
+        });
+
+      this.deps.progressStore
+        .recordAttempt(attempt)
+        .catch((error) => {
+          console.warn('⚠️ 記錄作答失敗:', error);
+        });
+
+      this.classStatsService
+        .recordAttempt({
+          className: this.className,
+          studentId: this.studentId,
+          studentName: this.deps.studentName,
+          studentSeatNumber: this.deps.studentSeatNumber,
+          wordId,
+          isCorrect: grading.isCorrect,
+        })
+        .catch((error) => {
+          console.warn('⚠️ 班級統計更新失敗:', error);
+        });
+
+      this.studentStateService
+        .incrementTotalAttempts(this.studentId)
+        .catch((error) => {
+          console.warn('⚠️ 累加總題數失敗:', error);
+        });
+    }
+
+    // ============================================================
+    // 更新本地計數
+    // ============================================================
     this.dailyAnsweredCount += 1;
     this.sessionAttempts += 1;
     if (grading.isCorrect) {
@@ -424,13 +462,9 @@ export class QuizOrchestrator {
     let progressionDecision: ProgressionDecision | null = null;
     if (this.sessionAttempts > 0 && this.sessionAttempts % 10 === 0) {
       try {
-        progressionDecision = await this.levelProgressionService.evaluate(
-          this.studentId,
-          this.sessionAttempts
-        );
+        progressionDecision = await this.levelProgressionService.evaluate(this.studentId);
         if (progressionDecision && progressionDecision.action !== 'hold') {
           console.log(`🎉 [submitAnswer] 等級調整：${progressionDecision.action} → L${progressionDecision.newLevel}`);
-          // 更新本地快取
           this.currentLevel = progressionDecision.newLevel;
         }
       } catch (e) {

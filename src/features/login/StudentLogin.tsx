@@ -8,6 +8,7 @@ import { HybridProgressStore } from '../../services/storage/HybridProgressStore'
 import { ProfileService } from '../../services/profile/ProfileService';
 import { QuizOrchestrator } from '../quiz/QuizOrchestrator';
 import type { Word } from '../../types/word';
+import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
 
 const FALLBACK_WORDS: Word[] = [
   { id: 'apple', word: 'apple', meaning: '蘋果', sentence: 'I eat an apple every day.' },
@@ -102,7 +103,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
           wordRepository: repo,
           progressStore: store,
           timeLimitMs: 8000, // 統一 8 秒
-          defaultDailyMaxQuota: 10,
+          defaultDailyMaxQuota: RECOMMENDED_MIN_QUOTA,
           defaultDailyNewQuota: 3,
           studentName: studentName.trim(),
           studentSeatNumber: seatNumber.trim(),
