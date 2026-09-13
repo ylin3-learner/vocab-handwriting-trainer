@@ -8,6 +8,13 @@ import { HandwritingCanvas, HandwritingCanvasRef } from './HandwritingCanvas';
 const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 120;
 
+/**
+ * cancel() 後等待的毫秒數。
+ * Chrome 的 speechSynthesis.cancel() 是非同步的，
+ * 立刻 speak() 可能被忽略或排在舊語音之後，造成殘留。
+ */
+const SPEECH_CANCEL_DELAY_MS = 100;
+
 async function callGoogleIME(trace: number[][][], language: string = 'en'): Promise<string[]> {
   const scaledTrace = trace.map(stroke => {
     const xs = (stroke[0] || []).map(x => x * CANVAS_WIDTH);
@@ -77,22 +84,70 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   const timedOutRef = useRef<boolean>(false);
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const canvasRef = useRef<HandwritingCanvasRef>(null);
-  // 🔥 同步鎖：避免連點提交導致重複 loadNext
   const submitLockRef = useRef<boolean>(false);
 
-  const loadNext = async () => {
-    // 🔥 關鍵：先停掉上一題的語音，避免音檔重疊
+  // 🔥 防止 React StrictMode 在 dev 模式觸發 useEffect 兩次
+  const hasInitializedRef = useRef<boolean>(false);
+
+  // 🔥 防止過期的 speakWord 呼叫仍在播放語音
+  const speechIdRef = useRef<number>(0);
+
+  /** 取消所有語音播放（同步呼叫） */
+  const cancelSpeech = () => {
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+  };
+
+  /**
+   * 播放單字 + 英文例句。
+   *
+   * 修復點：
+   *   1. 純英文格式（en-US），避免中文標點被英文引擎誤讀
+   *   2. cancel() 後等 SPEECH_CANCEL_DELAY_MS 讓 queue 真的清空
+   *   3. 用 speechIdRef 檢查：如果已經有更新的呼叫，跳過
+   */
+  const speakWord = async (word: string, sentence: string) => {
+    const myId = ++speechIdRef.current;
+
+    if (!window.speechSynthesis) return;
+
+    window.speechSynthesis.cancel();
+    await new Promise(resolve => setTimeout(resolve, SPEECH_CANCEL_DELAY_MS));
+
+    // 若有更新的呼叫進來，跳過（避免過期語音繼續播放）
+    if (myId !== speechIdRef.current) {
+      console.log(`🔇 [speakWord] 跳過過期語音：${word}`);
+      return;
+    }
+    if (!window.speechSynthesis) return;
+
+    // 純英文格式：單字 + 句號停頓 + 例句
+    const text = `${word}. ${sentence}`;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.85;
+
+    utterance.onerror = (e) => {
+      if (e.error !== 'interrupted') {
+        console.warn('🔇 語音播放錯誤:', e.error);
+      }
+    };
+
+    console.log(`🔊 [speakWord] 播放：${word}`);
+    speechRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const loadNext = async () => {
+    // 先停掉上一題的語音
+    cancelSpeech();
 
     const q = await orchestrator.nextQuestion();
     setDailyProgress(orchestrator.getDailyProgress());
 
     if (!q) {
-      // 🔥 結束時呼叫 finalizeSession（若有實作）
-      // 普通模式：無需實作
-      // Placement 模式：在此執行原子性寫入
       if (orchestrator.finalizeSession) {
         try {
           await orchestrator.finalizeSession();
@@ -111,30 +166,28 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     setStatus('answering');
     startTimeRef.current = Date.now();
     timedOutRef.current = false;
-    submitLockRef.current = false; // 重置鎖
+    submitLockRef.current = false;
 
-    if (window.speechSynthesis) {
-      const utterance = new SpeechSynthesisUtterance(
-        `${q.word.word}。例句：${q.word.sentence}`
-      );
-      utterance.lang = 'zh-TW';
-      utterance.rate = 0.8;
-      speechRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
-    }
+    // 播放語音
+    await speakWord(q.word.word, q.word.sentence);
   };
 
   useEffect(() => {
+    // 🔥 防止 StrictMode 雙重觸發
+    if (hasInitializedRef.current) {
+      console.log('⚠️ [QuizScreen] useEffect 被觸發第二次，跳過');
+      return;
+    }
+    hasInitializedRef.current = true;
+
     loadNext();
+
     return () => {
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
+      cancelSpeech();
     };
   }, []);
 
   const handleSubmit = async () => {
-    // 🔥 同步鎖：立即鎖定，避免連點
     if (submitLockRef.current) return;
     if (status !== 'answering' || !question) return;
 
@@ -190,20 +243,19 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
       setResult({ correct: isCorrect, message });
 
-      // 🔥 從 2000ms 縮短為 1200ms，使用者體驗更流暢
       setTimeout(() => loadNext(), 1200);
     } catch (error) {
       console.error('提交錯誤:', error);
       setResult({ correct: false, message: '發生錯誤，請重試' });
       setStatus('answering');
-      submitLockRef.current = false; // 失敗時解鎖
+      submitLockRef.current = false;
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleTimeout = () => {
-    if (timedOutRef.current) return; // 避免重複觸發
+    if (timedOutRef.current) return;
     timedOutRef.current = true;
     if (question && status === 'answering') {
       handleSubmit();
@@ -233,7 +285,6 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     return <div style={{ padding: '2rem', textAlign: 'center' }}>載入中...</div>;
   }
 
-  // 🔥 用 getDisplayInfo() 驅動頂部資訊列
   const displayInfo = orchestrator.getDisplayInfo();
 
   return (

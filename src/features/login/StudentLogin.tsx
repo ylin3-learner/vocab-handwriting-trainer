@@ -33,16 +33,14 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
   const [isLoading, setIsLoading] = useState(false);
 
   const unlockSpeech = () => {
-    if (window.speechSynthesis) {
-      try {
-        const utterance = new SpeechSynthesisUtterance(' ');
-        utterance.volume = 0;
-        window.speechSynthesis.speak(utterance);
-        window.speechSynthesis.cancel();
-        console.log('✅ 語音引擎已解鎖');
-      } catch (e) {
-        console.log('語音功能不可用');
-      }
+    if (!window.speechSynthesis) return;
+    try {
+      // 用 getVoices() 熱身：不發出任何聲音，但觸發引擎初始化
+      // 這樣就不會在 queue 裡留下任何殘留 utterance
+      const voices = window.speechSynthesis.getVoices();
+      console.log(`✅ 語音引擎已解鎖（可用語音 ${voices.length} 個）`);
+    } catch (e) {
+      console.log('語音功能不可用');
     }
   };
 
@@ -86,7 +84,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
         studentName.trim(),
         uid  // fallback（理論上不會用到，因為三欄都必填）
       );
-      
+
       console.log(`✅ [StudentLogin] Profile 已儲存：${displayId}`);
 
       // ===== 步驟 3：建立 WordRepository =====
