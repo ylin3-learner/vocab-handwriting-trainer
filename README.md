@@ -1,119 +1,211 @@
-# Vocab Handwriting Trainer
+# 📖 Vocabulary King Trainer (英語單字王比賽訓練系統)
 
-[繁體中文版 README](./README.zh-TW.md)
+An adaptive, offline-friendly vocabulary training platform built to help a small cohort of
+middle-school students prepare for a live English vocabulary competition ("英語單字王比賽").
+The system pairs a spaced-repetition engine (SM-2) with speech prompts, handwriting capture
+and recognition, and a teacher analytics dashboard — while staying simple enough that a
+non-technical teacher can update the word bank by dragging a spreadsheet into GitHub.
 
-A handwriting-based English vocabulary practice system built for middle school students. Teachers upload a vocabulary bank and assign practice sets; students write their answers by hand on a tablet; the system automatically recognizes, grades, and schedules reviews — with a teacher dashboard showing class-wide learning data.
+> This README documents the full engineering history of the project: the competition rules
+> that shaped the design, the architecture decisions, the data contracts, and the staged
+> development roadmap (Stage 0 → Stage 7).
 
-This project was built to replace self-reported spelling drills (where students can under-report mistakes) with objective, handwriting-based assessment that mirrors real spelling-bee conditions: the teacher reads a word and a sentence aloud, the student has a fixed time window to write the answer from memory, and the system judges the result exactly — no self-grading, no partial credit.
+---
 
-## ✨ Features
+## 🏆 Why this exists
 
-- **Handwriting recognition** — Google Input Tools API, full-word recognition
-- **Spaced repetition (SM-2)** — smart scheduling of review timing based on objectively measured accuracy and response time (not student self-rating)
-- **Top-K candidate pool** — dramatically reduces Firestore reads (99%+) by keeping the active review set small instead of querying the whole word bank every time
-- **Assignment distribution** — teachers can set daily quotas, the new-word/review-word ratio, and review focus per class or per student
-- **Teacher dashboard** — class progress, at-risk students, and weak-word analysis
-- **Offline-first** — local `localStorage` cache with background cloud sync, so a flaky classroom Wi-Fi connection doesn't interrupt practice
-- **Role-based access** — Firebase Auth + Firestore security rules separating teacher and student permissions
+The target competition scores students across **five rounds of 10 words each**, drawn from a
+lottery of question slips. A foreign teacher reads a word and an example sentence, students
+have **8 seconds** to write the answer on a whiteboard, and any correction/erasure on the
+board is treated as an automatic wrong answer. Students who fail a round leave their seats;
+scoring above 31/50 words correct earns a formal ranking.
 
-## 🛠️ Tech Stack
+That format — timed dictation, strict handwriting, elimination pressure — is the reason this
+project centers on:
 
-| Layer | Technology |
-| :--- | :--- |
-| Frontend | TypeScript + React + Vite |
-| Backend | Firebase Firestore + Firebase Auth |
-| Handwriting recognition | Google Input Tools API |
-| Text-to-speech | Web Speech API |
-| Deployment | GitHub Pages |
+- **Spaced repetition** so practice time is spent on words a student is actually weak on,
+  not words they already know.
+- **Timed handwriting capture**, mirroring the "write in N seconds, no corrections allowed"
+  rule of the real competition.
+- **Objective, non-self-reported grading** — a student never rates their own answer; the
+  system grades from recognized text vs. the correct spelling and elapsed time.
+- **A teacher dashboard** that surfaces class-wide weak points without requiring the teacher
+  to manually tally results.
 
-## 📁 Project Structure
+## ✨ Key Features
+
+| Area | Feature |
+|---|---|
+| Practice loop | TTS word + sentence prompt → timed handwriting capture → recognition → objective grading → SM-2 scheduling |
+| Spaced repetition | SM-2 algorithm, adapted from an earlier GRE vocabulary SRS project |
+| Handwriting | Canvas capture + pluggable recognition engine (Google IME handwriting API, with a TensorFlow.js/OpenCV.js fallback path) |
+| Word bank management | Teachers upload a `.xlsx` file → schema validation → preview → versioned publish, with zero code changes required |
+| Teacher dashboard | Student overview, at-risk student detection, Top-K weakness analysis, response-time analysis, memory-curve visualization |
+| Roles & auth | Anonymous auth for students, Email/Password for teachers/admins, Firestore security rules enforcing per-role access |
+| Anti-cheat signals | Edit-distance + response-time based "random guessing" detection, flagged separately from genuine spelling mistakes |
+| Performance | Top-K candidate pooling (not full-table scans), pre-aggregated class stats, batched writes — designed to survive Firestore's free-tier quota |
+
+## 🧱 Architecture
+
+The codebase is organized by **Single Responsibility Principle (SRP)**, so that any one piece
+— the recognition engine, the scheduler, the word source — can be swapped without touching
+the others.
 
 ```
 vocab-handwriting-trainer/
 ├── data/
-│   ├── raw/words.xlsx          # Teacher-maintained vocabulary source (single source of truth)
-│   ├── schema/                 # Fixed column contract shared by the converter and the app's types
-│   └── generated/              # Auto-generated words.json + validation report (do not edit by hand)
+│   ├── raw/words.xlsx              # Teacher-maintained source of truth
+│   ├── schema/words.schema.json    # Shared data contract (script + frontend types)
+│   └── generated/words.json        # CI-generated, never hand-edited
+│
+├── scripts/                        # Build-time tools (not shipped to the browser)
+│   ├── convertXlsx.ts              # xlsx → words.json
+│   └── validateSchema.ts           # Field validation with human-readable Chinese errors
+│
 ├── src/
-│   ├── domain/                 # Pure business logic: SM-2, grading, question selection, countdown
-│   ├── services/                # I/O boundary: recognition engine, speech prompter, Firestore sync
-│   ├── features/                # Screens: quiz, login, teacher dashboard
-│   └── types/                   # Shared type definitions matching the data contract
-├── scripts/                     # Build-time Excel → JSON conversion & validation
-├── .github/workflows/           # CI: data conversion + build + deploy
-└── docs/                        # Architecture notes and the Excel data contract
+│   ├── domain/                     # Pure functions only — no DOM, no network, no DB
+│   │   ├── scheduler/sm2.ts        # Spaced-repetition math
+│   │   ├── selection/questionSelector.ts
+│   │   └── grading/grader.ts       # Objective pass/fail + SM-2 "quality" score
+│   │
+│   ├── services/                   # I/O boundary — the only layer allowed to touch the outside world
+│   │   ├── recognition/            # RecognitionEngine interface + swappable implementations
+│   │   ├── audio/SpeechPrompter.ts # Web Speech API
+│   │   ├── storage/                # ProgressStore interface + Firestore implementation
+│   │   └── wordRepository/         # WordRepository interface + Firestore/in-memory implementations
+│   │
+│   ├── features/                   # Screens, organized by user-facing flow
+│   │   ├── quiz/                   # QuizOrchestrator, handwriting canvas, countdown
+│   │   ├── login/                  # Student anonymous login, teacher/admin login
+│   │   └── dashboard/              # Teacher analytics dashboard
+│   │
+│   └── types/word.ts               # Mirrors the Excel schema in TypeScript
+│
+└── docs/
+    ├── data-contract.md
+    └── architecture.md
 ```
 
-See [`docs/architecture.md`](./docs/architecture.md) and [`docs/data-contract.md`](./docs/data-contract.md) for details.
+### Design decisions worth calling out
 
-## 🚀 Getting Started
+- **Word content vs. learning progress are stored separately.** The Excel file only ever
+  holds *content* (word, meaning, sentence, root, hint, level). SRS state
+  (`reviewInterval`, `easeFactor`, `nextReviewDate`, …) lives in Firestore, keyed by
+  student. This means a teacher can publish a new word list without wiping out anyone's
+  review history.
+- **Grading never trusts the user.** `grader.ts` computes an objective `quality` score
+  (0–5) purely from recognized text vs. correct answer and elapsed time vs. time limit.
+  `sm2.ts` never sees raw user input — only that pre-computed score. This mirrors the real
+  competition, where a whiteboard is judged by a human referee, not self-reported.
+- **Recognition is fully pluggable.** `RecognitionEngine` is an interface; the concrete
+  implementation is chosen at runtime by a lightweight device-capability benchmark, and
+  inference runs in a Web Worker so the handwriting canvas never drops frames while a model
+  is thinking.
+- **Candidate pools, not full scans.** Early versions loaded a student's entire review
+  history on login, which blew through Firestore's free-tier read quota (7,000+ reads at
+  once). The fix: Top-K candidate pooling (`getReviewCandidates(limit)` /
+  `getNewCandidates(limit)`), pre-aggregated `classStats` documents for the teacher
+  dashboard, and batched writes for large word-bank uploads.
+- **Question selection avoids "stuck on one word."** An earlier bug caused the selector to
+  loop over the same 2–3 words once a student exhausted their small pool of due reviews.
+  The fix combines: a same-day "asked" set, a candidate pool sized as a multiple of the
+  daily quota (not equal to it), backfilling with recently-studied-but-not-yet-due words,
+  and an ε-greedy exploration term so no single word can get "stuck" at zero selection
+  weight.
 
-### Prerequisites
+## 🔐 Roles & Authentication
 
-- Node.js 18+
-- A Firebase project (the free Spark plan is enough)
+| Role | Auth method | Access |
+|---|---|---|
+| `student` | Firebase Anonymous Auth (automatic, zero friction) | Login/quiz screens only |
+| `teacher` | Email/Password | Login/quiz + dashboard + assignment management |
+| `admin` | Email/Password | Everything a teacher can do, **plus** word-bank upload/publish |
 
-### 1. Install dependencies
+Firestore security rules are the actual enforcement layer — UI-level hiding of buttons is a
+convenience, not a security boundary. Students can only write to their own
+`students/{uid}` document; only `teacher`/`admin` roles can write to `vocabulary` and
+`assignments`.
 
-```bash
-npm install
-```
+## 📋 Data Contract
 
-### 2. Configure Firebase
+Teachers only ever touch a `.xlsx` file with these columns:
 
-Copy the example environment file and fill in your Firebase project's web app credentials:
+| Column | Required | Notes |
+|---|---|---|
+| `word` | ✅ | Correct spelling (the answer) |
+| `meaning` | ✅ | Chinese definition |
+| `sentence` | ✅ | Example sentence read aloud during quiz |
+| `root` | – | Word root, for hints |
+| `root_meaning` | – | Root meaning |
+| `hint` | – | Memory aid |
+| `level` | – | Difficulty/grouping tag |
 
-```bash
-cp .env.example .env
-```
+The conversion script only recognizes these column names — extra columns are ignored, and a
+missing required column produces a specific, teacher-readable error (e.g. "Row 5 is missing
+the `meaning` column") rather than a silent failure or a stack trace.
 
-```env
-VITE_FIREBASE_API_KEY=your_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_project_id
-VITE_FIREBASE_APP_ID=your_app_id
-```
+## 🗺️ Development Roadmap
 
-### 3. Add your vocabulary bank
+The project was deliberately staged so that each phase could be validated independently
+before the next began:
 
-Replace `data/raw/words.xlsx` with your own file, following the column contract described in [`docs/data-contract.md`](./docs/data-contract.md) (`word`, `meaning`, `sentence`, plus optional `root`, `root_meaning`, `hint`, `level`). Pushing a new file to this path automatically triggers the conversion workflow.
+| Stage | Goal |
+|---|---|
+| 0 | Lock the data contract (`.xlsx` schema ↔ JSON schema) |
+| 1 | Data pipeline: conversion/validation scripts + CI automation |
+| 2 | Core quiz logic (SM-2, question selection) — validated with **typed input**, deliberately isolated from handwriting recognition risk |
+| 3 | Quiz UI: TTS prompt, countdown, canvas (storage only, no recognition yet) |
+| 4 | Wire up real handwriting recognition; measure accuracy independently |
+| 5 | End-to-end integration: recognition → grading → SM-2 → cloud write |
+| 6-A | Teacher dashboard (read-only: student overview, risk detection, weakness analysis, response time) |
+| 6-B | Word-bank upload, schema validation, preview, versioned publish |
+| 6-C | Memory-curve visualization |
+| 6-D | Performance hardening: Top-K pooling, pre-aggregated stats, batched uploads, composite indexes |
+| 6-E | Firebase Authentication + role-based navigation |
+| 7 | Pilot test with real students on real tablets; collect recognition error cases |
 
-### 4. Run the app locally
+Stage 6-A was deliberately prioritized over 6-B: dashboards are **read-only** and touch
+nothing in the existing quiz flow, while word-bank upload requires rewiring the core
+`WordRepository`, which is the highest-risk refactor in the whole system.
 
-```bash
-npm run dev
-```
+## 🛠️ Tech Stack
 
-### 5. Run tests
+- **Frontend:** TypeScript + Vite (static output, deployable to GitHub Pages)
+- **Data conversion:** Node.js/TypeScript with SheetJS (`xlsx`), run via GitHub Actions
+- **Handwriting recognition:** Google IME handwriting API, with an open-source
+  TensorFlow.js + OpenCV.js path as a self-hosted fallback
+- **Speech:** Web Speech API (browser-native TTS)
+- **Backend:** Firebase (Firestore + Anonymous/Email Auth), free Spark tier
+- **CI/CD:** GitHub Actions — a teacher drags a new `words.xlsx` into GitHub, and the
+  pipeline validates, converts, builds, and deploys automatically
 
-```bash
-npm test
-```
+## 🧭 Product Validation Approach
 
-Domain logic (SM-2 scheduling, grading, question selection, countdown state) is covered by fast, dependency-free unit tests using Node's built-in test runner. Browser-only integrations (handwriting recognition, speech synthesis, canvas capture) are verified manually in the browser.
+Because this system supports a real, dated competition with a small, known group of
+students, the roadmap deliberately front-loads **requirements discovery** over feature
+building:
 
-### 6. Build and deploy
+1. Interview the teacher who has previously run this competition — not "should we build a
+   tool," but "how do you actually run practice today, and where does it hurt."
+2. Talk to 2–3 students directly about how they currently self-study and where they get
+   stuck (spelling vs. listening vs. recall).
+3. Only then decide which differentiated features (error-type diagnostics, teacher
+   roll-up view) are worth building, versus what a generic tool like Quizlet already
+   covers.
+4. Build the competition-facing UI last, and with the least effort — it is not the
+   differentiator.
+5. Run a real pilot with the ~7 target students before the competition, and treat both
+   positive and negative findings as legitimate outcomes to report on.
 
-```bash
-npm run build
-```
+## 📌 Status
 
-Pushing to `main` triggers the GitHub Actions workflow, which builds the app and deploys it to GitHub Pages.
-
-## 📊 Data Format
-
-The vocabulary bank is intentionally kept in `.xlsx` so non-technical teachers can maintain it in Excel. Student review progress is stored separately in Firestore and is never overwritten when the word bank is replaced. Full column specification: [`docs/data-contract.md`](./docs/data-contract.md).
-
-## 🧪 Design Principles
-
-- **Single Responsibility** — each module (grading, scheduling, selection, recognition, storage) has exactly one reason to change.
-- **Objective grading** — the quality score fed into SM-2 is always computed from spelling accuracy and response time, never from student self-report.
-- **Swappable recognition engine** — the app depends on a `RecognitionEngine` interface, not a specific vendor, so the handwriting backend can be replaced without touching quiz logic.
-
-## 🤝 Contributing
-
-Issues and pull requests are welcome. Please make sure `npm test` passes before submitting a PR.
+Stages 0 through 6-B (partial) are complete: data contract, pipeline, SM-2 core logic,
+handwriting recognition (Google IME), Firebase storage, teacher dashboard (overview, risk
+detection, weakness analysis, average response time), and Excel/CSV upload with schema
+validation, preview, and versioned publish/draft state. Firebase Authentication (roles for
+student/teacher/admin) and further performance/UX polish (Stage 6-D/6-E) are in progress
+ahead of the Stage 7 pilot test.
 
 ## 📄 License
 
-See [`LICENSE`](./LICENSE).
+TBD.
