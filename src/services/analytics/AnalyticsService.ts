@@ -10,7 +10,6 @@ import { StudentAnalytics } from '../../types/analytics';
 import { Word } from '../../types/word';
 import { DailySnapshot } from '../../types/dailySnapshot';
 
-// 定義學生統計資料結構
 export interface StudentStat {
     id: string;
     name: string;
@@ -152,10 +151,10 @@ export class AnalyticsService {
     }
 
     /**
-     * 取得單一學生的完整個人化分析
+     * 取得單一學生的完整個人化分析。
      *
-     * 🔥 參數的 studentId 實際上是 displayId（例如 "709_1_林佑綸"），
-     *    因為呼叫端（TeacherDashboard）傳入的是學生列表的 id。
+     * 🔥 問題 10 修復：參數名改為 displayId，避免誤導。
+     *   呼叫端傳入的是 displayId（例如 "709_1_林佑綸"），不是 uid。
      *
      * 讀取策略：
      *   1. 用 studentDisplayId 查 attempts
@@ -165,42 +164,40 @@ export class AnalyticsService {
      *   5. 從 studentStates/{displayId}/dailySnapshots 讀取每日快照
      *   6. 用完整的 wordMap 重新分析
      */
-    async getStudentDetail(studentId: string): Promise<StudentAnalytics> {
+    async getStudentDetail(displayId: string): Promise<StudentAnalytics> {
         // ============================================================
         // 步驟 1：查詢 attempts
         // ============================================================
         const attemptsRef = collection(db, 'attempts');
         let attempts: AttemptRecord[] = [];
 
-        console.log(`🔍 [AnalyticsService] 嘗試用 displayId "${studentId}" 查詢...`);
-        const q1 = query(attemptsRef, where('studentDisplayId', '==', studentId));
+        console.log(`🔍 [AnalyticsService] 嘗試用 displayId "${displayId}" 查詢...`);
+        const q1 = query(attemptsRef, where('studentDisplayId', '==', displayId));
         const snap1 = await getDocs(q1);
         attempts = snap1.docs.map(d => d.data() as AttemptRecord);
 
         if (attempts.length === 0) {
             console.log(`🔍 [AnalyticsService] displayId 查不到，改用 UID 查詢...`);
-            const q2 = query(attemptsRef, where('studentId', '==', studentId));
+            const q2 = query(attemptsRef, where('studentId', '==', displayId));
             const snap2 = await getDocs(q2);
             attempts = snap2.docs.map(d => d.data() as AttemptRecord);
         }
 
-        console.log(`📊 [AnalyticsService] "${studentId}" → 找到 ${attempts.length} 筆 attempts`);
+        console.log(`📊 [AnalyticsService] "${displayId}" → 找到 ${attempts.length} 筆 attempts`);
 
         // ============================================================
         // 步驟 2：取得 profile
-        //   🔥 currentLevel 從 studentStates/{displayId} 讀取
-        //   🔥 name/class 從 classStats 反查（因為 students/{uid} 無法用 displayId 查）
         // ============================================================
         let profile = {
-            studentId,
-            name: studentId,
+            studentId: displayId,
+            name: displayId,
             className: '未分類',
             currentLevel: 1,
         };
 
         // 2.1：讀取 studentStates/{displayId}
         try {
-            const stateDoc = await getDoc(doc(db, 'studentStates', studentId));
+            const stateDoc = await getDoc(doc(db, 'studentStates', displayId));
             if (stateDoc.exists()) {
                 const data = stateDoc.data();
                 profile.currentLevel = data.currentLevel ?? 1;
@@ -214,9 +211,9 @@ export class AnalyticsService {
         try {
             const classStats = await this.classStatsService.getAllClassStats();
             for (const cs of classStats) {
-                if (cs.students && cs.students[studentId]) {
-                    const s = cs.students[studentId];
-                    profile.name = s.name || studentId;
+                if (cs.students && cs.students[displayId]) {
+                    const s = cs.students[displayId];
+                    profile.name = s.name || displayId;
                     profile.className = cs.className;
                     break;
                 }
@@ -246,11 +243,10 @@ export class AnalyticsService {
 
         // ============================================================
         // 步驟 5：讀取每日快照
-        //   🔥 路徑改為 studentStates/{displayId}/dailySnapshots
         // ============================================================
         let dailySnapshots: DailySnapshot[] = [];
         try {
-            const snapshotsRef = collection(db, 'studentStates', studentId, 'dailySnapshots');
+            const snapshotsRef = collection(db, 'studentStates', displayId, 'dailySnapshots');
             const snapshotsSnap = await getDocs(snapshotsRef);
             dailySnapshots = snapshotsSnap.docs
                 .map(d => d.data() as DailySnapshot)
@@ -261,7 +257,7 @@ export class AnalyticsService {
         }
 
         // ============================================================
-        // 步驟 6：用完整的 wordMap 重新分析，並塞入 dailySnapshots
+        // 步驟 6：用完整的 wordMap 重新分析
         // ============================================================
         const result = analyzeStudent(attempts, profile, wordMap);
         result.dailySnapshots = dailySnapshots;

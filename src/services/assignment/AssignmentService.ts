@@ -8,6 +8,7 @@ import {
   deleteDoc,
   getDoc,
   query,
+  where,
   orderBy,
   startAt,
   endAt,
@@ -19,24 +20,8 @@ export type ReviewFocus = 'strict' | 'balanced' | 'explore';
 
 export interface Assignment {
   id: string;
-  /**
-   * 作業名稱。
-   * - 老師有填 → 用老師填的
-   * - 未填 → 建立時由 UI 自動生成（例如 "709 · L4 · 09-13"）
-   */
   name: string;
-  /**
-   * 指派對象識別碼。
-   * - "709"           → 班級作業
-   * - "709_1_林佑綸"  → 個人作業（displayId）
-   * - null            → 全校作業
-   */
   className: string | null;
-  /**
-   * 目標等級（1~6），選填。
-   * - 有設定：出題以該等級為主（加權出題）
-   * - 未設定：出題依學生當前 DDA 等級
-   */
   targetLevel?: number;
   dailyQuota: number;
   newRatio: number;
@@ -54,19 +39,12 @@ export interface ActiveAssignment {
   explorationRate: number;
 }
 
-/**
- * 學生選項（供 UI 下拉選單使用）。
- */
 export interface StudentOption {
-  /** 完整的 displayId（例如 "709_1_林佑綸"） */
   displayId: string;
-  /** 座號（例如 "1"） */
   seatNumber: string;
-  /** 姓名（例如 "林佑綸"） */
   name: string;
 }
 
-// 將「複習專注度」換算為探索率 ε
 function focusToExplorationRate(focus: ReviewFocus | undefined): number {
   switch (focus) {
     case 'strict':   return 0.05;
@@ -89,6 +67,11 @@ export class AssignmentService {
    *   2. 班級作業（className === className）
    *   3. 全校作業（className === null）
    *
+   * 🔥 修復（問題 7）：加入 where('isActive', '==', true) 減少讀取量。
+   *   原本全撈所有作業（含停用、過期），作業累積後會浪費讀取配額。
+   *   時間範圍（startDate/endDate）無法加進 query，因為 Firestore
+   *   不允許對多個欄位同時做 range 查詢，仍在客戶端過濾。
+   *
    * @param className 班級（例如 "709"）
    * @param displayId 學生的複合識別碼（例如 "709_1_林佑綸"）
    */
@@ -97,7 +80,8 @@ export class AssignmentService {
     displayId?: string
   ): Promise<ActiveAssignment | null> {
     const assignmentsRef = collection(db, 'assignments');
-    const snapshot = await getDocs(assignmentsRef);
+    const q = query(assignmentsRef, where('isActive', '==', true));
+    const snapshot = await getDocs(q);
     const now = new Date().toISOString();
 
     const all = snapshot.docs.map(d => ({
@@ -105,15 +89,14 @@ export class AssignmentService {
       ...d.data()
     } as Assignment));
 
-    // 1. 篩選：啟用中 + 時間範圍內
+    // 時間範圍過濾（無法放進 query）
     const validAssignments = all.filter(a => {
-      if (!a.isActive) return false;
       if (a.startDate > now) return false;
       if (a.endDate < now) return false;
       return true;
     });
 
-    // 2. 優先序查找：個人 → 班級 → 全校
+    // 優先序查找：個人 → 班級 → 全校
     let target: Assignment | undefined;
 
     if (displayId) {
@@ -158,12 +141,6 @@ export class AssignmentService {
   // 教師端：取得下拉選單資料
   // ============================================================
 
-  /**
-   * 取得所有「有學生使用過」的班級列表。
-   *
-   * 資料來源：classStats collection（document ID 即 className）。
-   * 這代表「有學生答過題的班級」，符合「只派作業給用過系統的學生」原則。
-   */
   async getAllClasses(): Promise<string[]> {
     try {
       const snap = await getDocs(collection(db, 'classStats'));
@@ -176,15 +153,6 @@ export class AssignmentService {
     }
   }
 
-  /**
-   * 取得某班級的所有學生（供 UI 下拉選單使用）。
-   *
-   * 用 documentId() 做範圍查詢：
-   *   startAt("709_") / endAt("709_\uf8ff")
-   *
-   * 只會撈到 displayId 以 "709_" 開頭的文件，效率高。
-   * 結果按座號升序排序。
-   */
   async getStudentsByClass(className: string): Promise<StudentOption[]> {
     if (!className || !className.trim()) return [];
 

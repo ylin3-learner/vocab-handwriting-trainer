@@ -20,6 +20,8 @@ import { AnswerProcessor } from './AnswerProcessor';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 
+import { buildDisplayId } from '../../domain/string/displayId';
+
 export interface QuizQuestion {
   word: Word;
   timeLimitMs: number;
@@ -106,11 +108,13 @@ export class QuizOrchestrator implements QuizSessionApi {
    * 用途：作為 learningState 的 key（跨 UID 持續追蹤）。
    * 若資料不完整（缺姓名或座號），退回使用 uid。
    */
-  private getDisplayId(): string {
-    if (this.className && this.deps.studentName && this.deps.studentSeatNumber) {
-      return `${this.className}_${this.deps.studentSeatNumber}_${this.deps.studentName}`;
-    }
-    return this.studentId;
+   private getDisplayId(): string {
+    return buildDisplayId(
+      this.className,
+      this.deps.studentSeatNumber,
+      this.deps.studentName,
+      this.studentId
+    );
   }
 
   getDisplayInfo(): SessionDisplayInfo {
