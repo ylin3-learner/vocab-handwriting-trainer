@@ -118,7 +118,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
       } else {
         // 🔥 正常練習模式
         console.log('📚 [StudentLogin] 進入正常練習模式');
-        const store = new HybridProgressStore(uid);
+        const store = new HybridProgressStore(displayId);
         orchestrator = new QuizOrchestrator(uid, className.trim(), {
           wordRepository: repo,
           progressStore: store,

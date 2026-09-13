@@ -8,7 +8,7 @@ import { DailySnapshot } from '../../types/dailySnapshot';
 
 export interface AttemptBatchParams {
   studentId: string;         // uid（用於 attempts 的 studentId 欄位）
-  studentDisplayId?: string; // displayId（用於 learningState、dailySnapshots）
+  studentDisplayId?: string; // displayId（用於 studentStates、dailySnapshots）
   className: string;
   wordId: string;
   nextState: ReviewState;
@@ -19,6 +19,21 @@ export interface AttemptBatchParams {
   dailySnapshot?: DailySnapshot;
 }
 
+/**
+ * 將一次作答的所有 Firestore 寫入合併為單一原子批次。
+ *
+ * 合併前（4~5 次網路請求）：
+ *   1. studentStates/{displayId}/words/{wordId}  ← SM-2 進度
+ *   2. studentStates/{displayId}                 ← totalAttempts 累加
+ *   3. attempts/{autoId}                          ← 作答紀錄
+ *   4. classStats/{className}                     ← 班級統計
+ *   5. studentStates/{displayId}/dailySnapshots/{date} ← 每日快照
+ *
+ * 合併後（1 次網路請求）：writeBatch.commit()
+ *
+ * 🔥 所有學生狀態（SM-2、totalAttempts、快照）統一存在 studentStates/{displayId}，
+ *   跨 UID 追蹤，換裝置或重新登入不遺失。
+ */
 export class AttemptBatcher {
   async commit(params: AttemptBatchParams): Promise<void> {
     const {
@@ -38,20 +53,19 @@ export class AttemptBatcher {
     const safeWordId = sanitizeFirestoreId(wordId);
     const now = new Date().toISOString();
 
-    // 若沒有 displayId，用 uid 當 fallback（理論上不該發生）
+    // 🔥 統一使用 displayId（若無則 fallback uid）
     const stateKey = studentDisplayId ?? studentId;
 
     // ============================================================
-    // 1. SM-2 進度：students/{uid}/words/{wordId}
-    //    （這裡保留按 uid，因為 SM-2 進度本身跟裝置/登入綁定較合理）
+    // 1. SM-2 進度：studentStates/{displayId}/words/{wordId}
     // ============================================================
     batch.set(
-      doc(db, 'students', studentId, 'words', safeWordId),
+      doc(db, 'studentStates', stateKey, 'words', safeWordId),
       { ...nextState, originalWordId: wordId }
     );
 
     // ============================================================
-    // 2. 🔥 totalAttempts 累加：studentStates/{displayId}
+    // 2. totalAttempts 累加：studentStates/{displayId}
     // ============================================================
     batch.set(
       doc(db, 'studentStates', stateKey),

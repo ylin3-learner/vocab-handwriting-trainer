@@ -10,23 +10,26 @@ type SyncOperation =
     | { type: 'saveState'; studentId: string; wordId: string; state: ReviewState; timestamp: number }
     | { type: 'recordAttempt'; attempt: AttemptRecord; timestamp: number };
 
+/**
+ * 混合進度儲存：本地優先 + 雲端同步。
+ *
+ * 🔥 建構參數 studentKey 是 displayId，不是 uid。
+ *   理由：跨 UID 追蹤學生，換裝置時同步佇列也能延續。
+ */
 export class HybridProgressStore implements ProgressStore {
     private cloud: FirestoreProgressStore;
     private local: LocalStorageProgressStore;
     private syncQueueKey: string;
     private syncInterval: number | null = null;
 
-    // 🔥 新增：熔斷器與同步狀態
     private isSyncing = false;
     private isCircuitBroken = false;
     private circuitBreakerTimeout: number | null = null;
 
-    constructor(private studentId: string) {
+    constructor(private studentKey: string) {
         this.cloud = new FirestoreProgressStore();
         this.local = new LocalStorageProgressStore();
-        this.syncQueueKey = `syncQueue_${studentId}`;
-        
-        // 🔥 修改：從 30 秒延長到 60 秒，減少請求頻率
+        this.syncQueueKey = `syncQueue_${studentKey}`;
         this.startAutoSync(60000);
     }
 
@@ -52,23 +55,20 @@ export class HybridProgressStore implements ProgressStore {
     }
 
     async saveState(studentId: string, wordId: string, state: ReviewState): Promise<void> {
-        // 1. 寫入本地
         await this.local.saveState(studentId, wordId, state);
 
-        // 2. 如果熔斷器開啟，直接跳過雲端寫入，加入佇列
         if (this.isCircuitBroken) {
             await this.addToSyncQueue({ type: 'saveState', studentId, wordId, state, timestamp: Date.now() });
             return;
         }
 
-        // 3. 嘗試寫入雲端
         try {
             await this.cloud.saveState(studentId, wordId, state);
             await this.removeFromSyncQueue('saveState', studentId, wordId);
         } catch (error) {
             console.warn('⚠️ 雲端儲存失敗，加入同步佇列:', error);
             await this.addToSyncQueue({ type: 'saveState', studentId, wordId, state, timestamp: Date.now() });
-            this.checkCircuitBreaker(error); // 🔥 檢查是否觸發熔斷
+            this.checkCircuitBreaker(error);
         }
     }
 
@@ -90,21 +90,43 @@ export class HybridProgressStore implements ProgressStore {
         }
     }
 
-    // 🔥 新增：檢查錯誤是否為配額耗盡，若是則啟動熔斷
+    /**
+     * 🔥 修復：熔斷器改為「隔天太平洋午夜」重置
+     *
+     * 原因：Firestore 配額每天太平洋午夜重置，
+     * 之前用 5 分鐘會導致「解鎖 → 撞牆 → 再熔斷」的無限迴圈。
+     */
+    private getNextPacificMidnightDelay(): number {
+        const now = new Date();
+        // 太平洋夏令時間 = UTC-7，換算為 UTC 07:00
+        // 保守使用 UTC 08:00（涵蓋冬令時間 UTC-8）
+        const nextReset = new Date(Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate() + 1,
+            8, 0, 0
+        ));
+        return nextReset.getTime() - now.getTime();
+    }
+
     private checkCircuitBreaker(error: any): void {
         const errorMessage = String(error?.message || '').toLowerCase();
         const errorCode = String(error?.code || '').toLowerCase();
-        
+
         if (errorMessage.includes('quota') || errorMessage.includes('429') || errorCode.includes('resource-exhausted')) {
             if (!this.isCircuitBroken) {
-                console.error('🚨 偵測到 Firebase 配額耗盡！啟動熔斷器，暫停雲端同步 5 分鐘。');
+                const delayMs = this.getNextPacificMidnightDelay();
+                const hours = (delayMs / 1000 / 60 / 60).toFixed(1);
+                console.error(
+                    `🚨 偵測到 Firebase 配額耗盡！啟動熔斷器，${hours} 小時後（太平洋午夜）恢復。`
+                );
                 notifyQuotaExceeded();
                 this.isCircuitBroken = true;
                 this.circuitBreakerTimeout = window.setTimeout(() => {
                     console.log('🔓 熔斷器解除，恢復雲端同步。');
                     this.isCircuitBroken = false;
                     this.circuitBreakerTimeout = null;
-                }, 5 * 60 * 1000); // 5 分鐘後解除
+                }, delayMs);
             }
         }
     }
@@ -165,16 +187,14 @@ export class HybridProgressStore implements ProgressStore {
         }
     }
 
-    // 🔥 修改：加上批次限制與熔斷器檢查
     async syncNow(): Promise<void> {
-        if (this.isSyncing || this.isCircuitBroken) return; // 避免重複觸發或熔斷中
+        if (this.isSyncing || this.isCircuitBroken) return;
         const queue = await this.getSyncQueue();
         if (queue.length === 0) return;
 
         this.isSyncing = true;
         console.log(`🔄 開始同步 ${queue.length} 筆待處理操作...`);
-        
-        // 🔥 關鍵：單次最多只同步 20 筆，避免請求風暴
+
         const BATCH_SIZE = 20;
         const currentBatch = queue.slice(0, BATCH_SIZE);
         const failed: SyncOperation[] = [];
@@ -189,16 +209,15 @@ export class HybridProgressStore implements ProgressStore {
             } catch (err) {
                 console.warn('同步操作失敗，保留:', err);
                 failed.push(op);
-                this.checkCircuitBreaker(err); // 🔥 同步失敗時也要檢查熔斷
-                if (this.isCircuitBroken) break; // 如果熔斷了，立刻停止本輪同步
+                this.checkCircuitBreaker(err);
+                if (this.isCircuitBroken) break;
             }
         }
 
-        // 更新佇列：把這輪成功的不見，失敗的放回去，剩下的排隊
         const remainingQueue = [...failed, ...queue.slice(BATCH_SIZE)];
         await this.saveSyncQueue(remainingQueue);
         this.isSyncing = false;
-        
+
         console.log(`✅ 本輪同步完成，剩餘 ${remainingQueue.length} 筆待處理`);
     }
 

@@ -8,10 +8,20 @@ import { db } from '../../firebase';
 import { ReviewState, createInitialReviewState } from '../../types/word';
 import { ProgressStore, AttemptRecord } from './ProgressStore';
 
+/**
+ * Firestore 進度儲存。
+ *
+ * 🔥 重要：SM-2 進度存在 studentStates/{displayId}/words/{wordId}
+ *   （不是 students/{uid}/words/{wordId}）
+ *
+ * 原因：跨 UID 追蹤學生，換裝置或重新登入時進度不遺失。
+ *
+ * 參數 studentId 名義上保留，但實際傳入的是 displayId。
+ */
 export class FirestoreProgressStore implements ProgressStore {
   // ----- 學生用：讀寫單字進度 -----
   async getState(studentId: string, wordId: string): Promise<ReviewState> {
-    const docRef = doc(db, 'students', studentId, 'words', wordId);
+    const docRef = doc(db, 'studentStates', studentId, 'words', wordId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       return snap.data() as ReviewState;
@@ -20,7 +30,7 @@ export class FirestoreProgressStore implements ProgressStore {
   }
 
   async getAllStates(studentId: string): Promise<Map<string, ReviewState>> {
-    const wordsRef = collection(db, 'students', studentId, 'words');
+    const wordsRef = collection(db, 'studentStates', studentId, 'words');
     const snap = await getDocs(wordsRef);
     const map = new Map<string, ReviewState>();
     snap.docs.forEach(doc => {
@@ -30,7 +40,7 @@ export class FirestoreProgressStore implements ProgressStore {
   }
 
   async saveState(studentId: string, wordId: string, state: ReviewState): Promise<void> {
-    const docRef = doc(db, 'students', studentId, 'words', wordId);
+    const docRef = doc(db, 'studentStates', studentId, 'words', wordId);
     await runTransaction(db, async (transaction) => {
       const snap = await transaction.get(docRef);
       if (snap.exists()) {
@@ -43,9 +53,7 @@ export class FirestoreProgressStore implements ProgressStore {
     });
   }
 
-  // 🔥 關鍵修改：recordAttempt 現在會處理任何缺少的欄位，不會報錯
   async recordAttempt(attempt: AttemptRecord): Promise<void> {
-    // 構建一個「安全」的 attempt 物件，確保所有欄位都存在
     const safeAttempt = {
       studentId: attempt.studentId,
       studentDisplayId: attempt.studentDisplayId ?? null,
@@ -55,7 +63,6 @@ export class FirestoreProgressStore implements ProgressStore {
       isCorrect: attempt.isCorrect ?? false,
       responseTimeMs: attempt.responseTimeMs ?? 0,
       snapshotImageUrl: attempt.snapshotImageUrl || '',
-      // 使用 ?? 確保即使欄位不存在也不會 undefined
       editDistance: attempt.editDistance ?? -1,
       similarity: attempt.similarity ?? 0,
       snapshotEaseFactor: attempt.snapshotEaseFactor ?? 2.5,
@@ -66,9 +73,7 @@ export class FirestoreProgressStore implements ProgressStore {
     try {
       await addDoc(collection(db, 'attempts'), safeAttempt);
     } catch (error) {
-      // 如果寫入失敗（例如 Quota exceeded），只是記錄錯誤，不拋出
       console.warn('⚠️ Firestore recordAttempt 失敗，但本地已儲存:', error);
-      // 不重新拋出錯誤，讓呼叫端繼續執行
     }
   }
 
@@ -105,7 +110,7 @@ export class FirestoreProgressStore implements ProgressStore {
 
   async clearStudentData(studentId: string): Promise<void> {
     try {
-      const wordsRef = collection(db, 'students', studentId, 'words');
+      const wordsRef = collection(db, 'studentStates', studentId, 'words');
       const wordsSnap = await getDocs(wordsRef);
       const batch = writeBatch(db);
       wordsSnap.docs.forEach(doc => batch.delete(doc.ref));

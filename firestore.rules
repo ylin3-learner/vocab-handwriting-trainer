@@ -5,7 +5,6 @@ service cloud.firestore {
     // ========================================
     // 輔助函式
     // ========================================
-    
     function isSignedIn() {
       return request.auth != null;
     }
@@ -27,7 +26,6 @@ service cloud.firestore {
 
     // ========================================
     // 1. 單字庫 vocabulary
-    //    所有人（已登入）可讀，僅教師可寫
     // ========================================
     match /vocabulary/{docPath=**} {
       allow read: if isSignedIn();
@@ -36,7 +34,6 @@ service cloud.firestore {
 
     // ========================================
     // 2. 作業 assignments
-    //    所有人（已登入）可讀，僅教師可寫
     // ========================================
     match /assignments/{assignmentId} {
       allow read: if isSignedIn();
@@ -45,13 +42,13 @@ service cloud.firestore {
 
     // ========================================
     // 3. 學生資料 students/{studentId}
-    //    學生只能讀寫自己的；教師可讀全部
+    //    students/{uid} 只保留為「登入身份映射」：
+    //    name, class, seatNumber, displayId
     // ========================================
     match /students/{studentId} {
       allow read: if isSelf(studentId) || isTeacher();
       allow write: if isSelf(studentId);
 
-      // 子集合（例如 /words/{wordId}）
       match /{document=**} {
         allow read: if isSelf(studentId) || isTeacher();
         allow write: if isSelf(studentId);
@@ -59,34 +56,56 @@ service cloud.firestore {
     }
 
     // ========================================
-    // 4. 作答紀錄 attempts
-    //    學生只能建立自己的；教師可讀全部
-    //    不允許修改或刪除
+    // 4. 學生狀態 studentStates/{displayId}
+    //    包含：學習狀態、SM-2 進度、每日快照
+    //    Key 為 displayId（如 "709_1_林佑綸"）
+    // ========================================
+    match /studentStates/{displayId} {
+      // 教師可讀寫；學生（含匿名）可讀寫
+      // 安全性依賴「學生不知道別人的 displayId」
+      allow read: if isTeacher() || isSignedIn();
+      allow write: if isTeacher() || isSignedIn();
+
+      match /{document=**} {
+        allow read: if isTeacher() || isSignedIn();
+        allow write: if isTeacher() || isSignedIn();
+      }
+    }
+
+    // ========================================
+    // 5. 作答紀錄 attempts
+    //    🔥 學生可讀（PerformanceTracker 在學生端執行）
     // ========================================
     match /attempts/{attemptId} {
-      allow read: if isTeacher();
+      allow read: if isTeacher() || isSignedIn();
+
       allow create: if isSignedIn()
         && request.resource.data.studentId == request.auth.uid;
+
       allow update, delete: if false;
     }
 
     // ========================================
-    // 5. 班級統計 classStats
-    //    教師可讀；所有登入者可寫（暫時，因為學生作答時會更新）
-    //    限制寫入結構，避免惡意破壞
+    // 6. 班級統計 classStats
+    //    🔥 簡化驗證（嵌套結構 + increment 無法用頂層欄位檢查）
     // ========================================
     match /classStats/{className} {
-      allow read: if isTeacher();
-      allow create, update: if isSignedIn()
-        && request.resource.data.className == className
-        && request.resource.data.totalAttempts is number
-        && request.resource.data.totalCorrect is number;
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
       allow delete: if isAdmin();
     }
 
     // ========================================
-    // 6. 其他集合：拒絕所有訪問（白名單策略）
-    //    未明確允許的集合一律拒絕
+    // 7. 歸檔學生 archived_students
+    // ========================================
+    match /archived_students/{displayId} {
+      allow read: if isTeacher();
+      allow create, update: if isTeacher();
+      allow delete: if isTeacher();
+    }
+
+    // ========================================
+    // 8. 白名單策略：未明確允許的集合一律拒絕
     // ========================================
     match /{document=**} {
       allow read, write: if false;

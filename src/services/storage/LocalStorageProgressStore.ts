@@ -2,6 +2,12 @@
 import { ReviewState, createInitialReviewState } from '../../types/word';
 import { ProgressStore, AttemptRecord } from './ProgressStore';
 
+/**
+ * 本地進度儲存（localStorage）。
+ *
+ * 🔥 參數 studentId 名義上保留，但實際傳入的是 displayId。
+ * localStorage key 用 displayId，跨裝置時不共享（裝置本地就是本地）。
+ */
 export class LocalStorageProgressStore implements ProgressStore {
   private getStateKey(studentId: string, wordId: string): string {
     return `progress_${studentId}_${wordId}`;
@@ -26,7 +32,6 @@ export class LocalStorageProgressStore implements ProgressStore {
 
   async getAllStates(studentId: string): Promise<Map<string, ReviewState>> {
     const result = new Map<string, ReviewState>();
-    // localStorage 沒有高效的「前綴查詢」，只能遍歷所有 key
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key.startsWith(`progress_${studentId}_`)) {
@@ -57,7 +62,6 @@ export class LocalStorageProgressStore implements ProgressStore {
     localStorage.setItem(key, JSON.stringify(attempts));
   }
 
-  // 測試用：取得某學生的所有 attempt
   getAllAttempts(studentId: string): AttemptRecord[] {
     const key = this.getAttemptsKey(studentId);
     const stored = localStorage.getItem(key);
