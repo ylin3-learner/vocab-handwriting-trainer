@@ -147,7 +147,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       this.currentLevel = 1;
     }
 
-    // 步驟 0.5：檢查今日快照（路徑改為 studentStates/{displayId}）
+    // 步驟 0.5：檢查今日快照
     const today = this.getNow().toISOString().slice(0, 10);
     try {
       const { getDoc, doc } = await import('firebase/firestore');
@@ -163,9 +163,12 @@ export class QuizOrchestrator implements QuizSessionApi {
       console.warn('⚠️ 檢查每日快照失敗（不影響測驗）:', e);
     }
 
-    // 步驟 1：讀取作業設定
+    // 步驟 1：讀取作業設定（傳入 displayId 支援個人作業）
     try {
-      this.activeAssignment = await this.assignmentService.getActiveAssignment(this.className);
+      this.activeAssignment = await this.assignmentService.getActiveAssignment(
+        this.className,
+        this.getDisplayId()
+      );
     } catch (e) {
       console.warn('⚠️ 讀取作業設定失敗，使用預設配額:', e);
       this.activeAssignment = null;
@@ -174,7 +177,9 @@ export class QuizOrchestrator implements QuizSessionApi {
     if (this.activeAssignment) {
       this.dailyMaxQuota = this.activeAssignment.assignment.dailyQuota;
       this.dailyNewQuotaRemaining = this.activeAssignment.newWordCount;
-      console.log(`   ✅ 讀取作業「${this.activeAssignment.assignment.name}」，配額 ${this.dailyMaxQuota} 題`);
+      console.log(
+        `   ✅ 讀取作業「${this.activeAssignment.assignment.name}」，配額 ${this.dailyMaxQuota} 題，targetLevel=${this.activeAssignment.assignment.targetLevel ?? '未指定'}`
+      );
     } else {
       this.dailyMaxQuota = this.deps.defaultDailyMaxQuota;
       this.dailyNewQuotaRemaining = this.deps.defaultDailyNewQuota;
@@ -194,6 +199,17 @@ export class QuizOrchestrator implements QuizSessionApi {
   // ============================================================
   // 內部：建立單字池
   // ============================================================
+
+  /**
+   * 建立單字池。
+   *
+   * 流程：
+   *   1. 組裝複習池（只挑 everWrong 的字）
+   *   2. 組裝新詞池
+   *      ├── 有指定 targetLevel → 加權出題
+   *      └── 無指定 → 預設出題（90% current + 10% 探針）
+   *   3. 合併成最終池子
+   */
   private async buildWordPool(): Promise<void> {
     const K2 = this.dailyNewQuotaRemaining;
     const K1 = Math.max(0, this.dailyMaxQuota - K2);
@@ -206,9 +222,11 @@ export class QuizOrchestrator implements QuizSessionApi {
     const reviewPoolSize = Math.max(K1 * REVIEW_POOL_MULTIPLIER, MIN_REVIEW_POOL);
     const newPoolSize = Math.max(K2 * NEW_POOL_MULTIPLIER, MIN_NEW_POOL);
 
+    // ============================================================
+    // 1. 複習池：只挑 everWrong 的字
+    // ============================================================
     const allStates = Array.from(this.stateCache!.entries());
 
-    // 複習候選：只挑 everWrong 的字
     const dueStates = allStates
       .filter(([_, state]) =>
         state.everWrong === true &&
@@ -244,11 +262,123 @@ export class QuizOrchestrator implements QuizSessionApi {
       reviewWords = await this.deps.wordRepository.getWordsByIds(finalReviewIds);
     }
 
-    // 新詞候選
+    // ============================================================
+    // 2. 新詞池：依作業設定決定策略
+    // ============================================================
     const excludeIds = new Set(this.stateCache!.keys());
+    const targetLevel = this.activeAssignment?.assignment.targetLevel;
+
+    let newWords: Word[];
+    if (targetLevel && targetLevel !== this.currentLevel) {
+      // 有指定目標等級 → 加權出題
+      newWords = await this.buildWeightedNewWords(
+        excludeIds,
+        targetLevel,
+        newPoolSize
+      );
+    } else {
+      // 無指定（或與 currentLevel 相同）→ 預設出題
+      newWords = await this.buildDefaultNewWords(excludeIds, newPoolSize);
+    }
+
+    // ============================================================
+    // 3. 合併成最終池子
+    // ============================================================
+    this.words = [...reviewWords, ...newWords];
+    for (const w of this.words) {
+      this.wordMap.set(w.id, w);
+    }
+  }
+
+  /**
+   * 加權出題（作業指定 targetLevel 時使用）。
+   *
+   * 一般情況（|target - current| <= 2）：
+   *   60% target + 30% current + 10% 探針（target + 1）
+   *
+   * 護欄（|target - current| >= 3）：
+   *   30% target + 60% current + 10% 中間級
+   *   避免老師判斷失誤導致學生崩潰
+   */
+  private async buildWeightedNewWords(
+    excludeIds: Set<string>,
+    targetLevel: number,
+    totalSize: number
+  ): Promise<Word[]> {
+    const currentLevel = this.currentLevel;
+    const diff = Math.abs(targetLevel - currentLevel);
+
+    let targetRatio: number;
+    let currentRatio: number;
+    let probeLevel: number;
+
+    if (diff >= 3) {
+      // 🔥 護欄：差距太大，降低 target 的比重
+      targetRatio = 0.3;
+      currentRatio = 0.6;
+      probeLevel = Math.round((targetLevel + currentLevel) / 2);
+      console.warn(
+        `⚠️ [加權出題] |target=L${targetLevel} - current=L${currentLevel}| >= 3，啟用護欄（30% / 60% / 10%）`
+      );
+    } else {
+      // 一般情況
+      targetRatio = 0.6;
+      currentRatio = 0.3;
+      probeLevel = targetLevel < 6 ? targetLevel + 1 : targetLevel;
+    }
+
+    const targetCount = Math.floor(totalSize * targetRatio);
+    const currentCount = Math.floor(totalSize * currentRatio);
+    const probeCount = totalSize - targetCount - currentCount;
+
+    const usedIds = new Set(excludeIds);
+
+    // 抽 targetLevel
+    const targetWords = await this.deps.wordRepository.getNewWordsByLevels(
+      usedIds,
+      [targetLevel],
+      targetCount
+    );
+    targetWords.forEach(w => usedIds.add(w.id));
+
+    // 抽 currentLevel
+    const currentWords = await this.deps.wordRepository.getNewWordsByLevels(
+      usedIds,
+      [currentLevel],
+      currentCount
+    );
+    currentWords.forEach(w => usedIds.add(w.id));
+
+    // 抽探針 / 中間級
+    const probeWords = await this.deps.wordRepository.getNewWordsByLevels(
+      usedIds,
+      [probeLevel],
+      probeCount
+    );
+
+    console.log(
+      `📊 [加權出題] target=L${targetLevel}, current=L${currentLevel}, probe=L${probeLevel}`
+    );
+    console.log(
+      `   抽到 target ${targetWords.length} + current ${currentWords.length} + probe ${probeWords.length} = ${targetWords.length + currentWords.length + probeWords.length}`
+    );
+
+    return [...targetWords, ...currentWords, ...probeWords];
+  }
+
+  /**
+   * 預設出題（無指定 targetLevel 時使用）。
+   *
+   * 90% currentLevel + 10% 探針（currentLevel + 1）
+   * 若不足，用 currentLevel - 1 補
+   */
+  private async buildDefaultNewWords(
+    excludeIds: Set<string>,
+    totalSize: number
+  ): Promise<Word[]> {
     const probeRatio = 0.1;
-    const probeCount = Math.floor(newPoolSize * probeRatio);
-    const mainCount = newPoolSize - probeCount;
+    const probeCount = Math.floor(totalSize * probeRatio);
+    const mainCount = totalSize - probeCount;
 
     const mainWords = await this.deps.wordRepository.getNewWordsByLevels(
       excludeIds,
@@ -265,13 +395,13 @@ export class QuizOrchestrator implements QuizSessionApi {
     );
 
     let fallbackWords: Word[] = [];
-    if (mainWords.length + probeWords.length < newPoolSize && this.currentLevel > 1) {
+    if (mainWords.length + probeWords.length < totalSize && this.currentLevel > 1) {
       const fallbackExclude = new Set([
         ...excludeIds,
         ...mainWords.map((w) => w.id),
         ...probeWords.map((w) => w.id),
       ]);
-      const need = newPoolSize - mainWords.length - probeWords.length;
+      const need = totalSize - mainWords.length - probeWords.length;
       fallbackWords = await this.deps.wordRepository.getNewWordsByLevels(
         fallbackExclude,
         [this.currentLevel - 1],
@@ -279,11 +409,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       );
     }
 
-    const newWords = [...mainWords, ...probeWords, ...fallbackWords];
-    this.words = [...reviewWords, ...newWords];
-    for (const w of this.words) {
-      this.wordMap.set(w.id, w);
-    }
+    return [...mainWords, ...probeWords, ...fallbackWords];
   }
 
   // ============================================================
@@ -430,7 +556,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     try {
       await this.attemptBatcher.commit({
         studentId: this.studentId,
-        studentDisplayId, // 🔥 傳入 displayId
+        studentDisplayId,
         className: this.className,
         wordId,
         nextState: processed.nextState,
@@ -466,7 +592,6 @@ export class QuizOrchestrator implements QuizSessionApi {
         })
         .catch((error) => console.warn('⚠️ 班級統計更新失敗:', error));
 
-      // 🔥 Fallback 用 displayId
       this.studentStateService
         .incrementTotalAttempts(displayId)
         .catch((error) => console.warn('⚠️ 累加總題數失敗:', error));
