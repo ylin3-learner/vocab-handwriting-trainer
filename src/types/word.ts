@@ -10,6 +10,18 @@ export interface Word {
   rootMeaning?: string;  // 字根意思(選填)
   hint?: string;         // 記憶提示(選填)
   level?: string;        // 難度/分組標籤(選填)
+
+  /**
+   * 🔥 隨機排序鍵 (0 <= x < 1)。
+   *
+   * 用途：Firestore 隨機抽樣。
+   *   查詢時用隨機起點 `where('random', '>=', r)` 做範圍查詢，
+   *   避免每次都從字母序最前面開始抓同一批單字。
+   *
+   * 生成時機：AdminPanel 寫入 Firestore 時自動生成，
+   *         老師的 CSV 不需要提供這個欄位。
+   */
+  random?: number;
 }
 
 // 學生單一單字的複習狀態,存在 Firestore,不放進 Excel
