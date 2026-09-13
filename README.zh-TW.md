@@ -1,119 +1,194 @@
-# 單字手寫訓練器 (Vocab Handwriting Trainer)
+# 📖 英語單字王比賽訓練系統（Vocabulary King Trainer）
 
-[English README](./README.md)
+這是一套為國中學生準備「英語單字王比賽」而設計的適應性單字訓練系統。系統結合間隔重
+複演算法（SM-2）、語音出題、⼿寫擷取與辨識、以及教師數據儀表板，同時刻意把操作複雜
+度壓到最低——⽼師只需要把 Excel 拖進 GitHub 就能換掉整套單字庫，完全不需要碰程式碼。
 
-一個專為中學生設計的英文單字手寫練習系統。老師上傳單字庫、派發作業，學生在平板上手寫作答，系統自動辨識、判分、排程複習，並在教師後台呈現學習數據。
+> 這份 README 記錄了這個專案完整的開發脈絡：⽐賽規則如何形塑系統設計、關鍵架構決
+> 策、資料契約，以及分階段的開發路線圖（Stage 0 → Stage 7）。
 
-這個專案的目的是取代容易失真的「學生自評」拼字練習，改用客觀的手寫辨識來模擬真實的英語單字比賽情境：老師唸出單字與例句，學生在限定時間內憑記憶手寫作答，系統依照精確拼字結果直接判定——沒有自評、沒有模糊地帶、沒有部分給分。
+---
 
-## ✨ 核心功能
+## 🏆 為什麼要做這個系統
 
-- **手寫辨識**：Google Input Tools API，支援完整單字辨識
-- **間隔重複（SM-2）**：依照客觀量測到的拼字準確度與作答時間智慧排程複習時間，不依賴學生自評分數
-- **Top-K 候選池**：只維持一小組活躍複習單字，而非每次都查詢整個單字庫，大幅降低 Firestore 讀取量（99%+）
-- **作業派發**：老師可依班級或學生設定每日配額、新舊字比例、複習專注度
-- **教師後台**：班級進度、風險學生、弱點單字分析
-- **離線優先**：本地 localStorage 快取 + 背景雲端同步，教室網路不穩定也不會中斷練習
-- **角色權限**：Firebase Auth + Firestore 安全規則，區分老師與學生的存取權限
+⽐賽的計分⽅式是 **五關、每關 10 題**，由主試者現場抽題籤決定題⽬。外籍⽼師唸出單字
+與例句，參賽者必須在 **8 秒內**於⼩⽩板上寫出答案，且**答案不得塗改**——⼀旦塗改⼀律
+視為未通過。未通過者離開座位，答對 31 題以上者依序評定名次。
 
-## 🛠️ 技術棧
+正是這種「限時聽寫、⼿寫不得塗改、答錯淘汰」的⽐賽形式，決定了這個系統的核⼼設計⽅
+向：
 
-| 層級 | 技術 |
-| :--- | :--- |
-| 前端 | TypeScript + React + Vite |
-| 後端 | Firebase Firestore + Firebase Auth |
-| 手寫辨識 | Google Input Tools API |
-| 語音 | Web Speech API |
-| 部署 | GitHub Pages |
+- **間隔重複（Spaced Repetition）**：讓練習時間花在學⽣真正不熟的字上，⽽不是已經
+  會的字。
+- **限時⼿寫擷取**，對應⽐賽現場「限時內寫完、不得塗改」的規則。
+- **客觀判分、不讓學⽣⾃評**：系統只根據辨識出的⽂字與正確答案⽐對、以及作答花費的
+  時間來判分，學⽣從來不需要（也不能）⾃⼰打分數。
+- **教師儀表板**，讓⽼師⼀眼看出全班的弱點，不需要⼿動彙整成績。
 
-## 📁 專案架構
+## ✨ 核⼼功能
+
+| 類別 | 功能 |
+|---|---|
+| 練習流程 | 語⾳唸出單字＋例句 → 限時⼿寫擷取 → 辨識 → 客觀判分 → SM-2 排程下次複習 |
+| 間隔重複 | SM-2 演算法，沿⽤⾃先前的 GRE 單字 SRS 專案並調整 |
+| ⼿寫辨識 | 畫布擷取 ＋ 可抽換的辨識引擎（Google IME ⼿寫 API，備援⽅案為開源
+  TensorFlow.js／OpenCV.js） |
+| 單字庫管理 | ⽼師上傳 `.xlsx` → Schema 驗證 → 預覽 → 版本化發布，全程不需修改程式碼 |
+| 教師儀表板 | 學⽣總覽、⾵險學⽣偵測、Top-K 弱點分析、作答時間分析、記憶曲線視覺化 |
+| ⾝份與權限 | 學⽣匿名登⼊、教師／管理員 Email/Password 登⼊，Firestore 安全規則依⾓⾊
+  限制存取 |
+| 防作弊訊號 | 依 editDistance ＋作答時間偵測「亂答」，與真正的拼字錯誤分開標記 |
+| 效能設計 | Top-K 候選池（⽽⾮全表掃描）、預聚合班級統計、批次寫入——設計⽬標是撐
+  得住 Firestore 免費⽅案的讀取配額 |
+
+## 🧱 系統架構
+
+整個程式碼庫依照 **單⼀職責原則（SRP）** 拆分，讓辨識引擎、排程邏輯、單字來源這幾件
+事都可以獨⽴替換，互不⼲擾。
 
 ```
 vocab-handwriting-trainer/
 ├── data/
-│   ├── raw/words.xlsx          # 老師維護的單字庫來源(唯一真相來源)
-│   ├── schema/                 # 固定欄位契約,轉換腳本與前端型別共用同一份
-│   └── generated/              # CI 自動產生的 words.json 與驗證報告(不要手動編輯)
+│   ├── raw/words.xlsx              # ⽼師維護的唯⼀真相來源
+│   ├── schema/words.schema.json    # 資料契約（轉換腳本與前端型別共⽤）
+│   └── generated/words.json        # CI ⾃動產⽣，不⼿動編輯
+│
+├── scripts/                        # Build-time ⼯具，不進入前端 bundle
+│   ├── convertXlsx.ts              # xlsx → words.json
+│   └── validateSchema.ts           # 欄位驗證，給出中⽂可讀的錯誤訊息
+│
 ├── src/
-│   ├── domain/                 # 純業務邏輯:SM-2、判分、選題、倒數計時
-│   ├── services/                # I/O 邊界層:辨識引擎、語音出題、Firestore 同步
-│   ├── features/                # 各畫面:測驗、登入、教師後台
-│   └── types/                   # 對應資料契約的共用型別
-├── scripts/                     # 建置階段的 Excel → JSON 轉換與驗證
-├── .github/workflows/           # CI:資料轉換 + 建置 + 部署
-└── docs/                        # 架構說明與 Excel 資料契約文件
+│   ├── domain/                     # 純函式：不碰 DOM、不碰網路、不碰資料庫
+│   │   ├── scheduler/sm2.ts        # 間隔重複演算法
+│   │   ├── selection/questionSelector.ts
+│   │   └── grading/grader.ts       # 客觀判分＋計算 SM-2 用的 quality 分數
+│   │
+│   ├── services/                   # I/O 邊界層，唯一允許碰外部世界的層
+│   │   ├── recognition/            # RecognitionEngine 介面＋可抽換實作
+│   │   ├── audio/SpeechPrompter.ts # Web Speech API
+│   │   ├── storage/                # ProgressStore 介面＋ Firestore 實作
+│   │   └── wordRepository/         # WordRepository 介面＋ Firestore／記憶體實作
+│   │
+│   ├── features/                   # 依畫⾯／使⽤者流程切分
+│   │   ├── quiz/                   # QuizOrchestrator、⼿寫畫布、倒數計時
+│   │   ├── login/                  # 學⽣匿名登⼊、教師／管理員登⼊
+│   │   └── dashboard/              # 教師數據儀表板
+│   │
+│   └── types/word.ts               # 對應 Excel schema 的 TypeScript 型別
+│
+└── docs/
+    ├── data-contract.md
+    └── architecture.md
 ```
 
-詳見 [`docs/architecture.md`](./docs/architecture.md) 與 [`docs/data-contract.md`](./docs/data-contract.md)。
+### 值得特別說明的設計決策
 
-## 🚀 快速開始
+- **單字內容與學習進度完全分離。** Excel 檔案永遠只存「內容」（單字、意思、例句、字
+  根、提⽰、難度）。SRS 狀態（`reviewInterval`、`easeFactor`、`nextReviewDate` 等）
+  存在 Firestore，依學⽣分開記錄。這代表⽼師發布新單字庫時，不會不⼩⼼洗掉任何學⽣
+  的複習紀錄。
+- **判分永遠不相信使⽤者輸入。** `grader.ts` 只根據「辨識出的⽂字 vs. 正確答案」、
+  「作答時間 vs. 時限」計算出客觀的 `quality` 分數（0–5）。`sm2.ts` 完全不知道原始的
+  使⽤者輸入是什麼，只接收這個已經算好的分數。這對應真實⽐賽中「⼩⽩板由評審現場判
+  定，不是選⼿⾃⼰講」的規則。
+- **辨識引擎完全可抽換。** `RecognitionEngine` 是一個介面，實際實作在執⾏期依裝置效
+  能 benchmark 動態選擇；推論運算丟進 Web Worker 執⾏，確保⼿寫畫布在模型運算時不
+  會掉幀、卡頓。
+- **候選池，而非全表掃描。** 早期版本在學⽣登入時載入全部複習歷史，直接把 Firestore
+  免費⽅案的讀取配額打爆（⼀次 7,000 多次讀取）。修正方式是導入 Top-K 候選池
+  （`getReviewCandidates(limit)` / `getNewCandidates(limit)`）、教師儀表板改讀預聚
+  合的 `classStats` ⽂件，以及單字庫大量上傳時採⽤批次寫入。
+- **選題邏輯避免「卡在同一個字」。** 曾經出現過的 bug：學⽣少量的到期複習字用完後，
+  選題邏輯會不斷重複同 2–3 個字。修正做法包含：同⼀天內已出過的題⽬集合、候選池⼤
+  ⼩改為每⽇配額的倍數（而非直接等於配額）、⽤最近學過但尚未到期的字補⾜池⼦，以及
+  ε-greedy 隨機探索，避免任何一個字的選中權重被卡在 0。
 
-### 前置需求
+## 🔐 ⾝份與權限設計
 
-- Node.js 18+
-- 一個 Firebase 專案(Spark 免費方案即可)
+| ⾓⾊ | 認證⽅式 | 可存取範圍 |
+|---|---|---|
+| `student` | Firebase 匿名登入（自動，零摩擦） | 學生登入頁／測驗頁 |
+| `teacher` | Email/Password | 學生登入頁／測驗頁＋教師後台＋作業管理 |
+| `admin` | Email/Password | 教師的全部權限，**再加上**單字庫上傳／發布 |
 
-### 1. 安裝依賴
+真正的防護層是 Firestore 安全規則，UI 上隱藏按鈕只是使用者體驗，不是安全邊界。學生只
+能寫入自己的 `students/{uid}` 文件；只有 `teacher`／`admin` 角色能寫入 `vocabulary`
+與 `assignments` 集合。
 
-```bash
-npm install
-```
+## 📋 資料契約（Excel 欄位規格）
 
-### 2. 設定 Firebase
+⽼師只需要維護一份固定欄位的 `.xlsx`：
 
-複製環境變數範例檔,填入你 Firebase 專案的網頁應用程式金鑰:
+| 欄位 | 必填 | 說明 |
+|---|---|---|
+| `word` | ✅ | 正確拼字（答案） |
+| `meaning` | ✅ | 中⽂意思 |
+| `sentence` | ✅ | 出題時唸出的例句 |
+| `root` | – | 字根，作為提示 |
+| `root_meaning` | – | 字根意思 |
+| `hint` | – | 記憶提示 |
+| `level` | – | 難度／分組標籤 |
 
-```bash
-cp .env.example .env
-```
+轉換腳本只認得這幾個欄位名稱：多餘欄位會被忽略，缺少必填欄位時會給出具體、老師看得
+懂的中⽂錯誤訊息（例如「第 5 列缺少 `meaning` 欄位」），而不是靜默失敗或程式崩潰。
 
-```env
-VITE_FIREBASE_API_KEY=your_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_project_id
-VITE_FIREBASE_APP_ID=your_app_id
-```
+## 🗺️ 開發路線圖
 
-### 3. 換上你的單字庫
+專案刻意分階段推進，確保每個階段都能獨立驗證後才進入下一步：
 
-把 `data/raw/words.xlsx` 換成你自己的檔案,欄位需符合 [`docs/data-contract.md`](./docs/data-contract.md) 的規格(`word`、`meaning`、`sentence`,以及選填的 `root`、`root_meaning`、`hint`、`level`)。把新檔案推到這個路徑會自動觸發轉換流程,老師不需要執行任何指令。
+| 階段 | ⽬標 |
+|---|---|
+| 0 | 定案資料契約（`.xlsx` 欄位規格 ↔ JSON schema） |
+| 1 | 資料管線：轉換／驗證腳本 ＋ CI 自動化 |
+| 2 | 核⼼測驗邏輯（SM-2、選題優先序），先用**打字輸入**驗證，刻意與⼿寫辨識的
+    不確定性隔離 |
+| 3 | 出題流程 UI：語音唸題、倒數計時、畫布（先只存圖，不辨識） |
+| 4 | 接上真正的⼿寫辨識引擎，獨立測準確率 |
+| 5 | 端到端整合：辨識結果 → 逐字比對 → SM-2 → 寫回雲端 |
+| 6-A | 教師後台（只讀）：學生總覽、風險偵測、弱點分析、作答時間分析 |
+| 6-B | 單字庫上傳、Schema 驗證、預覽、版本化發布 |
+| 6-C | 記憶曲線視覺化 |
+| 6-D | 效能強化：Top-K 候選池、預聚合統計、分批上傳、複合索引 |
+| 6-E | Firebase Authentication ＋依角色顯示的導航 |
+| 7 | 真實學生於平板上進行試點測試，蒐集辨識錯誤案例 |
 
-### 4. 本機執行
+Stage 6-A 之所以刻意排在 6-B 之前，是因為儀表板**只讀**、完全不影響現有測驗流程，而
+單字庫上傳需要重新接線核⼼的 `WordRepository`，是整個系統中風險最高的重構。
 
-```bash
-npm run dev
-```
+## 🛠️ 技術棧
 
-### 5. 執行測試
+- **前端：** TypeScript + Vite（靜態輸出，可直接部署到 GitHub Pages）
+- **資料轉換：** Node.js/TypeScript ＋ SheetJS（`xlsx`），透過 GitHub Actions 執行
+- **⼿寫辨識：** Google IME ⼿寫 API，並保留開源 TensorFlow.js ＋ OpenCV.js 作為可
+  自架的備援方案
+- **語音：** Web Speech API（瀏覽器內建 TTS）
+- **後端：** Firebase（Firestore ＋匿名／Email 認證），免費 Spark 方案
+- **CI/CD：** GitHub Actions——老師把新的 `words.xlsx` 拖進 GitHub，管線自動驗證、
+  轉檔、建置、部署
 
-```bash
-npm test
-```
+## 🧭 產品驗證思路
 
-核心業務邏輯(SM-2 排程、判分、選題邏輯、倒數計時狀態機)用 Node 內建測試框架撰寫,執行快速且不依賴外部套件。瀏覽器相關的整合(手寫辨識、語音合成、畫布擷取)則在瀏覽器中手動驗證。
+由於這個系統要服務一場有明確日期、對象人數固定（約 7 位學生）的真實比賽，路線圖刻意
+把「需求驗證」排在「功能開發」之前：
 
-### 6. 建置與部署
+1. 訪談曾經帶過這場比賽的老師——不是問「要不要做這個工具」，而是問「你們現在到底
+   怎麼準備、哪裡最痛苦」。
+2. 直接與 2–3 位學生聊他們現在怎麼自己練習、卡在哪裡（拼字／聽力／記憶）。
+3. 根據訪談結果，才決定哪些差異化功能（錯誤類型診斷、老師端彙整視圖）值得做，哪些
+   Quizlet 這類現成工具已經解決了。
+4. 比賽介面（TTS、拼字、計時）盡量用現成工具，用最少力氣做到堪用，因為它不是這個
+   專案的差異化價值所在。
+5. 在比賽前對這 7 位目標學生進行真實試跑，並把正面與負面的發現都當作合理的成果來
+   記錄，而不是只挑好聽的講。
 
-```bash
-npm run build
-```
+## 📌 目前進度
 
-推送到 `main` 分支會觸發 GitHub Actions,自動建置並部署到 GitHub Pages。
-
-## 📊 資料格式
-
-單字庫刻意維持 `.xlsx` 格式,方便沒有資訊背景的老師直接在 Excel 中維護。學生的複習進度另外存在 Firestore,換單字庫時不會被覆蓋或洗掉。完整欄位規格請見 [`docs/data-contract.md`](./docs/data-contract.md)。
-
-## 🧪 設計原則
-
-- **單一職責原則(SRP)**——每個模組(判分、排程、選題、辨識、儲存)都只有一個會讓它改變的理由。
-- **客觀判分**——餵給 SM-2 的 quality 分數永遠是由拼字準確度與作答時間客觀算出,絕不是學生自評。
-- **可抽換的辨識引擎**——應用程式依賴 `RecognitionEngine` 這個介面,而不是綁定特定廠商,之後要更換手寫辨識後端時完全不用動到測驗邏輯。
-
-## 🤝 貢獻
-
-歡迎提出 Issue 或 Pull Request。提交 PR 前請確認 `npm test` 全數通過。
+Stage 0 到 Stage 6-B（部分）已完成：資料契約、資料管線、SM-2 核⼼邏輯、手寫辨識
+（Google IME）、Firebase 儲存、教師儀表板（總覽、風險偵測、弱點分析、平均作答秒
+數），以及 Excel/CSV 上傳搭配 Schema 驗證、預覽、版本化發布／草稿狀態。Firebase
+Authentication（學生／教師／管理員角色）與後續效能／體驗優化（Stage 6-D/6-E）正在
+進行中，之後將進入 Stage 7 試點測試。
 
 ## 📄 授權
 
-詳見 [`LICENSE`](./LICENSE)。
+待定。
