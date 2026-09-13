@@ -188,7 +188,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     }
 
     // 步驟 2：讀取學生進度狀態
-    this.stateCache = await this.deps.progressStore.getAllStates(this.studentId);
+    this.stateCache = await this.deps.progressStore.getAllStates(displayId);
     console.log(`   ✅ 已載入 ${this.stateCache.size} 個單字的進度狀態`);
 
     // 步驟 3~7：建立單字池
@@ -488,10 +488,10 @@ export class QuizOrchestrator implements QuizSessionApi {
       throw new Error(`Word ${wordId} not found`);
     }
 
-    const currentState = await this.deps.progressStore.getState(this.studentId, wordId);
-
     const displayId = this.getDisplayId();
     const studentDisplayId = displayId !== this.studentId ? displayId : undefined;
+
+    const currentState = await this.deps.progressStore.getState(displayId, wordId);
 
     const now = this.getNow();
 
@@ -547,7 +547,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     // 寫入：先本地 → 嘗試批次 → 失敗回退
     // ============================================================
     try {
-      await this.localStore.saveState(this.studentId, wordId, processed.nextState);
+      await this.localStore.saveState(displayId, wordId, processed.nextState);
       await this.localStore.recordAttempt(processed.attempt);
       this.stateCache?.set(wordId, processed.nextState);
     } catch (e) {
@@ -571,7 +571,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       console.warn('⚠️ 批次寫入失敗，回退到個別寫入:', batchError);
 
       this.deps.progressStore
-        .saveState(this.studentId, wordId, processed.nextState)
+        .saveState(displayId, wordId, processed.nextState)
         .then(() => this.stateCache?.set(wordId, processed.nextState))
         .catch((error) => {
           console.warn('⚠️ 儲存進度失敗:', error);

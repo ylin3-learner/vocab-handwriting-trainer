@@ -447,11 +447,11 @@ export class PlacementOrchestrator implements QuizSessionApi {
         // 3. SM-2 狀態（含答對與答錯的字）
         //    答對：everWrong = false（不進複習池，但記為「已見過」）
         //    答錯：everWrong = true（進複習池）
-        //    （保留按 uid 儲存，因為 SM-2 進度本身與裝置綁定較合理）
+        //    🔥 儲存位置：studentStates/{displayId}/words/{wordId}
         // ============================================================
         for (const [wordId, state] of this.stateCache) {
             batch.set(
-                doc(db, 'students', this.studentId, 'words', sanitizeFirestoreId(wordId)),
+                doc(db, 'studentStates', displayId, 'words', sanitizeFirestoreId(wordId)),
                 { ...state, originalWordId: wordId }
             );
         }
