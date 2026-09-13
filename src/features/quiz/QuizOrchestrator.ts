@@ -17,6 +17,9 @@ import { DailySnapshot } from '../../types/dailySnapshot';
 import { QuizSessionApi, SessionDisplayInfo } from './QuizSessionApi';
 import { AnswerProcessor } from './AnswerProcessor';
 
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase';
+
 export interface QuizQuestion {
   word: Word;
   timeLimitMs: number;
@@ -150,8 +153,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     // 步驟 0.5：檢查今日快照
     const today = this.getNow().toISOString().slice(0, 10);
     try {
-      const { getDoc, doc } = await import('firebase/firestore');
-      const { db } = await import('../../firebase');
       const snapDoc = await getDoc(
         doc(db, 'studentStates', displayId, 'dailySnapshots', today)
       );
