@@ -43,75 +43,146 @@ project centers on:
 | Teacher dashboard | Student overview, at-risk student detection, Top-K weakness analysis, response-time analysis, memory-curve visualization |
 | Roles & auth | Anonymous auth for students, Email/Password for teachers/admins, Firestore security rules enforcing per-role access |
 | Anti-cheat signals | Edit-distance + response-time based "random guessing" detection, flagged separately from genuine spelling mistakes |
-| Performance | Top-K candidate pooling (not full-table scans), pre-aggregated class stats, batched writes — designed to survive Firestore's free-tier quota |
+| Performance | Top-K candidate pooling (not full-table scans), pre-aggregated class stats, batched writes, live quota monitoring — designed to survive Firestore's free-tier quota |
+| Adaptive leveling | A `PlacementOrchestrator` + rule-based `LevelProgressionStrategy` decide which difficulty tier a student starts at and moves through, independent of the day-to-day SM-2 scheduling |
+| Reporting | Per-student PDF report export; archiving service for students who graduate out of a cohort |
 
 ## 🧱 Architecture
 
-The codebase is organized by **Single Responsibility Principle (SRP)**, so that any one piece
-— the recognition engine, the scheduler, the word source — can be swapped without touching
-the others.
+The codebase is organized by **Single Responsibility Principle (SRP)**: `domain/` holds pure
+logic, `services/` owns every I/O boundary (Firestore, exports, monitoring), and
+`features/` wires them together into screens. This is the actual current project tree:
 
 ```
 vocab-handwriting-trainer/
-├── data/
-│   ├── raw/words.xlsx              # Teacher-maintained source of truth
-│   ├── schema/words.schema.json    # Shared data contract (script + frontend types)
-│   └── generated/words.json        # CI-generated, never hand-edited
+├── tsconfig.json
+├── vite.config.ts
 │
-├── scripts/                        # Build-time tools (not shipped to the browser)
-│   ├── convertXlsx.ts              # xlsx → words.json
-│   └── validateSchema.ts           # Field validation with human-readable Chinese errors
+├── scripts/                                # Build-time / maintenance tools
+│   ├── mergeVocabCsv.ts                    # Merge multiple raw vocab sources into one CSV
+│   ├── simplifyVocabByUsage.ts             # Trim/simplify the word bank by usage frequency
+│   ├── set-role.mjs                        # Assign teacher/admin custom claims to a Firebase user
+│   └── tsconfig.json
 │
-├── src/
-│   ├── domain/                     # Pure functions only — no DOM, no network, no DB
-│   │   ├── scheduler/sm2.ts        # Spaced-repetition math
-│   │   ├── selection/questionSelector.ts
-│   │   └── grading/grader.ts       # Objective pass/fail + SM-2 "quality" score
-│   │
-│   ├── services/                   # I/O boundary — the only layer allowed to touch the outside world
-│   │   ├── recognition/            # RecognitionEngine interface + swappable implementations
-│   │   ├── audio/SpeechPrompter.ts # Web Speech API
-│   │   ├── storage/                # ProgressStore interface + Firestore implementation
-│   │   └── wordRepository/         # WordRepository interface + Firestore/in-memory implementations
-│   │
-│   ├── features/                   # Screens, organized by user-facing flow
-│   │   ├── quiz/                   # QuizOrchestrator, handwriting canvas, countdown
-│   │   ├── login/                  # Student anonymous login, teacher/admin login
-│   │   └── dashboard/              # Teacher analytics dashboard
-│   │
-│   └── types/word.ts               # Mirrors the Excel schema in TypeScript
+├── vocab_csv/
+│   └── vocab_cleaned.csv                   # Cleaned word bank (CSV-based pipeline)
 │
-└── docs/
-    ├── data-contract.md
-    └── architecture.md
+└── src/
+    ├── App.tsx / main.tsx / firebase.ts / vite-env.d.ts
+    │
+    ├── contexts/
+    │   └── AuthContext.tsx                 # Reads Firebase custom claims → role (student/teacher/admin)
+    │
+    ├── domain/                             # Pure functions only — no DOM, no network, no DB
+    │   ├── analytics/
+    │   │   ├── radarMetrics.ts             # Learning-style radar chart math
+    │   │   └── studentAnalyzer.ts (+test)  # Per-student stat aggregation
+    │   ├── date/overdue.ts                 # Overdue-review date math
+    │   ├── grading/grader.ts (+test)       # Objective pass/fail + SM-2 "quality" score
+    │   ├── progression/                    # Adaptive leveling logic
+    │   │   ├── LevelProgressionStrategy.ts
+    │   │   ├── RuleBasedStrategy.ts
+    │   │   ├── metricsCalculator.ts
+    │   │   └── progression.test.ts
+    │   ├── scheduler/
+    │   │   ├── sm2.ts (+test)              # Spaced-repetition math
+    │   │   └── reviewStateMapper.ts
+    │   ├── selection/questionSelector.ts (+test)
+    │   ├── string/
+    │   │   ├── sanitizeId.ts               # word → stable Firestore-safe wordId
+    │   │   └── similarity.ts               # editDistance / similarity for guess detection
+    │   └── validation/wordSchema.ts        # Word-bank field contract
+    │
+    ├── services/                           # I/O boundary layer
+    │   ├── analytics/
+    │   │   ├── AnalyticsService.ts         # Per-student data aggregation from Firestore
+    │   │   ├── ClassStatsService.ts        # Pre-aggregated class-wide stats
+    │   │   └── ArchivedStudentsService.ts  # Archive/retire students across cohorts
+    │   ├── assignment/AssignmentService.ts # Teacher-configurable daily quota per class
+    │   ├── export/studentReportPdf.ts      # Per-student PDF report generation
+    │   ├── profile/ProfileService.ts       # Student name/class profile (keyed by uid)
+    │   ├── progression/
+    │   │   ├── LevelProgressionService.ts
+    │   │   ├── PerformanceTracker.ts
+    │   │   └── StudentStateService.ts
+    │   ├── status/quotaMonitor.ts          # Firestore read/write quota tracking
+    │   ├── storage/
+    │   │   ├── ProgressStore.ts            # Interface
+    │   │   ├── FirestoreProgressStore.ts
+    │   │   ├── LocalStorageProgressStore.ts
+    │   │   ├── InMemoryProgressStore.ts
+    │   │   ├── HybridProgressStore.ts      # Local-first, syncs to Firestore
+    │   │   └── AttemptBatcher.ts           # Batches attempt writes
+    │   └── wordRepository/
+    │       ├── WordRepository.ts           # Interface
+    │       ├── FirestoreWordRepository.ts
+    │       └── InMemoryWordRepository.ts
+    │
+    ├── features/                           # Screens, organized by user-facing flow
+    │   ├── admin/AdminPanel.tsx
+    │   ├── common/AppHeader.tsx            # Role-aware navigation
+    │   ├── login/
+    │   │   ├── StudentLogin.tsx            # Anonymous auth + profile save
+    │   │   └── TeacherLogin.tsx            # Email/Password auth
+    │   ├── placement/PlacementOrchestrator.ts  # Initial level-placement flow
+    │   ├── quiz/
+    │   │   ├── QuizOrchestrator.ts         # Coordinates the whole practice loop
+    │   │   ├── QuizSessionApi.ts
+    │   │   ├── AnswerProcessor.ts          # Recognition result → grading → SM-2 → storage
+    │   │   ├── HandwritingCanvas.tsx
+    │   │   ├── Countdown.tsx
+    │   │   └── QuizScreen.tsx
+    │   └── dashboard/
+    │       ├── TeacherDashboard.tsx
+    │       ├── AssignmentManager.tsx
+    │       ├── hooks/useStudentDetail.ts   # Fetch + cache per-student detail
+    │       └── components/
+    │           ├── StudentDetailPanel.tsx
+    │           ├── WeakWordsTable.tsx
+    │           ├── ResponseTimeBar.tsx
+    │           ├── ErrorBreakdownPie.tsx
+    │           ├── LearningStyleRadar.tsx
+    │           └── StudentGrowthChart.tsx
+    │
+    └── types/
+        ├── word.ts
+        ├── progression.ts
+        ├── analytics.ts
+        ├── archivedStudent.ts
+        └── dailySnapshot.ts
 ```
 
 ### Design decisions worth calling out
 
-- **Word content vs. learning progress are stored separately.** The Excel file only ever
-  holds *content* (word, meaning, sentence, root, hint, level). SRS state
-  (`reviewInterval`, `easeFactor`, `nextReviewDate`, …) lives in Firestore, keyed by
-  student. This means a teacher can publish a new word list without wiping out anyone's
-  review history.
-- **Grading never trusts the user.** `grader.ts` computes an objective `quality` score
-  (0–5) purely from recognized text vs. correct answer and elapsed time vs. time limit.
-  `sm2.ts` never sees raw user input — only that pre-computed score. This mirrors the real
-  competition, where a whiteboard is judged by a human referee, not self-reported.
-- **Recognition is fully pluggable.** `RecognitionEngine` is an interface; the concrete
-  implementation is chosen at runtime by a lightweight device-capability benchmark, and
-  inference runs in a Web Worker so the handwriting canvas never drops frames while a model
-  is thinking.
+- **Word content vs. learning progress are stored separately.** The word bank only ever
+  holds *content* (word, meaning, sentence, level). SRS state (`reviewInterval`,
+  `easeFactor`, `nextReviewDate`, …) lives in Firestore, keyed by student. A teacher can
+  publish a new word list without wiping out anyone's review history.
+- **Grading never trusts the user.** `domain/grading/grader.ts` computes an objective
+  `quality` score (0–5) purely from recognized text vs. correct answer and elapsed time vs.
+  time limit; `AnswerProcessor.ts` is the only place that pipes a recognition result through
+  grading, SM-2, and storage. `sm2.ts` never sees raw user input — only the pre-computed
+  score. This mirrors the real competition, where a whiteboard is judged by a human referee,
+  not self-reported.
+- **Storage is layered, not monolithic.** `ProgressStore` is an interface with
+  `InMemoryProgressStore`, `LocalStorageProgressStore`, `FirestoreProgressStore`, and a
+  `HybridProgressStore` that combines local-first responsiveness with a Firestore sync —
+  plus `AttemptBatcher` to avoid write storms.
 - **Candidate pools, not full scans.** Early versions loaded a student's entire review
   history on login, which blew through Firestore's free-tier read quota (7,000+ reads at
-  once). The fix: Top-K candidate pooling (`getReviewCandidates(limit)` /
-  `getNewCandidates(limit)`), pre-aggregated `classStats` documents for the teacher
-  dashboard, and batched writes for large word-bank uploads.
+  once). `quotaMonitor.ts` now tracks read/write volume directly, alongside Top-K candidate
+  pooling and pre-aggregated `ClassStatsService` documents for the teacher dashboard.
 - **Question selection avoids "stuck on one word."** An earlier bug caused the selector to
   loop over the same 2–3 words once a student exhausted their small pool of due reviews.
   The fix combines: a same-day "asked" set, a candidate pool sized as a multiple of the
   daily quota (not equal to it), backfilling with recently-studied-but-not-yet-due words,
   and an ε-greedy exploration term so no single word can get "stuck" at zero selection
   weight.
+- **Adaptive leveling sits alongside SRS, not inside it.** `domain/progression/` (a
+  strategy-pattern `LevelProgressionStrategy` with a `RuleBasedStrategy` implementation) and
+  `PlacementOrchestrator.ts` handle *which difficulty level* a student is placed into,
+  separately from SM-2's *which specific word is due today*. The two systems compose rather
+  than overlap.
 
 ## 🔐 Roles & Authentication
 
@@ -171,7 +242,10 @@ nothing in the existing quiz flow, while word-bank upload requires rewiring the 
 ## 🛠️ Tech Stack
 
 - **Frontend:** TypeScript + Vite (static output, deployable to GitHub Pages)
-- **Data conversion:** Node.js/TypeScript with SheetJS (`xlsx`), run via GitHub Actions
+- **Data conversion:** Node.js/TypeScript. Teacher-facing word-bank publishing still goes
+  through the Excel upload flow in `AdminPanel.tsx`; a separate set of one-off maintenance
+  scripts (`mergeVocabCsv.ts`, `simplifyVocabByUsage.ts`) prepare and clean the underlying
+  `vocab_csv/vocab_cleaned.csv` source list before it's imported
 - **Handwriting recognition:** Google IME handwriting API, with an open-source
   TensorFlow.js + OpenCV.js path as a self-hosted fallback
 - **Speech:** Web Speech API (browser-native TTS)
@@ -208,4 +282,4 @@ ahead of the Stage 7 pilot test.
 
 ## 📄 License
 
-TBD.
+GPL-3.0

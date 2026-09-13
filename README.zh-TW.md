@@ -38,70 +38,142 @@
 | ⾝份與權限 | 學⽣匿名登⼊、教師／管理員 Email/Password 登⼊，Firestore 安全規則依⾓⾊
   限制存取 |
 | 防作弊訊號 | 依 editDistance ＋作答時間偵測「亂答」，與真正的拼字錯誤分開標記 |
-| 效能設計 | Top-K 候選池（⽽⾮全表掃描）、預聚合班級統計、批次寫入——設計⽬標是撐
-  得住 Firestore 免費⽅案的讀取配額 |
+| 效能設計 | Top-K 候選池（⽽⾮全表掃描）、預聚合班級統計、批次寫入、即時配額監控——
+  設計⽬標是撐得住 Firestore 免費⽅案的讀取配額 |
+| 適應性分級 | `PlacementOrchestrator` ＋規則式 `LevelProgressionStrategy`，決定學生
+  一開始被分到哪個難度層級、之後如何升降級，與每日的 SM-2 排程各自獨立運作 |
+| 報表 | 單一學生 PDF 報告匯出；針對畢業／退場學生的封存服務 |
 
 ## 🧱 系統架構
 
-整個程式碼庫依照 **單⼀職責原則（SRP）** 拆分，讓辨識引擎、排程邏輯、單字來源這幾件
-事都可以獨⽴替換，互不⼲擾。
+整個程式碼庫依照 **單⼀職責原則（SRP）** 拆分：`domain/` 只放純邏輯，`services/`
+負責所有對外的 I/O（Firestore、匯出、配額監控），`features/` 再把兩者組裝成畫⾯。
+以下是專案**目前實際的檔案結構**：
 
 ```
 vocab-handwriting-trainer/
-├── data/
-│   ├── raw/words.xlsx              # ⽼師維護的唯⼀真相來源
-│   ├── schema/words.schema.json    # 資料契約（轉換腳本與前端型別共⽤）
-│   └── generated/words.json        # CI ⾃動產⽣，不⼿動編輯
+├── tsconfig.json
+├── vite.config.ts
 │
-├── scripts/                        # Build-time ⼯具，不進入前端 bundle
-│   ├── convertXlsx.ts              # xlsx → words.json
-│   └── validateSchema.ts           # 欄位驗證，給出中⽂可讀的錯誤訊息
+├── scripts/                                # Build-time／維護用工具
+│   ├── mergeVocabCsv.ts                    # 合併多個原始單字來源成一份 CSV
+│   ├── simplifyVocabByUsage.ts             # 依使用頻率精簡單字庫
+│   ├── set-role.mjs                        # 幫 Firebase 使用者設定 teacher/admin 自訂聲明
+│   └── tsconfig.json
 │
-├── src/
-│   ├── domain/                     # 純函式：不碰 DOM、不碰網路、不碰資料庫
-│   │   ├── scheduler/sm2.ts        # 間隔重複演算法
-│   │   ├── selection/questionSelector.ts
-│   │   └── grading/grader.ts       # 客觀判分＋計算 SM-2 用的 quality 分數
-│   │
-│   ├── services/                   # I/O 邊界層，唯一允許碰外部世界的層
-│   │   ├── recognition/            # RecognitionEngine 介面＋可抽換實作
-│   │   ├── audio/SpeechPrompter.ts # Web Speech API
-│   │   ├── storage/                # ProgressStore 介面＋ Firestore 實作
-│   │   └── wordRepository/         # WordRepository 介面＋ Firestore／記憶體實作
-│   │
-│   ├── features/                   # 依畫⾯／使⽤者流程切分
-│   │   ├── quiz/                   # QuizOrchestrator、⼿寫畫布、倒數計時
-│   │   ├── login/                  # 學⽣匿名登⼊、教師／管理員登⼊
-│   │   └── dashboard/              # 教師數據儀表板
-│   │
-│   └── types/word.ts               # 對應 Excel schema 的 TypeScript 型別
+├── vocab_csv/
+│   └── vocab_cleaned.csv                   # 清理後的單字庫（CSV pipeline）
 │
-└── docs/
-    ├── data-contract.md
-    └── architecture.md
+└── src/
+    ├── App.tsx / main.tsx / firebase.ts / vite-env.d.ts
+    │
+    ├── contexts/
+    │   └── AuthContext.tsx                 # 讀取 Firebase 自訂聲明 → role（student/teacher/admin）
+    │
+    ├── domain/                             # 純函式：不碰 DOM、不碰網路、不碰資料庫
+    │   ├── analytics/
+    │   │   ├── radarMetrics.ts             # 學習風格雷達圖運算
+    │   │   └── studentAnalyzer.ts (+test)  # 單一學生的統計聚合
+    │   ├── date/overdue.ts                 # 逾期複習日期運算
+    │   ├── grading/grader.ts (+test)       # 客觀判分＋計算 SM-2 用的 quality 分數
+    │   ├── progression/                    # 適應性分級邏輯
+    │   │   ├── LevelProgressionStrategy.ts
+    │   │   ├── RuleBasedStrategy.ts
+    │   │   ├── metricsCalculator.ts
+    │   │   └── progression.test.ts
+    │   ├── scheduler/
+    │   │   ├── sm2.ts (+test)              # 間隔重複演算法
+    │   │   └── reviewStateMapper.ts
+    │   ├── selection/questionSelector.ts (+test)
+    │   ├── string/
+    │   │   ├── sanitizeId.ts               # word → 穩定且 Firestore 安全的 wordId
+    │   │   └── similarity.ts               # editDistance／相似度，用於亂答偵測
+    │   └── validation/wordSchema.ts        # 單字庫欄位契約
+    │
+    ├── services/                           # I/O 邊界層
+    │   ├── analytics/
+    │   │   ├── AnalyticsService.ts         # 從 Firestore 聚合單一學生資料
+    │   │   ├── ClassStatsService.ts        # 預聚合的班級統計
+    │   │   └── ArchivedStudentsService.ts  # 跨梯次學生的封存／退場管理
+    │   ├── assignment/AssignmentService.ts # 老師可調整的班級每日配額
+    │   ├── export/studentReportPdf.ts      # 產生單一學生的 PDF 報告
+    │   ├── profile/ProfileService.ts       # 學生姓名／班級 profile（以 uid 為 key）
+    │   ├── progression/
+    │   │   ├── LevelProgressionService.ts
+    │   │   ├── PerformanceTracker.ts
+    │   │   └── StudentStateService.ts
+    │   ├── status/quotaMonitor.ts          # Firestore 讀寫配額追蹤
+    │   ├── storage/
+    │   │   ├── ProgressStore.ts            # 介面
+    │   │   ├── FirestoreProgressStore.ts
+    │   │   ├── LocalStorageProgressStore.ts
+    │   │   ├── InMemoryProgressStore.ts
+    │   │   ├── HybridProgressStore.ts      # 本地優先，同步回 Firestore
+    │   │   └── AttemptBatcher.ts           # 批次寫入作答紀錄
+    │   └── wordRepository/
+    │       ├── WordRepository.ts           # 介面
+    │       ├── FirestoreWordRepository.ts
+    │       └── InMemoryWordRepository.ts
+    │
+    ├── features/                           # 依使用者流程切分的畫面
+    │   ├── admin/AdminPanel.tsx
+    │   ├── common/AppHeader.tsx            # 依角色顯示的導航列
+    │   ├── login/
+    │   │   ├── StudentLogin.tsx            # 匿名登入＋儲存 profile
+    │   │   └── TeacherLogin.tsx            # Email/Password 登入
+    │   ├── placement/PlacementOrchestrator.ts  # 初始分級測驗流程
+    │   ├── quiz/
+    │   │   ├── QuizOrchestrator.ts         # 統籌整個練習流程
+    │   │   ├── QuizSessionApi.ts
+    │   │   ├── AnswerProcessor.ts          # 辨識結果 → 判分 → SM-2 → 寫入
+    │   │   ├── HandwritingCanvas.tsx
+    │   │   ├── Countdown.tsx
+    │   │   └── QuizScreen.tsx
+    │   └── dashboard/
+    │       ├── TeacherDashboard.tsx
+    │       ├── AssignmentManager.tsx
+    │       ├── hooks/useStudentDetail.ts   # 讀取＋快取單一學生詳情
+    │       └── components/
+    │           ├── StudentDetailPanel.tsx
+    │           ├── WeakWordsTable.tsx
+    │           ├── ResponseTimeBar.tsx
+    │           ├── ErrorBreakdownPie.tsx
+    │           ├── LearningStyleRadar.tsx
+    │           └── StudentGrowthChart.tsx
+    │
+    └── types/
+        ├── word.ts
+        ├── progression.ts
+        ├── analytics.ts
+        ├── archivedStudent.ts
+        └── dailySnapshot.ts
 ```
 
 ### 值得特別說明的設計決策
 
-- **單字內容與學習進度完全分離。** Excel 檔案永遠只存「內容」（單字、意思、例句、字
-  根、提⽰、難度）。SRS 狀態（`reviewInterval`、`easeFactor`、`nextReviewDate` 等）
-  存在 Firestore，依學⽣分開記錄。這代表⽼師發布新單字庫時，不會不⼩⼼洗掉任何學⽣
-  的複習紀錄。
-- **判分永遠不相信使⽤者輸入。** `grader.ts` 只根據「辨識出的⽂字 vs. 正確答案」、
-  「作答時間 vs. 時限」計算出客觀的 `quality` 分數（0–5）。`sm2.ts` 完全不知道原始的
-  使⽤者輸入是什麼，只接收這個已經算好的分數。這對應真實⽐賽中「⼩⽩板由評審現場判
-  定，不是選⼿⾃⼰講」的規則。
-- **辨識引擎完全可抽換。** `RecognitionEngine` 是一個介面，實際實作在執⾏期依裝置效
-  能 benchmark 動態選擇；推論運算丟進 Web Worker 執⾏，確保⼿寫畫布在模型運算時不
-  會掉幀、卡頓。
+- **單字內容與學習進度完全分離。** 單字庫永遠只存「內容」（單字、意思、例句、難
+  度）。SRS 狀態（`reviewInterval`、`easeFactor`、`nextReviewDate` 等）存在
+  Firestore，依學⽣分開記錄。⽼師發布新單字庫時，不會不⼩⼼洗掉任何學⽣的複習紀錄。
+- **判分永遠不相信使⽤者輸入。** `domain/grading/grader.ts` 只根據「辨識出的⽂字
+  vs. 正確答案」、「作答時間 vs. 時限」計算出客觀的 `quality` 分數（0–5）；
+  `AnswerProcessor.ts` 是唯一一個把辨識結果串接到判分、SM-2、儲存的地方。`sm2.ts`
+  完全不知道原始的使⽤者輸入是什麼，只接收這個已經算好的分數。這對應真實⽐賽中
+  「⼩⽩板由評審現場判定，不是選⼿⾃⼰講」的規則。
+- **儲存層是分層的，不是單體的。** `ProgressStore` 是一個介面，底下有
+  `InMemoryProgressStore`、`LocalStorageProgressStore`、`FirestoreProgressStore`，
+  以及結合「本地優先反應速度」與「Firestore 同步」的 `HybridProgressStore`，另外用
+  `AttemptBatcher` 避免寫入暴衝。
 - **候選池，而非全表掃描。** 早期版本在學⽣登入時載入全部複習歷史，直接把 Firestore
-  免費⽅案的讀取配額打爆（⼀次 7,000 多次讀取）。修正方式是導入 Top-K 候選池
-  （`getReviewCandidates(limit)` / `getNewCandidates(limit)`）、教師儀表板改讀預聚
-  合的 `classStats` ⽂件，以及單字庫大量上傳時採⽤批次寫入。
+  免費⽅案的讀取配額打爆（⼀次 7,000 多次讀取）。現在由 `quotaMonitor.ts` 直接追蹤
+  讀寫量，搭配 Top-K 候選池與 `ClassStatsService` 的預聚合文件供教師儀表板使用。
 - **選題邏輯避免「卡在同一個字」。** 曾經出現過的 bug：學⽣少量的到期複習字用完後，
   選題邏輯會不斷重複同 2–3 個字。修正做法包含：同⼀天內已出過的題⽬集合、候選池⼤
   ⼩改為每⽇配額的倍數（而非直接等於配額）、⽤最近學過但尚未到期的字補⾜池⼦，以及
   ε-greedy 隨機探索，避免任何一個字的選中權重被卡在 0。
+- **適應性分級與 SRS 並存，而非合併。** `domain/progression/`（策略模式的
+  `LevelProgressionStrategy`，目前有 `RuleBasedStrategy` 實作）與
+  `PlacementOrchestrator.ts` 負責決定學生「該被放在哪個難度層級」，這跟 SM-2 決定
+  「今天該複習哪個字」是兩件事、分開處理，只在系統邊界互相組合。
 
 ## 🔐 ⾝份與權限設計
 
@@ -158,7 +230,10 @@ Stage 6-A 之所以刻意排在 6-B 之前，是因為儀表板**只讀**、完�
 ## 🛠️ 技術棧
 
 - **前端：** TypeScript + Vite（靜態輸出，可直接部署到 GitHub Pages）
-- **資料轉換：** Node.js/TypeScript ＋ SheetJS（`xlsx`），透過 GitHub Actions 執行
+- **資料轉換：** Node.js/TypeScript。老師端的單字庫發布仍走 `AdminPanel.tsx` 的
+  Excel 上傳流程；另外有一組獨立的維護腳本（`mergeVocabCsv.ts`、
+  `simplifyVocabByUsage.ts`）用來在匯入前整理、清理底層的
+  `vocab_csv/vocab_cleaned.csv` 單字來源
 - **⼿寫辨識：** Google IME ⼿寫 API，並保留開源 TensorFlow.js ＋ OpenCV.js 作為可
   自架的備援方案
 - **語音：** Web Speech API（瀏覽器內建 TTS）
@@ -191,4 +266,4 @@ Authentication（學生／教師／管理員角色）與後續效能／體驗優
 
 ## 📄 授權
 
-待定。
+GPL-3.0
