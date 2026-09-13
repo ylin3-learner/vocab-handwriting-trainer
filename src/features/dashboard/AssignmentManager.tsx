@@ -1,14 +1,23 @@
 // src/features/dashboard/AssignmentManager.tsx
-import React, { useState, useEffect } from 'react';
-import { AssignmentService, Assignment, ReviewFocus } from '../../services/assignment/AssignmentService';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  AssignmentService,
+  Assignment,
+  ReviewFocus,
+  StudentOption,
+} from '../../services/assignment/AssignmentService';
 import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
 
 const service = new AssignmentService();
 
+type AssignMode = 'class' | 'individual';
+
 interface FormState {
   name: string;
-  className: string;
-  wordScope: string;
+  assignMode: AssignMode;
+  classId: string;
+  studentDisplayId: string; // 只在 assignMode === 'individual' 使用
+  targetLevel: number | undefined;
   dailyQuota: number;
   newRatio: number;
   reviewFocus: ReviewFocus;
@@ -19,22 +28,48 @@ interface FormState {
 
 const emptyForm = (): FormState => ({
   name: '',
-  className: '',
-  wordScope: '全部',
+  assignMode: 'class',
+  classId: '',
+  studentDisplayId: '',
+  targetLevel: undefined,
   dailyQuota: 30,
   newRatio: 0.3,
-  reviewFocus: 'balanced', // 👈 修正：原本漏掉這個欄位
+  reviewFocus: 'balanced',
   startDate: new Date().toISOString().slice(0, 10),
   endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
   isActive: true,
 });
 
-// 專注度對應的顯示文字
 const FOCUS_LABEL: Record<ReviewFocus, string> = {
   strict: '🎯 精準複習',
   balanced: '⚖️ 均衡練習',
   explore: '🎲 廣泛探索',
 };
+
+/**
+ * 依指派對象與等級自動生成作業名稱。
+ * 格式：`{對象} · L{等級} · {MM-DD}`
+ * 例如：`709 · L4 · 09-13`
+ */
+function generateAutoName(className: string, targetLevel?: number): string {
+  const levelStr = targetLevel ? `L${targetLevel}` : '自動';
+  const dateStr = new Date().toISOString().slice(5, 10); // MM-DD
+  return `${className} · ${levelStr} · ${dateStr}`;
+}
+
+/**
+ * 將 className 格式化為顯示用。
+ * - "709"           → "709"
+ * - "709_1_林佑綸"  → "709 · 1 · 林佑綸"
+ */
+function formatTarget(className: string | null): string {
+  if (!className) return '全校';
+  return className.split('_').join(' · ');
+}
+
+function isPersonal(className: string | null): boolean {
+  return !!className && className.includes('_');
+}
 
 export const AssignmentManager: React.FC = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -42,6 +77,11 @@ export const AssignmentManager: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [status, setStatus] = useState('');
+
+  // 下拉選單資料
+  const [classes, setClasses] = useState<string[]>([]);
+  const [students, setStudents] = useState<StudentOption[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
 
   const loadAssignments = async () => {
     setLoading(true);
@@ -57,24 +97,67 @@ export const AssignmentManager: React.FC = () => {
     }
   };
 
+  const loadClasses = async () => {
+    const list = await service.getAllClasses();
+    setClasses(list);
+  };
+
+  const loadStudents = useCallback(async (className: string) => {
+    if (!className) {
+      setStudents([]);
+      return;
+    }
+    setLoadingStudents(true);
+    try {
+      const list = await service.getStudentsByClass(className);
+      setStudents(list);
+    } finally {
+      setLoadingStudents(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadAssignments();
+    loadClasses();
   }, []);
+
+  // 當班級變動時，重新載入學生
+  useEffect(() => {
+    if (form.assignMode === 'individual') {
+      void loadStudents(form.classId);
+    }
+  }, [form.classId, form.assignMode, loadStudents]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim()) {
-      setStatus('❌ 請輸入作業名稱');
+
+    // 驗證
+    if (!form.classId) {
+      setStatus('❌ 請選擇班級');
+      return;
+    }
+    if (form.assignMode === 'individual' && !form.studentDisplayId) {
+      setStatus('❌ 請選擇學生');
       return;
     }
 
+    // 決定 className
+    const className =
+      form.assignMode === 'individual'
+        ? form.studentDisplayId
+        : form.classId;
+
+    // 決定名稱（若未填則自動生成）
+    const name =
+      form.name.trim() || generateAutoName(className, form.targetLevel);
+
     const payload = {
-      name: form.name.trim(),
-      className: form.className.trim() || null,
-      wordScope: form.wordScope,
+      name,
+      className,
+      targetLevel: form.targetLevel,
       dailyQuota: form.dailyQuota,
       newRatio: form.newRatio,
-      reviewFocus: form.reviewFocus, // 👈 新增
+      reviewFocus: form.reviewFocus,
       startDate: new Date(form.startDate).toISOString(),
       endDate: new Date(form.endDate).toISOString(),
       isActive: form.isActive,
@@ -99,13 +182,21 @@ export const AssignmentManager: React.FC = () => {
 
   const handleEdit = (a: Assignment) => {
     setEditingId(a.id);
+
+    const personal = isPersonal(a.className);
+    const classId = personal
+      ? a.className!.split('_')[0] ?? ''
+      : (a.className ?? '');
+
     setForm({
       name: a.name,
-      className: a.className || '',
-      wordScope: a.wordScope,
+      assignMode: personal ? 'individual' : 'class',
+      classId,
+      studentDisplayId: personal ? a.className! : '',
+      targetLevel: a.targetLevel,
       dailyQuota: a.dailyQuota,
       newRatio: a.newRatio,
-      reviewFocus: a.reviewFocus ?? 'balanced', // 👈 新增（舊資料預設 balanced）
+      reviewFocus: a.reviewFocus ?? 'balanced',
       startDate: a.startDate.slice(0, 10),
       endDate: a.endDate.slice(0, 10),
       isActive: a.isActive,
@@ -148,7 +239,7 @@ export const AssignmentManager: React.FC = () => {
         📋 作業管理
       </h1>
       <p style={{ color: '#6c757d' }}>
-        建立作業後，學生登入時會依班級自動讀取對應的配額與新舊字比例。
+        建立作業後，學生登入時會依「個人 → 班級 → 全校」的優先序自動讀取對應設定。
       </p>
 
       {status && (
@@ -162,7 +253,9 @@ export const AssignmentManager: React.FC = () => {
         </div>
       )}
 
+      {/* ============================================================ */}
       {/* 表單 */}
+      {/* ============================================================ */}
       <form onSubmit={handleSubmit} style={{
         background: '#f8f9fa',
         padding: '1.5rem',
@@ -174,46 +267,144 @@ export const AssignmentManager: React.FC = () => {
         </h3>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-          <div>
-            <label>作業名稱 *</label>
+          {/* 作業名稱（選填） */}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label>作業名稱（選填）</label>
             <input
               type="text"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-              placeholder="例如：Unit 1 基礎單字"
+              placeholder="留空將自動生成，例如：709 · L4 · 09-13"
               style={{ width: '100%', padding: '0.5rem' }}
             />
+            <small style={{ color: '#6c757d' }}>
+              建議只在「同一對象同時有多個作業」時填寫，方便辨識。
+            </small>
           </div>
 
-          <div>
-            <label>班級（留空 = 全校通用）</label>
-            <input
-              type="text"
-              value={form.className}
-              onChange={(e) => setForm({ ...form, className: e.target.value })}
-              placeholder="例如：701"
-              style={{ width: '100%', padding: '0.5rem' }}
-            />
+          {/* 指派對象 */}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label>指派對象</label>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setForm({
+                  ...form,
+                  assignMode: 'class',
+                  studentDisplayId: '',
+                })}
+                style={{
+                  flex: 1,
+                  padding: '0.5rem 1rem',
+                  background: form.assignMode === 'class' ? '#007bff' : '#e9ecef',
+                  color: form.assignMode === 'class' ? 'white' : '#495057',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                }}
+              >
+                🏫 全班
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, assignMode: 'individual' })}
+                style={{
+                  flex: 1,
+                  padding: '0.5rem 1rem',
+                  background: form.assignMode === 'individual' ? '#007bff' : '#e9ecef',
+                  color: form.assignMode === 'individual' ? 'white' : '#495057',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                }}
+              >
+                👤 個人
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: form.assignMode === 'individual' ? '1fr 1fr' : '1fr', gap: '1rem' }}>
+              {/* 班級下拉 */}
+              <div>
+                <label style={{ fontSize: '0.9rem' }}>班級</label>
+                <select
+                  value={form.classId}
+                  onChange={(e) => setForm({
+                    ...form,
+                    classId: e.target.value,
+                    studentDisplayId: '', // 切換班級時重設學生
+                  })}
+                  style={{ width: '100%', padding: '0.5rem' }}
+                >
+                  <option value="">請選擇班級</option>
+                  {classes.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                {classes.length === 0 && (
+                  <small style={{ color: '#856404' }}>
+                    ⚠️ 尚無班級資料，請先讓學生登入系統
+                  </small>
+                )}
+              </div>
+
+              {/* 學生下拉（僅個人模式） */}
+              {form.assignMode === 'individual' && (
+                <div>
+                  <label style={{ fontSize: '0.9rem' }}>學生</label>
+                  <select
+                    value={form.studentDisplayId}
+                    onChange={(e) => setForm({ ...form, studentDisplayId: e.target.value })}
+                    disabled={!form.classId || loadingStudents}
+                    style={{ width: '100%', padding: '0.5rem' }}
+                  >
+                    <option value="">
+                      {loadingStudents ? '載入中...' : '請選擇學生'}
+                    </option>
+                    {students.map(s => (
+                      <option key={s.displayId} value={s.displayId}>
+                        {s.seatNumber} · {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  {form.classId && !loadingStudents && students.length === 0 && (
+                    <small style={{ color: '#856404' }}>
+                      ⚠️ 此班級尚無學生資料
+                    </small>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
+          {/* 目標等級 */}
           <div>
-            <label>單字範圍</label>
+            <label>目標等級</label>
             <select
-              value={form.wordScope}
-              onChange={(e) => setForm({ ...form, wordScope: e.target.value })}
+              value={form.targetLevel ?? ''}
+              onChange={(e) => setForm({
+                ...form,
+                targetLevel: e.target.value ? Number(e.target.value) : undefined,
+              })}
               style={{ width: '100%', padding: '0.5rem' }}
             >
-              <option value="全部">全部單字</option>
-              <option value="level:A1">A1 等級</option>
-              <option value="level:A2">A2 等級</option>
-              <option value="category:Food">食物類</option>
-              <option value="category:People">人物類</option>
+              <option value="">不指定（依學生程度自動出題）</option>
+              <option value="1">L1</option>
+              <option value="2">L2</option>
+              <option value="3">L3</option>
+              <option value="4">L4</option>
+              <option value="5">L5</option>
+              <option value="6">L6</option>
             </select>
+            <small style={{ color: '#6c757d' }}>
+              指定後，出題以該等級為主（60%），混合學生當前等級（30%）
+            </small>
           </div>
 
+          {/* 每日題數 */}
           <div>
-            <label>每日練習題數（dailyQuota）</label>
+            <label>每日練習題數</label>
             <input
               type="number"
               value={form.dailyQuota}
@@ -240,9 +431,10 @@ export const AssignmentManager: React.FC = () => {
             )}
           </div>
 
+          {/* 新字比例 */}
           <div>
             <label>
-              新單字比例（newRatio）：{Math.round(form.newRatio * 100)}%
+              新單字比例：{Math.round(form.newRatio * 100)}%
             </label>
             <input
               type="range"
@@ -255,7 +447,7 @@ export const AssignmentManager: React.FC = () => {
             />
           </div>
 
-          {/* 👇 新增：複習專注度 */}
+          {/* 複習專注度 */}
           <div>
             <label>複習專注度</label>
             <select
@@ -272,6 +464,7 @@ export const AssignmentManager: React.FC = () => {
             </small>
           </div>
 
+          {/* 起訖日期 */}
           <div style={{ display: 'flex', gap: '1rem' }}>
             <div style={{ flex: 1 }}>
               <label>開始日期</label>
@@ -293,6 +486,7 @@ export const AssignmentManager: React.FC = () => {
             </div>
           </div>
 
+          {/* 立即啟用 */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <label>
               <input
@@ -339,7 +533,9 @@ export const AssignmentManager: React.FC = () => {
         </div>
       </form>
 
+      {/* ============================================================ */}
       {/* 列表 */}
+      {/* ============================================================ */}
       <h3>現有作業（{assignments.length}）</h3>
       {assignments.length === 0 ? (
         <p style={{ color: '#6c757d' }}>尚無作業，請於上方建立。</p>
@@ -348,9 +544,9 @@ export const AssignmentManager: React.FC = () => {
           <thead>
             <tr style={{ background: '#f1f3f5', textAlign: 'left' }}>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>名稱</th>
-              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>班級</th>
+              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>指派對象</th>
+              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>目標等級</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>每日題數</th>
-              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>新字比例</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>K1/K2</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>專注度</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>期間</th>
@@ -363,12 +559,37 @@ export const AssignmentManager: React.FC = () => {
               const k2 = Math.floor(a.dailyQuota * a.newRatio);
               const k1 = a.dailyQuota - k2;
               const focus = a.reviewFocus ?? 'balanced';
+              const personal = isPersonal(a.className);
               return (
                 <tr key={a.id} style={{ borderBottom: '1px solid #f1f3f5' }}>
                   <td style={{ padding: '10px' }}><strong>{a.name}</strong></td>
-                  <td style={{ padding: '10px' }}>{a.className || '全校'}</td>
+                  <td style={{ padding: '10px', fontSize: '0.85rem' }}>
+                    {formatTarget(a.className)}
+                    {personal && (
+                      <span style={{
+                        marginLeft: '0.4rem',
+                        background: '#007bff',
+                        color: 'white',
+                        padding: '1px 6px',
+                        borderRadius: '8px',
+                        fontSize: '0.7rem',
+                      }}>個人</span>
+                    )}
+                    {!a.className && (
+                      <span style={{
+                        marginLeft: '0.4rem',
+                        background: '#6c757d',
+                        color: 'white',
+                        padding: '1px 6px',
+                        borderRadius: '8px',
+                        fontSize: '0.7rem',
+                      }}>全校</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '10px' }}>
+                    {a.targetLevel ? `L${a.targetLevel}` : '自動'}
+                  </td>
                   <td style={{ padding: '10px' }}>{a.dailyQuota}</td>
-                  <td style={{ padding: '10px' }}>{Math.round(a.newRatio * 100)}%</td>
                   <td style={{ padding: '10px' }}>K1={k1} / K2={k2}</td>
                   <td style={{ padding: '10px' }}>{FOCUS_LABEL[focus]}</td>
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>
