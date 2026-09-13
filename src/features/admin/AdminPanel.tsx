@@ -153,6 +153,8 @@ export const AdminPanel: React.FC = () => {
                     rootMeaning: word.rootMeaning as string | undefined,
                     hint: word.hint as string | undefined,
                     level: word.level as string | undefined,
+                    // 生成隨機排序鍵，供 Firestore 隨機抽樣使用
+                    random: Math.random(),
                 });
             }
         });
@@ -213,7 +215,7 @@ export const AdminPanel: React.FC = () => {
         }
     };
 
-        const handlePublish = async () => {
+    const handlePublish = async () => {
         if (previewData.length === 0) {
             alert('沒有可發布的資料');
             return;
@@ -230,11 +232,11 @@ export const AdminPanel: React.FC = () => {
 
         const confirmMsg = oldCount >= 0
             ? `確定要發布 ${previewData.length} 筆單字嗎？\n\n` +
-              `此操作會：\n` +
-              `1. 刪除現有 ${oldCount} 筆舊單字\n` +
-              `2. 寫入 ${previewData.length} 筆新單字\n\n` +
-              `⚠️ 為避免觸發 Firestore 配額限制，每批次之間會延遲 1 秒。\n` +
-              `預估耗時：${Math.ceil((oldCount + previewData.length) / 400) * 1.5} 秒`
+            `此操作會：\n` +
+            `1. 刪除現有 ${oldCount} 筆舊單字\n` +
+            `2. 寫入 ${previewData.length} 筆新單字\n\n` +
+            `⚠️ 為避免觸發 Firestore 配額限制，每批次之間會延遲 1 秒。\n` +
+            `預估耗時：${Math.ceil((oldCount + previewData.length) / 400) * 1.5} 秒`
             : `確定要發布 ${previewData.length} 筆單字嗎？`;
 
         if (!window.confirm(confirmMsg)) {

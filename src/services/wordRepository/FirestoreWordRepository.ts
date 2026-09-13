@@ -7,11 +7,14 @@ import {
   orderBy,
   limit,
   startAfter,
-  documentId
+  documentId,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Word } from '../../types/word';
 import { WordRepository } from './WordRepository';
+
+/** 每批讀取的單字數（用於隨機抽樣的分頁） */
+const RANDOM_BATCH_SIZE = 100;
 
 export class FirestoreWordRepository implements WordRepository {
   private readonly collectionPath = ['vocabulary', 'current', 'words'] as const;
@@ -44,7 +47,6 @@ export class FirestoreWordRepository implements WordRepository {
       const words: Word[] = [];
       const batchCount = Math.ceil(ids.length / 30);
 
-      // Firestore 的 `in` 查詢一次最多 30 個
       for (let i = 0; i < ids.length; i += 30) {
         const chunk = ids.slice(i, i + 30);
         const batchIndex = Math.floor(i / 30) + 1;
@@ -67,7 +69,12 @@ export class FirestoreWordRepository implements WordRepository {
     }
   }
 
-  // 取得新單字（排除已學過的）
+  /**
+   * ⚠️ Legacy：取得新單字（無 level 過濾）。
+   *
+   * 保留給相容性與測試使用。日常練習已改用 getNewWordsByLevels。
+   * 注意：此方法仍按 documentId 排序，可能會有「每次都抓同一批」的問題。
+   */
   async getNewWords(excludeIds: Set<string>, limitCount: number): Promise<Word[]> {
     try {
       console.log(`📚 [getNewWords] 目標：${limitCount} 個，排除 ${excludeIds.size} 個已學過的單字`);
@@ -81,17 +88,12 @@ export class FirestoreWordRepository implements WordRepository {
 
       while (words.length < limitCount && iterations < maxIterations) {
         iterations++;
-        console.log(`   - 第 ${iterations}/${maxIterations} 輪，目前 ${words.length}/${limitCount} 個，讀取 ${batchSize} 筆...`);
-
         const q = lastDoc
           ? query(wordsRef, orderBy(documentId()), startAfter(lastDoc), limit(batchSize))
           : query(wordsRef, orderBy(documentId()), limit(batchSize));
 
         const snapshot = await getDocs(q);
-        if (snapshot.empty) {
-          console.log(`   - 已到集合尾端，停止`);
-          break;
-        }
+        if (snapshot.empty) break;
 
         for (const d of snapshot.docs) {
           if (excludeIds.has(d.id)) continue;
@@ -102,7 +104,7 @@ export class FirestoreWordRepository implements WordRepository {
         lastDoc = snapshot.docs[snapshot.docs.length - 1];
       }
 
-      console.log(`✅ [getNewWords] 完成，共取得 ${words.length} 個新單字（讀了 ${iterations} 輪）`);
+      console.log(`✅ [getNewWords] 完成，共取得 ${words.length} 個新單字`);
       return words;
     } catch (error) {
       console.error('❌ [getNewWords] 取得新單字失敗:', error);
@@ -111,53 +113,101 @@ export class FirestoreWordRepository implements WordRepository {
   }
 
   /**
-   * Stage 3 新增：依 level 清單取得新單字
+   * 🔥 依 level 清單隨機取得新單字。
    *
-   * Firestore 的 `in` 查詢最多支援 30 個值，但 level 只有 1~6，遠低於限制。
+   * 核心演算法（隨機範圍查詢）：
+   *   1. 生成隨機起點 randomStart = Math.random()
+   *   2. 第一段：where('random', '>=', randomStart) 由小到大讀取
+   *   3. 若不足，第二段：where('random', '<', randomStart) 補齊
+   *   4. 兩段都做分頁，直到湊足 limitCount 或全部讀完
+   *
+   * 為什麼需要 random 欄位？
+   *   若只按 'word' 字母序查詢，每次都從字母最前面抓，
+   *   導致每次抽樣都拿到同一批單字。隨機欄位讓每次查詢的
+   *   起點不同，達成均勻隨機抽樣。
+   *
+   * 為什麼分兩段？
+   *   若 randomStart 很接近 1，第一段可能不足；
+   *   若很接近 0，第二段幾乎不需要。兩段互補覆蓋整批資料。
    */
   async getNewWordsByLevels(
     excludeIds: Set<string>,
     levels: number[],
     limitCount: number
   ): Promise<Word[]> {
-    if (levels.length === 0) return [];
+    if (levels.length === 0 || limitCount <= 0) return [];
 
-    // Firestore 的 in 查詢要求值為字串
     const levelStrings = levels.map((l) => String(l));
-
-    // 每次最多讀取 limitCount * 3 筆（避免一次拉太多），用分頁方式累積
-    const BATCH_SIZE = Math.min(300, limitCount * 3);
+    const wordsRef = collection(db, ...this.collectionPath);
     const results: Word[] = [];
-    let lastDoc: any = null;
+    const seenIds = new Set<string>();
 
+    const tryAdd = (word: Word): void => {
+      if (results.length >= limitCount) return;
+      if (excludeIds.has(word.id)) return;
+      if (seenIds.has(word.id)) return;
+      results.push(word);
+      seenIds.add(word.id);
+    };
+
+    const randomStart = Math.random();
+    console.log(
+      `🎲 [getNewWordsByLevels] levels=[${levelStrings.join(',')}] target=${limitCount} randomStart=${randomStart.toFixed(3)}`
+    );
+
+    // ============================================================
+    // 第一段：random >= randomStart（由 random 升序，分頁讀取）
+    // ============================================================
+    let cursor: any = null;
     while (results.length < limitCount) {
-      const baseQuery = query(
-        collection(db, 'vocabulary', 'current', 'words'),
+      const baseQ = query(
+        wordsRef,
         where('level', 'in', levelStrings),
-        orderBy('word'),
-        limit(BATCH_SIZE)
+        where('random', '>=', randomStart),
+        orderBy('random'),
+        limit(RANDOM_BATCH_SIZE)
       );
-
-      // 分頁游標（下一輪從這裡繼續）
-      const q = lastDoc
-        ? query(baseQuery, startAfter(lastDoc))
-        : baseQuery;
+      const q = cursor ? query(baseQ, startAfter(cursor)) : baseQ;
 
       const snap = await getDocs(q);
       if (snap.empty) break;
 
-      for (const docSnap of snap.docs) {
-        if (results.length >= limitCount) break;
-        const word = { id: docSnap.id, ...docSnap.data() } as Word;
-        if (!excludeIds.has(word.id)) {
-          results.push(word);
-        }
+      for (const d of snap.docs) {
+        tryAdd({ id: d.id, ...d.data() } as Word);
       }
 
-      lastDoc = snap.docs[snap.docs.length - 1];
-      if (snap.docs.length < BATCH_SIZE) break; // 資料已讀完
+      if (snap.docs.length < RANDOM_BATCH_SIZE) break;
+      cursor = snap.docs[snap.docs.length - 1];
     }
 
+    // ============================================================
+    // 第二段：random < randomStart（補齊不足）
+    // ============================================================
+    if (results.length < limitCount) {
+      cursor = null;
+      while (results.length < limitCount) {
+        const baseQ = query(
+          wordsRef,
+          where('level', 'in', levelStrings),
+          where('random', '<', randomStart),
+          orderBy('random'),
+          limit(RANDOM_BATCH_SIZE)
+        );
+        const q = cursor ? query(baseQ, startAfter(cursor)) : baseQ;
+
+        const snap = await getDocs(q);
+        if (snap.empty) break;
+
+        for (const d of snap.docs) {
+          tryAdd({ id: d.id, ...d.data() } as Word);
+        }
+
+        if (snap.docs.length < RANDOM_BATCH_SIZE) break;
+        cursor = snap.docs[snap.docs.length - 1];
+      }
+    }
+
+    console.log(`✅ [getNewWordsByLevels] 取得 ${results.length}/${limitCount} 個單字`);
     return results;
   }
 
@@ -173,6 +223,7 @@ export class FirestoreWordRepository implements WordRepository {
       rootMeaning: data.rootMeaning,
       hint: data.hint,
       level: data.level,
+      random: data.random, // 保留 random 欄位
     };
   }
 }
