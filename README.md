@@ -282,4 +282,4 @@ ahead of the Stage 7 pilot test.
 
 ## 📄 License
 
-TBD.
+GPL 3.0
