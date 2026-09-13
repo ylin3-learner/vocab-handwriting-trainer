@@ -12,6 +12,7 @@ import { StudentStateService } from '../../services/progression/StudentStateServ
 import { QuizSessionApi } from '../quiz/QuizSessionApi';
 import type { Word } from '../../types/word';
 import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
+import { buildDisplayId } from '../../domain/string/displayId';
 
 const FALLBACK_WORDS: Word[] = [
   { id: 'apple', word: 'apple', meaning: '蘋果', sentence: 'I eat an apple every day.' },
@@ -78,7 +79,14 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
         className.trim(),
         seatNumber.trim()
       );
-      const displayId = `${className.trim()}_${seatNumber.trim()}_${studentName.trim()}`;
+
+      const displayId = buildDisplayId(
+        className.trim(),
+        seatNumber.trim(),
+        studentName.trim(),
+        uid  // fallback（理論上不會用到，因為三欄都必填）
+      );
+      
       console.log(`✅ [StudentLogin] Profile 已儲存：${displayId}`);
 
       // ===== 步驟 3：建立 WordRepository =====
