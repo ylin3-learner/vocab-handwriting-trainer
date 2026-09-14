@@ -1,5 +1,5 @@
 // src/features/dashboard/AssignmentManager.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   AssignmentService,
   Assignment,
@@ -77,6 +77,28 @@ export const AssignmentManager: React.FC = () => {
   const [classes, setClasses] = useState<string[]>([]);
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(false);
+
+  /**
+   * 偵測「同一對象存在多個生效中作業」的作業 ID 集合。
+   * 用於在列表中顯示警告徽章，提醒老師手動刪除重複。
+   */
+  const duplicateAssignmentIds = useMemo(() => {
+    const byTarget = new Map<string, Assignment[]>();
+    for (const a of assignments) {
+      if (!a.isActive) continue;
+      const key = a.className ?? '__school__';
+      if (!byTarget.has(key)) byTarget.set(key, []);
+      byTarget.get(key)!.push(a);
+    }
+
+    const dups = new Set<string>();
+    byTarget.forEach((list) => {
+      if (list.length > 1) {
+        list.forEach(a => dups.add(a.id));
+      }
+    });
+    return dups;
+  }, [assignments]);
 
   const loadAssignments = async () => {
     setLoading(true);
@@ -559,7 +581,24 @@ export const AssignmentManager: React.FC = () => {
               const floor = a.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE;
               return (
                 <tr key={a.id} style={{ borderBottom: '1px solid #f1f3f5' }}>
-                  <td style={{ padding: '10px' }}><strong>{a.name}</strong></td>
+                  <td style={{ padding: '10px' }}>
+                    <strong>{a.name}</strong>
+                    {duplicateAssignmentIds.has(a.id) && (
+                      <span
+                        title="此對象存在多個生效中作業，請手動刪除不需要的"
+                        style={{
+                          marginLeft: '0.4rem',
+                          background: '#ffc107',
+                          color: '#000',
+                          padding: '1px 6px',
+                          borderRadius: '8px',
+                          fontSize: '0.7rem',
+                        }}
+                      >
+                        ⚠️ 同對象多個
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>
                     {formatTarget(a.className)}
                     {personal && (

@@ -15,12 +15,11 @@ import {
   documentId,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { selectActiveAssignment } from '../../domain/assignment/selectAssignment';
 
 export type ReviewFocus = 'strict' | 'balanced' | 'explore';
 
-/** 系統預設語速（標準英語） */
 export const DEFAULT_SPEECH_RATE = 1.0;
-/** 系統預設語速下限（慢速重聽） */
 export const DEFAULT_SPEECH_FLOOR_RATE = 0.85;
 
 export interface Assignment {
@@ -35,17 +34,7 @@ export interface Assignment {
   endDate: string;
   isActive: boolean;
   createdAt: string;
-
-  // 🔥 語音設定
-  /**
-   * 預設播放語速（1.0 = 標準英語）。
-   * 學生首次聽到題目時使用。若未設定，預設 1.0。
-   */
   speechRate?: number;
-  /**
-   * 全班語速下限（0.5 ~ 1.0）。
-   * 學生點「🐢 重聽一次（慢速）」時使用。若未設定，預設 0.85。
-   */
   speechFloorRate?: number;
 }
 
@@ -72,6 +61,12 @@ function focusToExplorationRate(focus: ReviewFocus | undefined): number {
 }
 
 export class AssignmentService {
+  /**
+   * 學生端：取得當前生效作業。
+   *
+   * 優先序由純函式 selectActiveAssignment 決定：
+   *   個人 > 班級 > 全校；同類型多個時取 createdAt 最新。
+   */
   async getActiveAssignment(
     className: string,
     displayId?: string
@@ -79,42 +74,29 @@ export class AssignmentService {
     const assignmentsRef = collection(db, 'assignments');
     const q = query(assignmentsRef, where('isActive', '==', true));
     const snapshot = await getDocs(q);
-    const now = new Date().toISOString();
 
     const all = snapshot.docs.map(d => ({
       id: d.id,
       ...d.data()
     } as Assignment));
 
-    const validAssignments = all.filter(a => {
-      if (a.startDate > now) return false;
-      if (a.endDate < now) return false;
-      return true;
-    });
+    const now = new Date().toISOString();
+    const selected = selectActiveAssignment(all, className, displayId, now);
 
-    let target: Assignment | undefined;
+    if (!selected) return null;
 
-    if (displayId) {
-      target = validAssignments.find(a => a.className === displayId);
-      if (target) console.log(`👤 [AssignmentService] 找到個人作業「${target.name}」`);
-    }
-    if (!target) {
-      target = validAssignments.find(a => a.className === className);
-      if (target) console.log(`🏫 [AssignmentService] 找到班級作業「${target.name}」`);
-    }
-    if (!target) {
-      target = validAssignments.find(a => a.className === null);
-      if (target) console.log(`🌐 [AssignmentService] 找到全校作業「${target.name}」`);
-    }
+    const target = selected.assignment;
+    const matchLabel =
+      selected.matchType === 'personal' ? '👤 個人' :
+      selected.matchType === 'class'    ? '🏫 班級' :
+                                          '🌐 全校';
 
-    if (!target) return null;
+    console.log(
+      `${matchLabel} [AssignmentService] 作業「${target.name}」→ targetLevel=${target.targetLevel ?? '未指定'}`
+    );
 
     const newWordCount = Math.floor(target.dailyQuota * target.newRatio);
     const explorationRate = focusToExplorationRate(target.reviewFocus);
-
-    console.log(
-      `📋 [AssignmentService] 作業「${target.name}」→ targetLevel=${target.targetLevel ?? '未指定'}, speechRate=${target.speechRate ?? DEFAULT_SPEECH_RATE}, speechFloor=${target.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE}`
-    );
 
     return {
       assignment: target,
