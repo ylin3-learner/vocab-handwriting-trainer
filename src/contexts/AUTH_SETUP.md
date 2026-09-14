@@ -258,3 +258,10 @@ node scripts/set-role.mjs admin@yourdomain.com admin
 # 移除角色（降為學生）
 node scripts/set-role.mjs teacher@school.edu.tw student
 ```
+
+# 流程確認
+
+1. Firebase Console → Authentication → Add user（輸入 email + password）
+2. node scripts/set-role.mjs <email> teacher
+3. 告訴老師帳密
+4. 老師登入 → 看到教師後台
