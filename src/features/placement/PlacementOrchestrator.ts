@@ -257,6 +257,21 @@ export class PlacementOrchestrator implements QuizSessionApi {
         };
     }
 
+    /**
+     * 鑑定模式的播放語速固定為 1.0（標準英語）。
+     * 鑑定要測「真實反應」，不允許學生調整。
+     */
+    getSpeechRate(): number {
+        return 1.0;
+    }
+
+    /**
+     * 鑑定模式不提供慢速重聽。
+     */
+    getSpeechFloorRate(): number | null {
+        return null;
+    }
+
     async finalizeSession(): Promise<void> {
         if (this.finalized) return;
         this.finalized = true;

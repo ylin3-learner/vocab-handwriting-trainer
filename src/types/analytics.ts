@@ -36,14 +36,14 @@ export interface StudentAnalytics {
   name: string;
   className: string;
 
-  // 🔥 需求 B：當前等級（來自 learningState.currentLevel）
+  // 當前等級
   currentLevel: number;
 
   // 學習概況
   totalAttempts: number;
   correctCount: number;
-  correctRate: number;        // 0~100
-  activeDaysLast7: number;    // 近 7 天有練習的天數
+  correctRate: number;
+  activeDaysLast7: number;
 
   // 行為診斷
   avgResponseTimeMs: number;
@@ -62,6 +62,9 @@ export interface StudentAnalytics {
   firstAttemptAt: string | null;
   lastAttemptAt: string | null;
 
-  // 🔥 需求 C：每日快照（供成長曲線使用）
+  // 每日快照
   dailySnapshots: DailySnapshot[];
+
+  // 個人語速下限（若未設定則 undefined）
+  customSpeechFloor?: number;
 }

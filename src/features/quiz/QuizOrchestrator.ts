@@ -6,7 +6,12 @@ import { GradingResult } from '../../domain/grading/grader';
 import { SM2Result } from '../../domain/scheduler/sm2';
 import { calculateOverdueDays } from '../../domain/date/overdue';
 import { pickNextWordId, WordEntry } from '../../domain/selection/questionSelector';
-import { AssignmentService, ActiveAssignment } from '../../services/assignment/AssignmentService';
+import {
+  AssignmentService,
+  ActiveAssignment,
+  DEFAULT_SPEECH_RATE,
+  DEFAULT_SPEECH_FLOOR_RATE,
+} from '../../services/assignment/AssignmentService';
 import { ClassStatsService } from '../../services/analytics/ClassStatsService';
 import { StudentStateService } from '../../services/progression/StudentStateService';
 import { LevelProgressionService } from '../../services/progression/LevelProgressionService';
@@ -73,6 +78,9 @@ export class QuizOrchestrator implements QuizSessionApi {
   private currentLevel: number = 1;
   private sessionAttempts: number = 0;
 
+  // 🔥 語音設定
+  private customSpeechFloor: number | undefined;
+
   private attemptBatcher: AttemptBatcher;
   private localStore: LocalStorageProgressStore;
   private answerProcessor: AnswerProcessor;
@@ -98,17 +106,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     return this.currentLevel;
   }
 
-  // ============================================================
-  // QuizSessionApi 實作
-  // ============================================================
-
-  /**
-   * 取得學生的複合識別碼（displayId）。
-   *
-   * 用途：作為 learningState 的 key（跨 UID 持續追蹤）。
-   * 若資料不完整（缺姓名或座號），退回使用 uid。
-   */
-   private getDisplayId(): string {
+  private getDisplayId(): string {
     return buildDisplayId(
       this.className,
       this.deps.studentSeatNumber,
@@ -131,6 +129,33 @@ export class QuizOrchestrator implements QuizSessionApi {
   }
 
   // ============================================================
+  // 🔥 語音設定
+  // ============================================================
+
+  /**
+   * 首次播放語速。
+   * 從作業設定讀取，若無則用系統預設 1.0。
+   */
+  getSpeechRate(): number {
+    return this.activeAssignment?.assignment.speechRate ?? DEFAULT_SPEECH_RATE;
+  }
+
+  /**
+   * 慢速重聽下限。
+   *
+   * 優先序：
+   *   1. 學生個人設定（customSpeechFloor）
+   *   2. 作業設定（speechFloorRate）
+   *   3. 系統預設 0.85
+   */
+  getSpeechFloorRate(): number | null {
+    if (this.customSpeechFloor !== undefined) {
+      return this.customSpeechFloor;
+    }
+    return this.activeAssignment?.assignment.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE;
+  }
+
+  // ============================================================
   // init
   // ============================================================
 
@@ -143,12 +168,16 @@ export class QuizOrchestrator implements QuizSessionApi {
 
     const displayId = this.getDisplayId();
 
-    // 步驟 0：讀取學習狀態（使用 displayId）
+    // 步驟 0：讀取學習狀態
     try {
       await this.studentStateService.initializeIfNeeded(displayId, 1);
       const learningState = await this.studentStateService.getState(displayId);
       this.currentLevel = learningState.currentLevel;
+      this.customSpeechFloor = learningState.customSpeechFloor; // 🔥 讀取個人語速下限
       console.log(`   ✅ 當前等級：L${this.currentLevel}`);
+      if (this.customSpeechFloor !== undefined) {
+        console.log(`   🔊 個人語速下限：${this.customSpeechFloor}`);
+      }
     } catch (e) {
       console.warn('⚠️ 讀取學習狀態失敗，使用預設 L1:', e);
       this.currentLevel = 1;
@@ -168,7 +197,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       console.warn('⚠️ 檢查每日快照失敗（不影響測驗）:', e);
     }
 
-    // 步驟 1：讀取作業設定（傳入 displayId 支援個人作業）
+    // 步驟 1：讀取作業設定
     try {
       this.activeAssignment = await this.assignmentService.getActiveAssignment(
         this.className,
@@ -183,7 +212,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       this.dailyMaxQuota = this.activeAssignment.assignment.dailyQuota;
       this.dailyNewQuotaRemaining = this.activeAssignment.newWordCount;
       console.log(
-        `   ✅ 讀取作業「${this.activeAssignment.assignment.name}」，配額 ${this.dailyMaxQuota} 題，targetLevel=${this.activeAssignment.assignment.targetLevel ?? '未指定'}`
+        `   ✅ 讀取作業「${this.activeAssignment.assignment.name}」，配額 ${this.dailyMaxQuota} 題`
       );
     } else {
       this.dailyMaxQuota = this.deps.defaultDailyMaxQuota;
@@ -201,20 +230,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     console.log(`✅ [QuizOrchestrator.init] 完成！單字池：${this.words.length} 個，等級：L${this.currentLevel}`);
   }
 
-  // ============================================================
-  // 內部：建立單字池
-  // ============================================================
-
-  /**
-   * 建立單字池。
-   *
-   * 流程：
-   *   1. 組裝複習池（只挑 everWrong 的字）
-   *   2. 組裝新詞池
-   *      ├── 有指定 targetLevel → 加權出題
-   *      └── 無指定 → 預設出題（90% current + 10% 探針）
-   *   3. 合併成最終池子
-   */
   private async buildWordPool(): Promise<void> {
     const K2 = this.dailyNewQuotaRemaining;
     const K1 = Math.max(0, this.dailyMaxQuota - K2);
@@ -227,9 +242,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     const reviewPoolSize = Math.max(K1 * REVIEW_POOL_MULTIPLIER, MIN_REVIEW_POOL);
     const newPoolSize = Math.max(K2 * NEW_POOL_MULTIPLIER, MIN_NEW_POOL);
 
-    // ============================================================
-    // 1. 複習池：只挑 everWrong 的字
-    // ============================================================
     const allStates = Array.from(this.stateCache!.entries());
 
     const dueStates = allStates
@@ -267,44 +279,22 @@ export class QuizOrchestrator implements QuizSessionApi {
       reviewWords = await this.deps.wordRepository.getWordsByIds(finalReviewIds);
     }
 
-    // ============================================================
-    // 2. 新詞池：依作業設定決定策略
-    // ============================================================
     const excludeIds = new Set(this.stateCache!.keys());
     const targetLevel = this.activeAssignment?.assignment.targetLevel;
 
     let newWords: Word[];
     if (targetLevel && targetLevel !== this.currentLevel) {
-      // 有指定目標等級 → 加權出題
-      newWords = await this.buildWeightedNewWords(
-        excludeIds,
-        targetLevel,
-        newPoolSize
-      );
+      newWords = await this.buildWeightedNewWords(excludeIds, targetLevel, newPoolSize);
     } else {
-      // 無指定（或與 currentLevel 相同）→ 預設出題
       newWords = await this.buildDefaultNewWords(excludeIds, newPoolSize);
     }
 
-    // ============================================================
-    // 3. 合併成最終池子
-    // ============================================================
     this.words = [...reviewWords, ...newWords];
     for (const w of this.words) {
       this.wordMap.set(w.id, w);
     }
   }
 
-  /**
-   * 加權出題（作業指定 targetLevel 時使用）。
-   *
-   * 一般情況（|target - current| <= 2）：
-   *   60% target + 30% current + 10% 探針（target + 1）
-   *
-   * 護欄（|target - current| >= 3）：
-   *   30% target + 60% current + 10% 中間級
-   *   避免老師判斷失誤導致學生崩潰
-   */
   private async buildWeightedNewWords(
     excludeIds: Set<string>,
     targetLevel: number,
@@ -318,15 +308,13 @@ export class QuizOrchestrator implements QuizSessionApi {
     let probeLevel: number;
 
     if (diff >= 3) {
-      // 🔥 護欄：差距太大，降低 target 的比重
       targetRatio = 0.3;
       currentRatio = 0.6;
       probeLevel = Math.round((targetLevel + currentLevel) / 2);
       console.warn(
-        `⚠️ [加權出題] |target=L${targetLevel} - current=L${currentLevel}| >= 3，啟用護欄（30% / 60% / 10%）`
+        `⚠️ [加權出題] |target=L${targetLevel} - current=L${currentLevel}| >= 3，啟用護欄`
       );
     } else {
-      // 一般情況
       targetRatio = 0.6;
       currentRatio = 0.3;
       probeLevel = targetLevel < 6 ? targetLevel + 1 : targetLevel;
@@ -338,45 +326,21 @@ export class QuizOrchestrator implements QuizSessionApi {
 
     const usedIds = new Set(excludeIds);
 
-    // 抽 targetLevel
-    const targetWords = await this.deps.wordRepository.getNewWordsByLevels(
-      usedIds,
-      [targetLevel],
-      targetCount
-    );
+    const targetWords = await this.deps.wordRepository.getNewWordsByLevels(usedIds, [targetLevel], targetCount);
     targetWords.forEach(w => usedIds.add(w.id));
 
-    // 抽 currentLevel
-    const currentWords = await this.deps.wordRepository.getNewWordsByLevels(
-      usedIds,
-      [currentLevel],
-      currentCount
-    );
+    const currentWords = await this.deps.wordRepository.getNewWordsByLevels(usedIds, [currentLevel], currentCount);
     currentWords.forEach(w => usedIds.add(w.id));
 
-    // 抽探針 / 中間級
-    const probeWords = await this.deps.wordRepository.getNewWordsByLevels(
-      usedIds,
-      [probeLevel],
-      probeCount
-    );
+    const probeWords = await this.deps.wordRepository.getNewWordsByLevels(usedIds, [probeLevel], probeCount);
 
     console.log(
       `📊 [加權出題] target=L${targetLevel}, current=L${currentLevel}, probe=L${probeLevel}`
-    );
-    console.log(
-      `   抽到 target ${targetWords.length} + current ${currentWords.length} + probe ${probeWords.length} = ${targetWords.length + currentWords.length + probeWords.length}`
     );
 
     return [...targetWords, ...currentWords, ...probeWords];
   }
 
-  /**
-   * 預設出題（無指定 targetLevel 時使用）。
-   *
-   * 90% currentLevel + 10% 探針（currentLevel + 1）
-   * 若不足，用 currentLevel - 1 補
-   */
   private async buildDefaultNewWords(
     excludeIds: Set<string>,
     totalSize: number
@@ -417,9 +381,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     return [...mainWords, ...probeWords, ...fallbackWords];
   }
 
-  // ============================================================
-  // getters
-  // ============================================================
   getActiveAssignment(): ActiveAssignment | null {
     return this.activeAssignment;
   }
@@ -435,9 +396,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     return this.deps.now ? this.deps.now() : new Date();
   }
 
-  // ============================================================
-  // nextQuestion
-  // ============================================================
   async nextQuestion(): Promise<QuizQuestion | null> {
     if (this.dailyAnsweredCount >= this.dailyMaxQuota) {
       return null;
@@ -480,9 +438,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     };
   }
 
-  // ============================================================
-  // submitAnswer
-  // ============================================================
   async submitAnswer(
     wordId: string,
     submission: AnswerSubmission
@@ -496,10 +451,8 @@ export class QuizOrchestrator implements QuizSessionApi {
     const studentDisplayId = displayId !== this.studentId ? displayId : undefined;
 
     const currentState = await this.deps.progressStore.getState(displayId, wordId);
-
     const now = this.getNow();
 
-    // 使用 AnswerProcessor 純運算
     const processed = this.answerProcessor.process({
       word,
       submission,
@@ -510,9 +463,6 @@ export class QuizOrchestrator implements QuizSessionApi {
       now,
     });
 
-    // ============================================================
-    // 更新本地計數
-    // ============================================================
     this.dailyAnsweredCount += 1;
     this.sessionAttempts += 1;
     this.dailyCorrectCount += processed.grading.isCorrect ? 1 : 0;
@@ -524,9 +474,6 @@ export class QuizOrchestrator implements QuizSessionApi {
       }
     }
 
-    // ============================================================
-    // 每日快照（若為今天第一次答題）
-    // ============================================================
     const today = now.toISOString().slice(0, 10);
     let dailySnapshot: DailySnapshot | undefined;
 
@@ -547,9 +494,6 @@ export class QuizOrchestrator implements QuizSessionApi {
       this.todaySnapshotDate = today;
     }
 
-    // ============================================================
-    // 寫入：先本地 → 嘗試批次 → 失敗回退
-    // ============================================================
     try {
       await this.localStore.saveState(displayId, wordId, processed.nextState);
       await this.localStore.recordAttempt(processed.attempt);
@@ -604,9 +548,6 @@ export class QuizOrchestrator implements QuizSessionApi {
 
     console.log(`✍️ [submitAnswer]「${word.word}」→ ${processed.grading.isCorrect ? '✅ 正確' : '❌ 錯誤'}（quality=${processed.grading.quality}）`);
 
-    // ============================================================
-    // 每 10 題評估等級（使用 displayId）
-    // ============================================================
     let progressionDecision: ProgressionDecision | null = null;
     if (this.sessionAttempts > 0 && this.sessionAttempts % 10 === 0) {
       try {

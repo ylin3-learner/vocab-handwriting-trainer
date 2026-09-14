@@ -194,6 +194,7 @@ export class AnalyticsService {
             className: '未分類',
             currentLevel: 1,
         };
+        let customSpeechFloor: number | undefined;  // 🔥 新增
 
         // 2.1：讀取 studentStates/{displayId}
         try {
@@ -201,6 +202,7 @@ export class AnalyticsService {
             if (stateDoc.exists()) {
                 const data = stateDoc.data();
                 profile.currentLevel = data.currentLevel ?? 1;
+                customSpeechFloor = data.customSpeechFloor; 
                 console.log(`✅ [AnalyticsService] 從 studentStates 讀到 L${profile.currentLevel}`);
             }
         } catch (e) {
@@ -261,6 +263,7 @@ export class AnalyticsService {
         // ============================================================
         const result = analyzeStudent(attempts, profile, wordMap);
         result.dailySnapshots = dailySnapshots;
+        result.customSpeechFloor = customSpeechFloor; // 新增
         return result;
     }
 }
