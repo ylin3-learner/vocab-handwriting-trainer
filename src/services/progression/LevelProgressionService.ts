@@ -3,21 +3,9 @@ import { PerformanceTracker } from './PerformanceTracker';
 import { StudentStateService } from './StudentStateService';
 import { RuleBasedStrategy } from '../../domain/progression/RuleBasedStrategy';
 import { LevelProgressionStrategy } from '../../domain/progression/LevelProgressionStrategy';
+import { checkEvaluationGuard } from '../../domain/progression/evaluationGuard';
 import { ProgressionDecision, LevelHistoryEntry } from '../../types/progression';
 
-/**
- * 職責：協調 DDA 流程
- *
- * 依賴注入：
- * - tracker：取得指標
- * - stateService：讀寫狀態
- * - strategy：決定是否升級（可抽換為 IRT / BKT 等）
- *
- * 設計原則：
- * - 只做「協調」，不實作演算法
- * - 只做「協調」，不碰 Firestore 細節
- * - 提供 evaluate() 給 QuizOrchestrator 呼叫
- */
 export class LevelProgressionService {
   private static readonly MIN_LEVEL = 1;
   private static readonly MAX_LEVEL = 6;
@@ -31,11 +19,7 @@ export class LevelProgressionService {
   /**
    * 評估學生是否需要調整等級
    *
-   * 注意：`state.totalAttempts` 由 `QuizOrchestrator.submitAnswer()` 每次答題時
-   * 透過 `StudentStateService.incrementTotalAttempts()` 累加，是精確的跨 session 總數。
-   *
-   * @param displayId Firebase UID
-   * @returns 決策結果（給 UI 顯示用；null 表示未評估）
+   * 守衛邏輯（鎖定檢查、距上次評估時間）由純函式 checkEvaluationGuard 處理。
    */
   async evaluate(displayId: string): Promise<ProgressionDecision | null> {
     // ============================================================
@@ -45,25 +29,25 @@ export class LevelProgressionService {
     const totalAttempts = state.totalAttempts;
 
     // ============================================================
-    // 步驟 2：檢查是否仍在鎖定期
+    // 步驟 2：守衛檢查（鎖定期 + 距上次評估時間）
     // ============================================================
-    if (totalAttempts < state.levelLockedUntilTotalAttempts) {
-      const remaining = state.levelLockedUntilTotalAttempts - totalAttempts;
-      console.log(`🔒 [LevelProgression] 鎖定中，剩 ${remaining} 題`);
+    const guard = checkEvaluationGuard({
+      totalAttempts,
+      levelLockedUntilTotalAttempts: state.levelLockedUntilTotalAttempts,
+      lastEvaluatedAtTotalAttempts: state.lastEvaluatedAtTotalAttempts,
+    });
+
+    if (!guard.shouldEvaluate) {
+      if (guard.reason === 'locked') {
+        console.log(`🔒 [LevelProgression] 鎖定中，剩 ${guard.remainingAttempts} 題`);
+      } else {
+        console.log(`⏭️ [LevelProgression] 距上次評估僅 ${guard.attemptsSinceLastEval} 題，跳過`);
+      }
       return null;
     }
 
     // ============================================================
-    // 步驟 3：檢查距離上次評估是否足夠
-    // ============================================================
-    const sinceLastEval = totalAttempts - state.lastEvaluatedAtTotalAttempts;
-    if (sinceLastEval < 10) {
-      console.log(`⏭️ [LevelProgression] 距上次評估僅 ${sinceLastEval} 題，跳過`);
-      return null;
-    }
-
-    // ============================================================
-    // 步驟 4：取得表現指標
+    // 步驟 3：取得表現指標
     // ============================================================
     const metrics = await this.tracker.getRecentMetrics(
       displayId,
@@ -71,7 +55,7 @@ export class LevelProgressionService {
     );
 
     // ============================================================
-    // 步驟 5：套用策略
+    // 步驟 4：套用策略
     // ============================================================
     const decision = this.strategy.evaluate({
       metrics,
@@ -86,7 +70,7 @@ export class LevelProgressionService {
     );
 
     // ============================================================
-    // 步驟 6：寫回 Firestore
+    // 步驟 5：寫回 Firestore
     // ============================================================
     if (decision.action === 'hold') {
       await this.stateService.markEvaluated(displayId, totalAttempts);
@@ -114,9 +98,6 @@ export class LevelProgressionService {
     return decision;
   }
 
-  /**
-   * 手動設定等級（例如：老師指派、程度鑑定結果）
-   */
   async setLevelManually(displayId: string, level: number, reason: string): Promise<void> {
     if (level < LevelProgressionService.MIN_LEVEL || level > LevelProgressionService.MAX_LEVEL) {
       throw new Error(`等級必須介於 ${LevelProgressionService.MIN_LEVEL}~${LevelProgressionService.MAX_LEVEL}`);
@@ -135,7 +116,7 @@ export class LevelProgressionService {
       displayId,
       level,
       historyEntry,
-      state.totalAttempts + 30, // 手動設定也鎖 30 題
+      state.totalAttempts + 30,
       state.totalAttempts
     );
   }
