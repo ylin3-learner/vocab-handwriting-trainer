@@ -13,6 +13,12 @@ import {
 } from '../../types/progression';
 import { sanitizeFirestoreId } from '../../domain/string/sanitizeId';
 import { buildDisplayId } from '../../domain/string/displayId';
+
+import {
+    decidePlacementStep,
+    PLACEMENT_PROMOTE_THRESHOLD,
+} from '../../domain/placement/placementDecision';
+
 import {
     writeBatch,
     doc,
@@ -33,7 +39,6 @@ import {
 
 const STARTING_LEVEL = 3;
 const QUESTIONS_PER_LEVEL = 3;
-const PROMOTE_THRESHOLD = 2;
 const MAX_TOTAL_QUESTIONS = 12;
 const WORDS_TO_PRELOAD = 5;
 
@@ -324,15 +329,12 @@ export class PlacementOrchestrator implements QuizSessionApi {
      * @returns true = 繼續下一級；false = 鑑定結束（finalLevel 已設定）
      */
     private advanceToNextLevel(): boolean {
-        const decision = this.decideNextStep();
+        const decision = decidePlacementStep(
+            this.currentLevel,
+            this.currentLevelCorrect
+        );
 
-        const stepAction: 'promote' | 'demote' | 'stop' = decision.isFinal
-            ? 'stop'
-            : decision.newLevel > this.currentLevel
-                ? 'promote'
-                : 'demote';
-
-        this.recordStep(stepAction);
+        this.recordStep(decision.action);
 
         if (decision.isFinal) {
             this.finalLevel = decision.newLevel;
@@ -385,28 +387,6 @@ export class PlacementOrchestrator implements QuizSessionApi {
             timeLimitMs: this.deps.timeLimitMs,
             isProbe: false,
         };
-    }
-
-    // ============================================================
-    // 私有方法：核心邏輯
-    // ============================================================
-
-    private decideNextStep(): { newLevel: number; isFinal: boolean } {
-        const correct = this.currentLevelCorrect;
-        const level = this.currentLevel;
-        const promote = correct >= PROMOTE_THRESHOLD;
-
-        if (promote) {
-            if (level >= 6) {
-                return { newLevel: 6, isFinal: true };
-            }
-            return { newLevel: level + 1, isFinal: false };
-        } else {
-            if (level <= 1) {
-                return { newLevel: 1, isFinal: true };
-            }
-            return { newLevel: level - 1, isFinal: false };
-        }
     }
 
     private recordStep(action: 'promote' | 'demote' | 'stop'): void {
