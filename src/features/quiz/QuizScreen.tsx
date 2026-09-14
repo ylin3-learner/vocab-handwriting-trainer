@@ -289,6 +289,21 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
   return (
     <div style={{ maxWidth: '700px', margin: '0 auto', padding: '1rem' }}>
+      {/* 🔥 iOS 靜音開關提示：只在 iOS 裝置顯示 */}
+      {/iPad|iPhone|iPod/.test(navigator.userAgent) && (
+        <div style={{
+          background: '#fff3cd',
+          border: '1px solid #ffeeba',
+          color: '#856404',
+          padding: '8px 12px',
+          borderRadius: '4px',
+          marginBottom: '12px',
+          fontSize: '0.85rem',
+          textAlign: 'center',
+        }}>
+          🔔 若聽不到聲音，請確認裝置側邊的靜音開關（或控制中心的鈴鐺圖示）已關閉
+        </div>
+      )}
       {displayInfo.showProgress && (
         <div style={{
           padding: '0.5rem 1rem',
