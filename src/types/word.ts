@@ -34,6 +34,17 @@ export interface ReviewState {
   lastReviewed: string | null;     // ISO 字串,尚未複習過為 null
   nextReviewDate: string | null;
   everWrong?: boolean; // 是否曾被答錯過（決定是否進入複習池）
+   /**
+   * 自上次答錯以來連續答對的次數。
+   *
+   * 與 sm2.ts 的 `consecutiveCorrect` 不同：
+   *   - `consecutiveCorrect` 在達成 MASTERY_STREAK（3）後歸零
+   *   - `correctStreak` 只在答錯時歸零，用來判斷是否已「真正掌握」
+   *
+   * 當 correctStreak 達到 EVER_WRONG_CLEAR_THRESHOLD（5）時，
+   * AnswerProcessor 會清除 everWrong，將該字移出複習池。
+   */
+  correctStreak?: number;
 }
 
 // 建立一個從未複習過的初始狀態,新單字第一次出現時使用
@@ -46,5 +57,6 @@ export function createInitialReviewState(): ReviewState {
     totalReviews: 0,
     lastReviewed: null,
     nextReviewDate: null,
+    correctStreak: 0,
   };
 }
