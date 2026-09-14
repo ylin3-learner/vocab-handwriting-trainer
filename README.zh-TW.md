@@ -33,7 +33,7 @@
 | 類別 | 功能 |
 |---|---|
 | 練習流程 | 語⾳唸出單字＋例句 → 限時⼿寫擷取 → 辨識 → 客觀判分 → SM-2 排程下次複習 |
-| 間隔重複 | SM-2 演算法；**只有答錯的字會進入複習池**（`everWrong` 旗標），避免已經答對的字浪費未來的複習配額 |
+| 間隔重複 | SM-2 演算法；**只有答錯的字會進入複習池**（`everWrong` 旗標），且**連續答對 5 次後自動移出**，讓已掌握的字真正畢業 |
 | ⼿寫辨識 | 畫布擷取 ＋ Google IME ⼿寫 API |
 | 語音 | Web Speech API，可調整播放語速（預設 1.0x 訓練真實英聽）＋「🐢 重聽一次（慢速）」按鈕，速度下限由老師設定（預設 0.85x） |
 | 適應性分級 | `PlacementOrchestrator` 用二分搜尋式的階梯（L3 起始、每級 3 題）將新學生放到合適層級；`LevelProgressionService` ＋ `RuleBasedStrategy` 依滾動表現持續升／降級 |
@@ -133,7 +133,7 @@ vocab-handwriting-trainer/
 │ ├── quiz/
 │ │ ├── QuizOrchestrator.ts # 統籌整個練習流程
 │ │ ├── QuizSessionApi.ts # 普通＋分級模式共用的介面
-│ │ ├── AnswerProcessor.ts # 辨識結果 → 判分 → SM-2（純運算）
+│ │ ├── AnswerProcessor.ts (+test) # 辨識結果 → 判分 → SM-2（純運算）
 │ │ ├── HandwritingCanvas.tsx
 │ │ ├── Countdown.tsx
 │ │ └── QuizScreen.tsx
@@ -158,6 +158,7 @@ vocab-handwriting-trainer/
 ```
 
 
+
 ### 值得特別說明的設計決策
 
 - **單字內容與學習進度完全分離。** 單字庫永遠只存「內容」（單字、意思、例句、難
@@ -175,9 +176,10 @@ vocab-handwriting-trainer/
   `AnswerProcessor.ts` 是唯一一個把辨識結果串接到判分、SM-2、儲存的地方。`sm2.ts`
   完全不知道原始的使⽤者輸入是什麼，只接收這個已經算好的分數。
 
-- **SM-2 只追蹤錯題。** `ReviewState.everWrong` 一旦被設為 `true` 就永不清除，所以
-  學生第一次就答對的字永遠不會進入複習池。這是刻意的取捨：複習配額應該花在弱點上，
-  而不是已經掌握的字。
+- **SM-2 只追蹤錯題，且會自動畢業。** `ReviewState.everWrong` 在第一次答錯時設為
+  `true`，但**連續答對 5 次後會自動清除**（由 `AnswerProcessor` 獨立維護的
+  `correctStreak` 計數器判斷，不受 `sm2.ts` 的 `MASTERY_STREAK` 歸零影響）。這代表
+  首次就答對的字永遠不進複習池，而經過努力後已掌握的字也會自然退出。
 
 - **儲存層是分層的，不是單體的。** `ProgressStore` 是一個介面，底下有
   `InMemoryProgressStore`、`LocalStorageProgressStore`、`FirestoreProgressStore`，
@@ -207,10 +209,11 @@ vocab-handwriting-trainer/
   `PlacementOrchestrator.ts` 負責決定學生「該被放在哪個難度層級」，這跟 SM-2 決定
   「今天該複習哪個字」是兩件事、分開處理，只在系統邊界互相組合。
 
-- **關鍵決策邏輯抽出為可測試的純函式。** 三個最高風險的演算法放在 `domain/` 底下的
+- **關鍵決策邏輯抽出為可測試的純函式。** 四個最高風險的演算法放在 `domain/` 底下的
   純函式：`placementDecision.ts`（分級階梯）、`evaluationGuard.ts`（DDA 的「現在該
-  不該評估」守衛）、`selectAssignment.ts`（作業優先序）。每個都有自己的單元測試
-  檔，未來任何改動都會立刻被 `npm test` 抓到。
+  不該評估」守衛）、`selectAssignment.ts`（作業優先序），以及 `AnswerProcessor`
+  中的 `everWrong` 生命週期邏輯。每個都有自己的單元測試檔，未來任何改動都會立刻被
+  `npm test` 抓到。
 
 ## 🔐 ⾝份與權限設計
 
@@ -267,11 +270,13 @@ vocab-handwriting-trainer/
 **原路線圖之外的額外功能**（皆已完成）：跨 UID 狀態追蹤（`studentStates`）、初始
 程度分級（`PlacementOrchestrator`）、老師可設定目標層級的加權出題、語速控制與個人
 覆蓋、單一學生 PDF 報告匯出、學生封存、`writeBatch` 最佳化、Firestore 離線持久化、
-熔斷器＋重試佇列、配額監控。
+熔斷器＋重試佇列、配額監控，以及 `everWrong` 的掌握生命週期（連續答對 5 次後自動
+清除）。
 
-**自動化測試：89 個單元測試**，涵蓋 `grader`、`sm2`、`questionSelector`、
+**自動化測試：101 個單元測試**，涵蓋 `grader`、`sm2`、`questionSelector`、
 `studentAnalyzer`、`RuleBasedStrategy`、`placementDecision`、`selectAssignment`、
-`evaluationGuard`。
+`evaluationGuard`，以及 `AnswerProcessor`。測試聚焦在最高風險的純函式；I/O 層刻意
+不寫單元測試（需要 Firestore emulator，延後到 Stage 7+ 處理）。
 
 Stage 6-A 之所以刻意排在 6-B 之前，是因為儀表板**只讀**、完全不影響現有測驗流程，而
 單字庫上傳需要重新接線核⼼的 `WordRepository`，是整個系統中風險最高的重構。
@@ -288,6 +293,7 @@ Stage 6-A 之所以刻意排在 6-B 之前，是因為儀表板**只讀**、完�
 - **後端：** Firebase（Firestore ＋匿名／Email 認證），免費 Spark 方案
 - **CI/CD：** GitHub Actions——老師把新的 `words.xlsx` 拖進 GitHub，管線自動驗證、
   轉檔、建置、部署
+- **Lint：** ESLint，使用 `@typescript-eslint/recommended` 規則集
 
 ## 🧭 產品驗證思路
 
@@ -304,12 +310,34 @@ Stage 6-A 之所以刻意排在 6-B 之前，是因為儀表板**只讀**、完�
 5. 在比賽前對這 7 位目標學生進行真實試跑，並把正面與負面的發現都當作合理的成果來
    記錄，而不是只挑好聽的講。
 
+## ⚠️ 已知限制
+
+### Firestore 安全規則（延後到試點後處理）
+
+`studentStates`、`attempts`、`classStats` 目前對任何已登入使用者開放讀寫。
+`displayId` 的格式（`{班級}_{座號}_{姓名}`）在本 README 中是公開資訊，這意味著任何
+讀過本文件、知道學校班級與座號範圍的人，理論上可以窮舉 `displayId` 來讀取或篡改其他
+學生的進度。
+
+**這對 7 人試點是可接受的風險**，但**正式大規模部署前必須修復**。正確做法是把
+`displayId`（或至少 `class`）綁定到學生 ID token 的 custom claims，讓規則可以檢查
+`request.auth.token.displayId == displayId`。這需要 Cloud Function（進而需要 Blaze
+方案），已排入 Stage 8。
+
+部分緩解措施：部署網站加上 `noindex, nofollow` 標記，並附上禁止所有爬蟲的
+`robots.txt`，降低被意外發現的機率。
+
+### I/O 層未寫單元測試
+
+`FirestoreProgressStore`、`AnalyticsService`、`AssignmentService` 等 I/O 層沒有自動
+化測試。它們委派的純邏輯**有**測試。加入 emulator-based 整合測試排入 Stage 7+。
+
 ## 📌 目前進度
 
 Stage 0 到 Stage 6-E 已完成。系統支援完整的練習流程（TTS → 手寫 → 判分 → SM-2 →
 Firestore）、適應性難度分級、老師可設定的作業與目標層級加權出題、個人化語速控制、
 含成長曲線視覺化的教師儀表板、單一學生 PDF 報告匯出，以及學生／教師／管理員的角色
-權限。自動化測試涵蓋 89 個案例，覆蓋所有高風險的純邏輯。
+權限。自動化測試涵蓋 101 個案例，覆蓋所有高風險的純邏輯。
 
 **Stage 7（真實學生於平板上進行試點測試）尚未開始。** 功能到此凍結——下一階段是
 真實世界的驗證，而不是繼續擴充功能。
