@@ -41,7 +41,7 @@ project centers on:
 | Area | Feature |
 |---|---|
 | Practice loop | TTS word + sentence prompt → timed handwriting capture → recognition → objective grading → SM-2 scheduling |
-| Spaced repetition | SM-2 algorithm, adapted from an earlier GRE vocabulary SRS project; **only wrong answers enter the review pool** (`everWrong` flag) so a student's correct guesses don't waste future quota |
+| Spaced repetition | SM-2 algorithm, adapted from an earlier GRE vocabulary SRS project; **only wrong answers enter the review pool** (`everWrong` flag), and a word leaves the pool after **5 consecutive correct answers** |
 | Handwriting | Canvas capture + pluggable recognition engine (Google IME handwriting API) |
 | Speech | Web Speech API with configurable playback rate (default 1.0x for authentic listening practice) + a "🐢 Replay slower" button bounded by a teacher-configurable floor (default 0.85x) |
 | Adaptive difficulty | `PlacementOrchestrator` places new students at roughly the right tier using a binary-search-style ladder (start L3, 3 questions per tier); `LevelProgressionService` + `RuleBasedStrategy` continuously promote/demote based on rolling performance |
@@ -141,7 +141,7 @@ vocab-handwriting-trainer/
 │ ├── quiz/
 │ │ ├── QuizOrchestrator.ts # Coordinates the whole practice loop
 │ │ ├── QuizSessionApi.ts # Interface shared by normal + placement sessions
-│ │ ├── AnswerProcessor.ts # Recognition result → grading → SM-2 (pure)
+│ │ ├── AnswerProcessor.ts (+test) # Recognition result → grading → SM-2 (pure)
 │ │ ├── HandwritingCanvas.tsx
 │ │ ├── Countdown.tsx
 │ │ └── QuizScreen.tsx
@@ -165,6 +165,7 @@ vocab-handwriting-trainer/
 └── dailySnapshot.ts
 ```
 
+
 ### Design decisions worth calling out
 
 - **Word content vs. learning progress are stored separately.** The word bank only ever
@@ -187,9 +188,10 @@ vocab-handwriting-trainer/
   not self-reported.
 
 - **SM-2 only tracks wrong answers.** `ReviewState.everWrong` is set to `true` on first wrong
-  answer and never cleared, so a word a student gets right on the first try never enters the
-  review pool. This is a deliberate trade-off: the review quota should be spent on gaps, not
-  on already-mastered vocabulary.
+  answer, and **cleared after 5 consecutive correct answers** (tracked via a separate
+  `correctStreak` counter that is independent of `sm2.ts`'s `MASTERY_STREAK` reset). This
+  means a word a student gets right on the first try never enters the review pool, and a
+  word a student eventually masters naturally graduates out.
 
 - **Storage is layered, not monolithic.** `ProgressStore` is an interface with
   `InMemoryProgressStore`, `LocalStorageProgressStore`, `FirestoreProgressStore`, and a
@@ -226,11 +228,11 @@ vocab-handwriting-trainer/
   separately from SM-2's *which specific word is due today*. The two systems compose rather
   than overlap.
 
-- **Pure decision logic is extracted for testability.** Three of the highest-risk
+- **Pure decision logic is extracted for testability.** Four of the highest-risk
   algorithms live as pure functions in `domain/`: `placementDecision.ts` (placement ladder),
-  `evaluationGuard.ts` (DDA "should we evaluate now?" gate), and `selectAssignment.ts`
-  (assignment priority order). Each has its own unit test file, so any future change is
-  caught immediately by `npm test`.
+  `evaluationGuard.ts` (DDA "should we evaluate now?" gate), `selectAssignment.ts`
+  (assignment priority order), and the `everWrong` lifecycle logic in `AnswerProcessor.ts`.
+  Each has its own unit test file, so any future change is caught immediately by `npm test`.
 
 ## 🔐 Roles & Authentication
 
@@ -290,11 +292,14 @@ before the next began:
 tracking (`studentStates`), initial degree placement (`PlacementOrchestrator`),
 teacher-configurable target-tier weighted selection, speech rate control with per-student
 override, per-student PDF report export, student archiving, `writeBatch` optimization,
-Firestore offline persistence, circuit breaker + retry queue, and quota monitoring.
+Firestore offline persistence, circuit breaker + retry queue, quota monitoring, and the
+`everWrong` mastery lifecycle (auto-clear after 5 consecutive correct answers).
 
-**Automated test coverage: 89 unit tests** across `grader`, `sm2`, `questionSelector`,
-`studentAnalyzer`, `RuleBasedStrategy`, `placementDecision`, `selectAssignment`, and
-`evaluationGuard`.
+**Automated test coverage: 101 unit tests** across `grader`, `sm2`, `questionSelector`,
+`studentAnalyzer`, `RuleBasedStrategy`, `placementDecision`, `selectAssignment`,
+`evaluationGuard`, and `AnswerProcessor`. Tests focus on the highest-risk pure functions;
+I/O layers are intentionally not unit-tested (they would require a Firestore emulator,
+which is deferred to Stage 7+).
 
 Stage 6-A was deliberately prioritized over 6-B: dashboards are **read-only** and touch
 nothing in the existing quiz flow, while word-bank upload requires rewiring the core
@@ -312,6 +317,7 @@ nothing in the existing quiz flow, while word-bank upload requires rewiring the 
 - **Backend:** Firebase (Firestore + Anonymous/Email Auth), free Spark tier
 - **CI/CD:** GitHub Actions — a teacher drags a new `words.xlsx` into GitHub, and the
   pipeline validates, converts, builds, and deploys automatically
+- **Linting:** ESLint with `@typescript-eslint/recommended`
 
 ## 🧭 Product Validation Approach
 
@@ -331,13 +337,37 @@ building:
 5. Run a real pilot with the ~7 target students before the competition, and treat both
    positive and negative findings as legitimate outcomes to report on.
 
+## ⚠️ Known Limitations
+
+### Firestore security rules — deferred to post-pilot
+
+`studentStates`, `attempts`, and `classStats` currently allow read/write to any signed-in
+user. The `displayId` key format (`{class}_{seat}_{name}`) is documented in this README,
+which means anyone who reads the README and knows the school's class/seat range could
+enumerate `displayId`s to read or tamper with other students' progress.
+
+This is an **acceptable risk for the 7-student pilot** but **must be fixed before any
+larger deployment**. The correct fix is to bind `displayId` (or at least `class`) to
+custom claims on the student's ID token, so rules can check
+`request.auth.token.displayId == displayId`. This requires a Cloud Function (thus Blaze
+plan) and is deferred to Stage 8.
+
+As a partial mitigation, the deployed site is marked `noindex, nofollow` and ships a
+`robots.txt` disallowing all crawlers, reducing the chance of accidental discovery.
+
+### I/O layers are not unit-tested
+
+`FirestoreProgressStore`, `AnalyticsService`, `AssignmentService`, etc. are not covered by
+automated tests. The pure logic they delegate to *is* tested. Adding emulator-based
+integration tests is planned for Stage 7+.
+
 ## 📌 Status
 
 Stages 0 through 6-E are complete. The system supports the full practice loop
 (TTS → handwriting → grading → SM-2 → Firestore), adaptive difficulty placement,
 teacher-configurable assignments with target-tier weighted selection, per-student speech
 rate control, the teacher dashboard with growth-chart visualization, per-student PDF report
-export, and role-based auth for students/teachers/admins. Automated tests cover 89 cases
+export, and role-based auth for students/teachers/admins. Automated tests cover 101 cases
 across the highest-risk pure logic.
 
 **Stage 7 (pilot test with real students on real tablets) has not yet started.** All
