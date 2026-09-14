@@ -8,6 +8,18 @@ import { calculateOverdueDays } from '../../domain/date/overdue';
 import { levenshteinDistance, normalizedSimilarity } from '../../domain/string/similarity';
 import { AnswerSubmission } from './QuizOrchestrator';
 
+/**
+ * 連續答對幾次後，將 everWrong 清除（移出複習池）。
+ *
+ * 為什麼不用 sm2.ts 的 consecutiveCorrect？
+ *   因為 sm2.ts 的 MASTERY_STREAK = 3，consecutiveCorrect 達 3 就歸零，
+ *   永遠不會累積到 5。所以這裡自己維護 correctStreak。
+ *
+ * 閾值 5 的依據：連續答對 5 次代表學生已經在多個不同的複習週期
+ * （間隔約 1、2、3、4、5 天）都答對，實質上已掌握。
+ */
+const EVER_WRONG_CLEAR_THRESHOLD = 5;
+
 export interface ProcessAnswerParams {
   word: Word;
   submission: AnswerSubmission;
@@ -34,8 +46,6 @@ export interface ProcessedAnswer {
  * - 不碰 I/O（不寫 Firestore、不寫本地）
  * - 相同輸入必定相同輸出
  * - 由呼叫者決定「要怎麼寫」（batch / 記憶體 / 其他）
- *
- * 這個模組被 QuizOrchestrator 和 PlacementOrchestrator 共用。
  */
 export class AnswerProcessor {
   process(params: ProcessAnswerParams): ProcessedAnswer {
@@ -90,17 +100,41 @@ export class AnswerProcessor {
     );
 
     // ============================================================
-    // 4. 合併成新狀態，並標記 everWrong
+    // 4. 更新 correctStreak 與 everWrong
     //
-    // 設計：SM-2 只追蹤錯題。
-    //   - 首次答對 → everWrong 保持 false（不進複習池）
-    //   - 首次答錯 → everWrong 永久為 true（進複習池）
+    // correctStreak：自上次答錯以來連續答對的次數（獨立於 sm2.ts）
+    //   - 答對 → +1
+    //   - 答錯 → 歸零
+    //
+    // everWrong：
+    //   - 答錯 → 設為 true（永久追蹤）
+    //   - 答對 + 之前 everWrong=true + correctStreak >= 5 → 清除為 false
+    //   - 其他 → 保持不變
     // ============================================================
     const mergedState = mergeSM2ResultWithState(currentState, scheduling, now);
+
+    const prevStreak = currentState.correctStreak ?? 0;
+    const nextStreak = grading.isCorrect ? prevStreak + 1 : 0;
+
+    const shouldClearEverWrong =
+      currentState.everWrong === true &&
+      nextStreak >= EVER_WRONG_CLEAR_THRESHOLD;
+
+    const nextEverWrong = !grading.isCorrect
+      ? true
+      : (shouldClearEverWrong ? false : currentState.everWrong);
+
     const nextState: ReviewState = {
       ...mergedState,
-      everWrong: currentState.everWrong === true || !grading.isCorrect,
+      everWrong: nextEverWrong,
+      correctStreak: shouldClearEverWrong ? 0 : nextStreak,
     };
+
+    if (shouldClearEverWrong) {
+      console.log(
+        `🎓 [AnswerProcessor]「${word.word}」連續答對 ${nextStreak} 次，移出複習池`
+      );
+    }
 
     // ============================================================
     // 5. 組裝 AttemptRecord
