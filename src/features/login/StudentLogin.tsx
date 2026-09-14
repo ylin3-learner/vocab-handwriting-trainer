@@ -35,9 +35,19 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
   const unlockSpeech = () => {
     if (!window.speechSynthesis) return;
     try {
-      // 用 getVoices() 熱身：不發出任何聲音，但觸發引擎初始化
-      // 這樣就不會在 queue 裡留下任何殘留 utterance
+      // 1. 熱身：觸發 voices 列表載入
       const voices = window.speechSynthesis.getVoices();
+
+      // 2. iOS 解鎖：在 user gesture 內 speak() 一個無聲、極短的 utterance
+      //    - volume = 0：無聲
+      //    - rate = 10：極快（毫秒級完成）
+      //    - 不呼叫 cancel()：讓它自然播完，避免競態殘留
+      const unlock = new SpeechSynthesisUtterance('a');
+      unlock.volume = 0;
+      unlock.rate = 10;
+      unlock.lang = 'en-US';
+      window.speechSynthesis.speak(unlock);
+
       console.log(`✅ 語音引擎已解鎖（可用語音 ${voices.length} 個）`);
     } catch (e) {
       console.log('語音功能不可用');
