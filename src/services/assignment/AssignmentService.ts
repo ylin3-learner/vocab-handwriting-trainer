@@ -18,6 +18,11 @@ import { db } from '../../firebase';
 
 export type ReviewFocus = 'strict' | 'balanced' | 'explore';
 
+/** 系統預設語速（標準英語） */
+export const DEFAULT_SPEECH_RATE = 1.0;
+/** 系統預設語速下限（慢速重聽） */
+export const DEFAULT_SPEECH_FLOOR_RATE = 0.85;
+
 export interface Assignment {
   id: string;
   name: string;
@@ -30,6 +35,18 @@ export interface Assignment {
   endDate: string;
   isActive: boolean;
   createdAt: string;
+
+  // 🔥 語音設定
+  /**
+   * 預設播放語速（1.0 = 標準英語）。
+   * 學生首次聽到題目時使用。若未設定，預設 1.0。
+   */
+  speechRate?: number;
+  /**
+   * 全班語速下限（0.5 ~ 1.0）。
+   * 學生點「🐢 重聽一次（慢速）」時使用。若未設定，預設 0.85。
+   */
+  speechFloorRate?: number;
 }
 
 export interface ActiveAssignment {
@@ -55,26 +72,6 @@ function focusToExplorationRate(focus: ReviewFocus | undefined): number {
 }
 
 export class AssignmentService {
-  // ============================================================
-  // 學生端：取得當前生效作業
-  // ============================================================
-
-  /**
-   * 學生端：取得當前生效作業
-   *
-   * 查找優先順序（hierarchy）：
-   *   1. 個人作業（className === displayId）
-   *   2. 班級作業（className === className）
-   *   3. 全校作業（className === null）
-   *
-   * 🔥 修復（問題 7）：加入 where('isActive', '==', true) 減少讀取量。
-   *   原本全撈所有作業（含停用、過期），作業累積後會浪費讀取配額。
-   *   時間範圍（startDate/endDate）無法加進 query，因為 Firestore
-   *   不允許對多個欄位同時做 range 查詢，仍在客戶端過濾。
-   *
-   * @param className 班級（例如 "709"）
-   * @param displayId 學生的複合識別碼（例如 "709_1_林佑綸"）
-   */
   async getActiveAssignment(
     className: string,
     displayId?: string
@@ -89,35 +86,25 @@ export class AssignmentService {
       ...d.data()
     } as Assignment));
 
-    // 時間範圍過濾（無法放進 query）
     const validAssignments = all.filter(a => {
       if (a.startDate > now) return false;
       if (a.endDate < now) return false;
       return true;
     });
 
-    // 優先序查找：個人 → 班級 → 全校
     let target: Assignment | undefined;
 
     if (displayId) {
       target = validAssignments.find(a => a.className === displayId);
-      if (target) {
-        console.log(`👤 [AssignmentService] 找到個人作業「${target.name}」`);
-      }
+      if (target) console.log(`👤 [AssignmentService] 找到個人作業「${target.name}」`);
     }
-
     if (!target) {
       target = validAssignments.find(a => a.className === className);
-      if (target) {
-        console.log(`🏫 [AssignmentService] 找到班級作業「${target.name}」`);
-      }
+      if (target) console.log(`🏫 [AssignmentService] 找到班級作業「${target.name}」`);
     }
-
     if (!target) {
       target = validAssignments.find(a => a.className === null);
-      if (target) {
-        console.log(`🌐 [AssignmentService] 找到全校作業「${target.name}」`);
-      }
+      if (target) console.log(`🌐 [AssignmentService] 找到全校作業「${target.name}」`);
     }
 
     if (!target) return null;
@@ -126,7 +113,7 @@ export class AssignmentService {
     const explorationRate = focusToExplorationRate(target.reviewFocus);
 
     console.log(
-      `📋 [AssignmentService] 作業「${target.name}」→ 專注度=${target.reviewFocus ?? 'balanced(預設)'}, ε=${explorationRate}, targetLevel=${target.targetLevel ?? '未指定'}`
+      `📋 [AssignmentService] 作業「${target.name}」→ targetLevel=${target.targetLevel ?? '未指定'}, speechRate=${target.speechRate ?? DEFAULT_SPEECH_RATE}, speechFloor=${target.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE}`
     );
 
     return {
@@ -136,10 +123,6 @@ export class AssignmentService {
       explorationRate,
     };
   }
-
-  // ============================================================
-  // 教師端：取得下拉選單資料
-  // ============================================================
 
   async getAllClasses(): Promise<string[]> {
     try {
@@ -187,10 +170,6 @@ export class AssignmentService {
       return [];
     }
   }
-
-  // ============================================================
-  // 教師端：CRUD
-  // ============================================================
 
   async getAllAssignments(): Promise<Assignment[]> {
     const assignmentsRef = collection(db, 'assignments');

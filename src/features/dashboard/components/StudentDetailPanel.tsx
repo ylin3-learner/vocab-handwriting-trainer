@@ -1,5 +1,5 @@
 // src/features/dashboard/components/StudentDetailPanel.tsx
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { StudentAnalytics, LearningStyle } from '../../../types/analytics';
 import { calculateRadarMetrics } from '../../../domain/analytics/radarMetrics';
 import { LearningStyleRadar } from './LearningStyleRadar';
@@ -9,6 +9,7 @@ import { WeakWordsTable } from './WeakWordsTable';
 import { StudentGrowthChart } from './StudentGrowthChart';
 import { generateStudentReportPdf } from '../../../services/export/studentReportPdf';
 import { useAuth } from '../../../contexts/AuthContext';
+import { StudentStateService } from '../../../services/progression/StudentStateService';
 
 interface Props {
   analytics: StudentAnalytics;
@@ -30,7 +31,6 @@ const LEARNING_STYLE_LABELS: Record<LearningStyle, { text: string; color: string
   'insufficient-data': { text: '樣本不足', color: '#6c757d', emoji: '📊' },
 };
 
-// 🔥 需求 A：活躍狀態標籤（純函式）
 function getEngagementStatus(analytics: StudentAnalytics): {
   label: string;
   color: string;
@@ -54,12 +54,11 @@ function getEngagementStatus(analytics: StudentAnalytics): {
   return { label: '❌ 7 天未練', color: '#721c24', bgColor: '#f8d7da' };
 }
 
-// 🔥 需求 B：等級徽章顏色
 function getLevelBadgeColor(level: number): string {
-  if (level >= 5) return '#28a745';  // L5~L6 綠
-  if (level >= 3) return '#17a2b8';  // L3~L4 藍
-  if (level >= 2) return '#ffc107';  // L2 黃
-  return '#6c757d';                  // L1 灰
+  if (level >= 5) return '#28a745';
+  if (level >= 3) return '#17a2b8';
+  if (level >= 2) return '#ffc107';
+  return '#6c757d';
 }
 
 export const StudentDetailPanel: React.FC<Props> = ({
@@ -72,10 +71,33 @@ export const StudentDetailPanel: React.FC<Props> = ({
   const [isArchiving, setIsArchiving] = useState(false);
   const { user } = useAuth();
 
+  // 🔥 語速下限
+  const [speechFloor, setSpeechFloor] = useState<number | undefined>(analytics.customSpeechFloor);
+  const [isUpdatingSpeech, setIsUpdatingSpeech] = useState(false);
+
+  // 當切換學生時同步
+  useEffect(() => {
+    setSpeechFloor(analytics.customSpeechFloor);
+  }, [analytics.studentId, analytics.customSpeechFloor]);
+
+  const handleSpeechFloorChange = async (value: number | null) => {
+    setIsUpdatingSpeech(true);
+    try {
+      const svc = new StudentStateService();
+      await svc.updateCustomSpeechFloor(analytics.studentId, value);
+      setSpeechFloor(value ?? undefined);
+    } catch (e) {
+      console.error('❌ 更新語速下限失敗:', e);
+      alert('更新失敗，請稍後再試');
+    } finally {
+      setIsUpdatingSpeech(false);
+    }
+  };
+
   const radarMetrics = useMemo(() => calculateRadarMetrics(analytics), [analytics]);
   const styleInfo = LEARNING_STYLE_LABELS[analytics.learningStyle];
-  const engagement = useMemo(() => getEngagementStatus(analytics), [analytics]); // 🔥 需求 A
-  const levelColor = useMemo(() => getLevelBadgeColor(analytics.currentLevel), [analytics.currentLevel]); // 🔥 需求 B
+  const engagement = useMemo(() => getEngagementStatus(analytics), [analytics]);
+  const levelColor = useMemo(() => getLevelBadgeColor(analytics.currentLevel), [analytics.currentLevel]);
 
   const handleExportPdf = async () => {
     if (!reportRef.current) return;
@@ -146,11 +168,7 @@ export const StudentDetailPanel: React.FC<Props> = ({
               fontWeight: 'bold',
             }}
           >
-            {isArchiving
-              ? '⏳ 處理中...'
-              : isArchived
-                ? '📤 取消歸檔'
-                : '📦 歸檔此學生'}
+            {isArchiving ? '⏳ 處理中...' : isArchived ? '📤 取消歸檔' : '📦 歸檔此學生'}
           </button>
         )}
 
@@ -172,7 +190,37 @@ export const StudentDetailPanel: React.FC<Props> = ({
         </button>
       </div>
 
-      {/* 若已歸檔，顯示提示橫幅 */}
+      {/* 🔥 個人語速下限設定 */}
+      <div style={{
+        background: '#e7f3ff',
+        border: '1px solid #b8daff',
+        borderRadius: '6px',
+        padding: '0.75rem 1rem',
+        marginBottom: '0.75rem',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.75rem',
+        flexWrap: 'wrap',
+        fontSize: '0.9rem',
+      }}>
+        <span style={{ fontWeight: 'bold' }}>🐢 個人語速下限：</span>
+        <select
+          value={speechFloor ?? ''}
+          onChange={(e) => handleSpeechFloorChange(e.target.value ? Number(e.target.value) : null)}
+          disabled={isUpdatingSpeech}
+          style={{ padding: '0.3rem 0.5rem', borderRadius: '4px', border: '1px solid #b8daff' }}
+        >
+          <option value="">用全班預設</option>
+          <option value="0.85">0.85x</option>
+          <option value="0.7">0.7x</option>
+          <option value="0.6">0.6x</option>
+          <option value="0.5">0.5x</option>
+        </select>
+        <small style={{ color: '#6c757d' }}>
+          （學生點「🐢 重聽一次」時使用；適用於特殊需求學生）
+        </small>
+      </div>
+
       {isArchived && (
         <div style={{
           background: '#fff3cd',
@@ -197,7 +245,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         }}
       >
-        {/* 列印用標題 */}
         <div style={{
           textAlign: 'center',
           borderBottom: '3px solid #007bff',
@@ -212,7 +259,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
           </p>
         </div>
 
-        {/* 學生摘要 */}
         <div style={{
           background: '#f8f9fa',
           padding: '1rem',
@@ -230,7 +276,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
               <span style={{ fontSize: '0.9rem', color: '#6c757d', marginLeft: '0.5rem' }}>
                 ({analytics.className})
               </span>
-              {/* 🔥 需求 B：等級徽章 */}
               <span style={{
                 fontSize: '0.8rem',
                 fontWeight: 'bold',
@@ -247,7 +292,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
               共 {analytics.totalAttempts} 題，答對 {analytics.correctCount} 題，
               平均 {(analytics.avgResponseTimeMs / 1000).toFixed(1)} 秒
             </p>
-            {/* 🔥 需求 A：活躍天數 + 狀態標籤 */}
             <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '0.8rem', color: '#6c757d' }}>
                 📅 近 7 天活躍 {analytics.activeDaysLast7} 天
@@ -271,12 +315,10 @@ export const StudentDetailPanel: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* 🔥 需求 C：成長曲線（跨兩欄） */}
         <div style={{ marginBottom: '1rem' }}>
           <StudentGrowthChart snapshots={analytics.dailySnapshots} />
         </div>
 
-        {/* 圖表 2x2 網格 */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
           <LearningStyleRadar metrics={radarMetrics} />
           <ErrorBreakdownPie breakdown={analytics.errorBreakdown} />
@@ -284,7 +326,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
           <WeakWordsTable words={analytics.weakestWords} />
         </div>
 
-        {/* 列印用頁尾 */}
         <div style={{
           marginTop: '1.5rem',
           paddingTop: '1rem',

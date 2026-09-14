@@ -86,13 +86,9 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   const canvasRef = useRef<HandwritingCanvasRef>(null);
   const submitLockRef = useRef<boolean>(false);
 
-  // 🔥 防止 React StrictMode 在 dev 模式觸發 useEffect 兩次
   const hasInitializedRef = useRef<boolean>(false);
-
-  // 🔥 防止過期的 speakWord 呼叫仍在播放語音
   const speechIdRef = useRef<number>(0);
 
-  /** 取消所有語音播放（同步呼叫） */
   const cancelSpeech = () => {
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
@@ -102,12 +98,9 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   /**
    * 播放單字 + 英文例句。
    *
-   * 修復點：
-   *   1. 純英文格式（en-US），避免中文標點被英文引擎誤讀
-   *   2. cancel() 後等 SPEECH_CANCEL_DELAY_MS 讓 queue 真的清空
-   *   3. 用 speechIdRef 檢查：如果已經有更新的呼叫，跳過
+   * @param rate 播放速度（1.0 = 標準）
    */
-  const speakWord = async (word: string, sentence: string) => {
+  const speakWord = async (word: string, sentence: string, rate: number) => {
     const myId = ++speechIdRef.current;
 
     if (!window.speechSynthesis) return;
@@ -115,19 +108,17 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     window.speechSynthesis.cancel();
     await new Promise(resolve => setTimeout(resolve, SPEECH_CANCEL_DELAY_MS));
 
-    // 若有更新的呼叫進來，跳過（避免過期語音繼續播放）
     if (myId !== speechIdRef.current) {
       console.log(`🔇 [speakWord] 跳過過期語音：${word}`);
       return;
     }
     if (!window.speechSynthesis) return;
 
-    // 純英文格式：單字 + 句號停頓 + 例句
     const text = `${word}. ${sentence}`;
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'en-US';
-    utterance.rate = 0.85;
+    utterance.rate = rate;
 
     utterance.onerror = (e) => {
       if (e.error !== 'interrupted') {
@@ -135,13 +126,12 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
       }
     };
 
-    console.log(`🔊 [speakWord] 播放：${word}`);
+    console.log(`🔊 [speakWord] 播放：${word}（rate=${rate}）`);
     speechRef.current = utterance;
     window.speechSynthesis.speak(utterance);
   };
 
   const loadNext = async () => {
-    // 先停掉上一題的語音
     cancelSpeech();
 
     const q = await orchestrator.nextQuestion();
@@ -168,12 +158,11 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     timedOutRef.current = false;
     submitLockRef.current = false;
 
-    // 播放語音
-    await speakWord(q.word.word, q.word.sentence);
+    // 用「首次播放語速」播放
+    await speakWord(q.word.word, q.word.sentence, orchestrator.getSpeechRate());
   };
 
   useEffect(() => {
-    // 🔥 防止 StrictMode 雙重觸發
     if (hasInitializedRef.current) {
       console.log('⚠️ [QuizScreen] useEffect 被觸發第二次，跳過');
       return;
@@ -186,6 +175,16 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
       cancelSpeech();
     };
   }, []);
+
+  /**
+   * 「🐢 重聽一次（慢速）」按鈕處理。
+   */
+  const handleReplaySlow = () => {
+    if (!question || status !== 'answering') return;
+    const floorRate = orchestrator.getSpeechFloorRate();
+    if (floorRate === null) return;
+    void speakWord(question.word.word, question.word.sentence, floorRate);
+  };
 
   const handleSubmit = async () => {
     if (submitLockRef.current) return;
@@ -215,8 +214,6 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         recognizedText,
         elapsedMs,
         timedOut: timedOutRef.current,
-        startTime: new Date(startTimeRef.current).toISOString(),
-        now: new Date().toISOString(),
       });
       const submission = {
         recognizedText,
@@ -286,10 +283,13 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   }
 
   const displayInfo = orchestrator.getDisplayInfo();
+  const speechRate = orchestrator.getSpeechRate();
+  const speechFloorRate = orchestrator.getSpeechFloorRate();
+  const showReplayButton = speechFloorRate !== null && speechFloorRate < speechRate;
 
   return (
     <div style={{ maxWidth: '700px', margin: '0 auto', padding: '1rem' }}>
-      {/* 🔥 iOS 靜音開關提示：只在 iOS 裝置顯示 */}
+      {/* iOS 靜音開關提示 */}
       {/iPad|iPhone|iPod/.test(navigator.userAgent) && (
         <div style={{
           background: '#fff3cd',
@@ -304,6 +304,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
           🔔 若聽不到聲音，請確認裝置側邊的靜音開關（或控制中心的鈴鐺圖示）已關閉
         </div>
       )}
+
       {displayInfo.showProgress && (
         <div style={{
           padding: '0.5rem 1rem',
@@ -351,6 +352,27 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
           disabled={status !== 'answering'}
         />
       </div>
+
+      {/* 🔊 重聽按鈕（僅在提供下限時顯示） */}
+      {showReplayButton && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <button
+            onClick={handleReplaySlow}
+            disabled={status !== 'answering'}
+            style={{
+              padding: '0.5rem 1.25rem',
+              fontSize: '1rem',
+              background: status === 'answering' ? '#17a2b8' : '#ccc',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: status === 'answering' ? 'pointer' : 'default',
+            }}
+          >
+            🐢 重聽一次（慢速）
+          </button>
+        </div>
+      )}
 
       {storageError && (
         <div style={{ padding: '0.5rem', marginBottom: '0.5rem', background: '#fff3cd', borderRadius: '4px' }}>
