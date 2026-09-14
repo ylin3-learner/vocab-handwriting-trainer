@@ -1,0 +1,12 @@
+{
+  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
+  "parser": "@typescript-eslint/parser",
+  "rules": {
+    "no-restricted-imports": ["error", {
+      "patterns": [{
+        "group": ["**/features/**"],
+        "message": "domain/ 和 services/ 不應該 import features/"
+      }]
+    }]
+  }
+}
