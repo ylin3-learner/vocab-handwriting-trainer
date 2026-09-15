@@ -17,6 +17,8 @@ import {
 import { db } from '../../firebase';
 import { selectActiveAssignment } from '../../domain/assignment/selectAssignment';
 import type { QuotaExceededBehavior } from '../../domain/quiz/SessionQuotaPolicy';
+// 🔥 新增
+import { removeUndefined } from '../../domain/firestore/removeUndefined';
 
 export type ReviewFocus = 'strict' | 'balanced' | 'explore';
 
@@ -37,9 +39,9 @@ export interface Assignment {
   createdAt: string;
   speechRate?: number;
   speechFloorRate?: number;
-  // 新增：配額用盡後的行為
-  // 未設定時視為 'stop'（向後相容舊作業）
   quotaExceededBehavior?: QuotaExceededBehavior;
+  // 🔥 新增：每題作答時限（毫秒）。未設定時用系統預設 8000ms。
+  timeLimitMs?: number;
 }
 
 export interface ActiveAssignment {
@@ -57,39 +59,14 @@ export interface StudentOption {
 
 function focusToExplorationRate(focus: ReviewFocus | undefined): number {
   switch (focus) {
-    case 'strict': return 0.05;
-    case 'explore': return 0.25;
+    case 'strict':   return 0.05;
+    case 'explore':  return 0.25;
     case 'balanced':
-    default: return 0.10;
+    default:         return 0.10;
   }
-}
-
-/**
- * Firestore 不接受 undefined 值。
- * 這個函式會過濾掉物件中所有值為 undefined 的欄位。
- *
- * 為什麼需要？
- *   老師建立作業時，「目標等級」可以不選（undefined），
- *   但 Firestore 會拒絕 undefined 欄位。
- *   與其讓每個呼叫端自己處理，不如在 Service 層統一過濾。
- */
-function removeUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
-  const result: Partial<T> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value !== undefined) {
-      result[key as keyof T] = value as T[keyof T];
-    }
-  }
-  return result;
 }
 
 export class AssignmentService {
-  /**
-   * 學生端：取得當前生效作業。
-   *
-   * 優先序由純函式 selectActiveAssignment 決定：
-   *   個人 > 班級 > 全校；同類型多個時取 createdAt 最新。
-   */
   async getActiveAssignment(
     className: string,
     displayId?: string
@@ -111,8 +88,8 @@ export class AssignmentService {
     const target = selected.assignment;
     const matchLabel =
       selected.matchType === 'personal' ? '👤 個人' :
-        selected.matchType === 'class' ? '🏫 班級' :
-          '🌐 全校';
+      selected.matchType === 'class'    ? '🏫 班級' :
+                                          '🌐 全校';
 
     console.log(
       `${matchLabel} [AssignmentService] 作業「${target.name}」→ targetLevel=${target.targetLevel ?? '未指定'}`
@@ -192,23 +169,23 @@ export class AssignmentService {
     return { id: snap.id, ...snap.data() } as Assignment;
   }
 
-  // 修改：過濾 undefined
+  // 🔥 使用全域 removeUndefined
   async createAssignment(assignment: Omit<Assignment, 'id' | 'createdAt'>): Promise<string> {
     const assignmentsRef = collection(db, 'assignments');
     const docRef = await addDoc(assignmentsRef, {
-      ...removeUndefined(assignment),
+      ...removeUndefined(assignment as Record<string, unknown>),
       createdAt: new Date().toISOString(),
     });
     return docRef.id;
   }
 
-  // 修改：過濾 undefined
+  // 🔥 使用全域 removeUndefined
   async updateAssignment(
     id: string,
     assignment: Partial<Omit<Assignment, 'id' | 'createdAt'>>
   ): Promise<void> {
     const docRef = doc(db, 'assignments', id);
-    await updateDoc(docRef, removeUndefined(assignment));
+    await updateDoc(docRef, removeUndefined(assignment as Record<string, unknown>));
   }
 
   async deleteAssignment(id: string): Promise<void> {

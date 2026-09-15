@@ -22,11 +22,13 @@ import { DailySnapshot } from '../../types/dailySnapshot';
 import { QuizSessionApi, SessionDisplayInfo } from './QuizSessionApi';
 import { AnswerProcessor } from './AnswerProcessor';
 
-// 🔥 新增
 import {
   SessionQuotaPolicy,
   QuotaExceededBehavior,
 } from '../../domain/quiz/SessionQuotaPolicy';
+
+// 🔥 新增
+import { QuizTimingPolicy } from '../../domain/quiz/QuizTimingPolicy';
 
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -94,8 +96,11 @@ export class QuizOrchestrator implements QuizSessionApi {
   private dailyTotalResponseTime = 0;
   private todaySnapshotDate: string | null = null;
 
-  // 🔥 配額政策（init 時依作業設定初始化）
   private quotaPolicy: SessionQuotaPolicy;
+
+  // 🔥 新增：本 session 的作答時限（init 時解析）
+  private timingPolicy = new QuizTimingPolicy();
+  private resolvedTimeLimitMs: number = QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS;
 
   constructor(studentId: string, className: string, deps: QuizOrchestratorDeps) {
     this.studentId = studentId;
@@ -109,11 +114,13 @@ export class QuizOrchestrator implements QuizSessionApi {
     this.localStore = new LocalStorageProgressStore();
     this.answerProcessor = new AnswerProcessor();
 
-    // 🔥 預設：stop 模式（init 會依作業設定覆蓋）
     this.quotaPolicy = new SessionQuotaPolicy({
       dailyMaxQuota: deps.defaultDailyMaxQuota,
       exceededBehavior: 'stop',
     });
+
+    // 🔥 初始時限：用 deps 的預設（init 會依作業設定覆蓋）
+    this.resolvedTimeLimitMs = deps.timeLimitMs;
   }
 
   getCurrentLevel(): number {
@@ -129,7 +136,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     );
   }
 
-  // 🔥 getDisplayInfo：加入「課後加強」模式
   getDisplayInfo(): SessionDisplayInfo {
     const assignmentName =
       this.activeAssignment?.assignment.name ?? '每日練習（預設配額）';
@@ -171,6 +177,11 @@ export class QuizOrchestrator implements QuizSessionApi {
       return this.customSpeechFloor;
     }
     return this.activeAssignment?.assignment.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE;
+  }
+
+  // 🔥 新增：給 QuizScreen 查詢本 session 時限（用於評分前的預判）
+  getTimeLimitMs(): number {
+    return this.resolvedTimeLimitMs;
   }
 
   // ============================================================
@@ -248,6 +259,12 @@ export class QuizOrchestrator implements QuizSessionApi {
     console.log(
       `   📋 配額政策：${exceededBehavior === 'continue' ? '允許課後加強' : '達配額即停止'}`
     );
+
+    // 🔥 解析本 session 的作答時限
+    this.resolvedTimeLimitMs = this.timingPolicy.resolve({
+      assignmentMs: this.activeAssignment?.assignment.timeLimitMs,
+    });
+    console.log(`   ⏱️ 作答時限：${this.resolvedTimeLimitMs}ms（${this.resolvedTimeLimitMs / 1000} 秒）`);
 
     // 步驟 2：讀取學生進度狀態
     this.stateCache = await this.deps.progressStore.getAllStates(displayId);
@@ -425,7 +442,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     return this.deps.now ? this.deps.now() : new Date();
   }
 
-  // 🔥 nextQuestion：改用 quotaPolicy
   async nextQuestion(): Promise<QuizQuestion | null> {
     if (!this.quotaPolicy.shouldContinue(this.dailyAnsweredCount)) {
       return null;
@@ -461,9 +477,10 @@ export class QuizOrchestrator implements QuizSessionApi {
     const wordLevel = Number(word.level ?? '0');
     const isProbe = wordLevel > this.currentLevel;
 
+    // 🔥 使用解析後的時限
     return {
       word,
-      timeLimitMs: this.deps.timeLimitMs,
+      timeLimitMs: this.resolvedTimeLimitMs,
       isProbe,
     };
   }
@@ -487,7 +504,8 @@ export class QuizOrchestrator implements QuizSessionApi {
       word,
       submission,
       currentState,
-      timeLimitMs: this.deps.timeLimitMs,
+      // 🔥 使用解析後的時限（讓 grader 用正確的閾值判斷超時）
+      timeLimitMs: this.resolvedTimeLimitMs,
       studentId: this.studentId,
       studentDisplayId,
       now,
@@ -591,6 +609,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       }
     }
 
+    // 🔥 修正錯字：schedule → scheduling
     return {
       grading: processed.grading,
       scheduling: processed.scheduling,
