@@ -445,10 +445,19 @@ export class QuizOrchestrator implements QuizSessionApi {
   }
 
   // ============================================================
-  // 🔥 nextQuestion：修正課後加強模式的配額檢查
+  // 🔥 nextQuestion：重構後只做協調
+  //
+  // 職責分工：
+  //   - SessionQuotaPolicy：「能不能出下一題」的唯一真實來源
+  //   - pickNextWordId：「選誰」的純選擇
+  //   - 本方法：協調者，依序呼叫兩者
+  //
+  // 重構前有「兩層配額檢查」（policy + selector），
+  // 導致課後加強模式需要傳 Number.MAX_SAFE_INTEGER 的 hack。
+  // 重構後只剩一層，不需要任何 hack。
   // ============================================================
   async nextQuestion(): Promise<QuizQuestion | null> {
-    // 第一層：quotaPolicy 決定「是否允許繼續」
+    // 唯一真實來源：配額是否允許
     if (!this.quotaPolicy.shouldContinue(this.dailyAnsweredCount)) {
       return null;
     }
@@ -463,49 +472,17 @@ export class QuizOrchestrator implements QuizSessionApi {
       entries.push({ wordId: word.id, state, overdueDays });
     }
 
-    // ============================================================
-    // 🔥 修正：課後加強模式下，放寬傳給 pickNextWordId 的配額
-    //
-    // 為什麼？
-    //   pickNextWordId 是純函式，職責是「依每日配額決定選誰」。
-    //   它內部的 `dailyAnsweredCount >= dailyMaxQuota` 檢查
-    //   與「課後加強」的產品概念衝突。
-    //
-    //   與其在純函式內加例外（會污染職責），
-    //   不如在 Orchestrator 層傳入「放寬的配額」，
-    //   讓純函式保持單純。
-    //
-    // 策略：
-    //   - dailyMaxQuota 設為 Number.MAX_SAFE_INTEGER，跳過配額檢查
-    //   - dailyNewQuotaRemaining 也設為極大值，允許優先抽新詞
-    // ============================================================
-    const isContinueMode = this.quotaPolicy.isInContinueMode(this.dailyAnsweredCount);
-
-    const quota = isContinueMode
-      ? {
-          dailyAnsweredCount: this.dailyAnsweredCount,
-          dailyMaxQuota: Number.MAX_SAFE_INTEGER,
-          dailyNewQuotaRemaining: Number.MAX_SAFE_INTEGER,
-        }
-      : {
-          dailyAnsweredCount: this.dailyAnsweredCount,
-          dailyMaxQuota: this.dailyMaxQuota,
-          dailyNewQuotaRemaining: this.dailyNewQuotaRemaining,
-        };
-
-    if (isContinueMode) {
-      console.log(
-        `📚 [nextQuestion] 課後加強模式：放寬配額（answered=${this.dailyAnsweredCount}, pool=${entries.length}）`
-      );
-    }
-
+    // 🔥 傳入精簡後的 quota（只有新字偏好）
     const selectedId = pickNextWordId(
       entries,
-      quota,
+      { dailyNewQuotaRemaining: this.dailyNewQuotaRemaining },
       this.activeAssignment?.explorationRate ?? 0.1
     );
 
     if (!selectedId) {
+      // 課後加強模式下無候選，是「池子用完」而非「配額用盡」
+      // （因為上面的 shouldContinue 已通過）
+      const isContinueMode = this.quotaPolicy.isInContinueMode(this.dailyAnsweredCount);
       if (isContinueMode) {
         console.warn(
           `⚠️ [nextQuestion] 課後加強模式下無候選單字（pool=${entries.length}），結束 session`

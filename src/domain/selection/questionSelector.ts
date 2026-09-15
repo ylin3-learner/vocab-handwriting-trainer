@@ -11,9 +11,21 @@ export interface WordEntry {
   overdueDays?: number;
 }
 
+/**
+ * 選題偏好參數。
+ *
+ * 🔥 職責邊界（重構後）：
+ *   - 這裡只放「選題的偏好」，不放「配額限制」。
+ *   - 「能不能出下一題」由 SessionQuotaPolicy 決定。
+ *   - 這樣 pickNextWordId 才能保持「純選擇」的職責，
+ *     不會與配額判斷耦合。
+ *
+ * dailyNewQuotaRemaining：
+ *   - 語意是「今天還想優先出幾個新字」
+ *   - 不是「配額上限」，而是「新字偏好額度」
+ *   - 0 代表不再優先新字（改從複習池挑）
+ */
 export interface DailyQuota {
-  dailyAnsweredCount: number;
-  dailyMaxQuota: number;
   dailyNewQuotaRemaining: number;
 }
 
@@ -79,15 +91,31 @@ function weightedPick(entries: WordEntry[], explorationRate: number): string {
   return entries[entries.length - 1]!.wordId;
 }
 
+/**
+ * 🔥 純選擇：從候選中選出下一題的 wordId。
+ *
+ * 職責邊界（重構後）：
+ *   - 只負責「選誰」，不負責「能不能選」。
+ *   - 「已達配額 → 結束 session」的判斷由 SessionQuotaPolicy 負責，
+ *     呼叫方（QuizOrchestrator）在呼叫此函式前就應該先擋掉。
+ *   - 這樣任何「配額相關的產品概念」（課後加強、特殊生、老師指派）
+ *     都不需要動到這個純函式。
+ *
+ * 選題邏輯：
+ *   1. 若 dailyNewQuotaRemaining > 0 且還有新字 → 隨機挑一個新字
+ *   2. 若 dueWords 太少（< 5）且還有新字 → 從新字挑（避免重複出同一批）
+ *   3. 否則 → 從 dueWords 用加權隨機挑
+ *
+ * @param entries 候選單字
+ * @param quota 選題偏好（僅 newQuotaRemaining）
+ * @param explorationRate 探索率（預設 0.1）
+ * @returns 選中的 wordId，或 null（沒有任何候選）
+ */
 export function pickNextWordId(
   entries: WordEntry[],
   quota: DailyQuota,
   explorationRate: number = 0.1
 ): string | null {
-  if (quota.dailyAnsweredCount >= quota.dailyMaxQuota) {
-    return null;
-  }
-
   const { newWords, dueWords } = splitNewAndDue(entries);
 
   // 1. 優先抽新字
