@@ -113,7 +113,7 @@ test('沒有任何可選單字 → 回傳 null', () => {
   assert.equal(picked, null);
 });
 
-test('只有新字、新字配額為 0、dueWords 也空 → 回傳 null', () => {
+test('只有新字、新字配額為 0 → 因 MIN_DUE_POOL fallback 而回傳新字（非 null）', () => {
   // 邊界：newQuotaRemaining = 0 且沒有 dueWords，但有新字
   // 因為 MIN_DUE_POOL = 5 且 dueWords.length = 0 < 5，會走「從新字抽」分支
   // 所以這個案例其實會回傳新字，不是 null
