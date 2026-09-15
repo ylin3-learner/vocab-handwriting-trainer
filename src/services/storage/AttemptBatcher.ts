@@ -5,6 +5,7 @@ import { ReviewState } from '../../types/word';
 import { AttemptRecord } from './ProgressStore';
 import { sanitizeFirestoreId } from '../../domain/string/sanitizeId';
 import { DailySnapshot } from '../../types/dailySnapshot';
+import { removeUndefined } from '../../domain/firestore/removeUndefined';
 
 export interface AttemptBatchParams {
   studentId: string;         // uid（用於 attempts 的 studentId 欄位）
@@ -58,10 +59,17 @@ export class AttemptBatcher {
 
     // ============================================================
     // 1. SM-2 進度：studentStates/{displayId}/words/{wordId}
+    //
+    // 🔥 用 removeUndefined 過濾 undefined，避免 Firestore 拒絕
+    //    （即使 ReviewState 已改為全必填，這層防守仍保留，
+    //      以防未來新增 optional 欄位時忘記處理）
     // ============================================================
     batch.set(
       doc(db, 'studentStates', stateKey, 'words', safeWordId),
-      { ...nextState, originalWordId: wordId }
+      {
+        ...removeUndefined(nextState as unknown as Record<string, unknown>),
+        originalWordId: wordId,
+      }
     );
 
     // ============================================================
@@ -75,8 +83,13 @@ export class AttemptBatcher {
 
     // ============================================================
     // 3. 作答紀錄：attempts/{autoId}
+    //
+    // 🔥 也過濾 undefined（AttemptRecord 有些欄位是 optional）
     // ============================================================
-    batch.set(doc(collection(db, 'attempts')), attempt);
+    batch.set(
+      doc(collection(db, 'attempts')),
+      removeUndefined(attempt as unknown as Record<string, unknown>)
+    );
 
     // ============================================================
     // 4. 班級統計（嵌套物件）

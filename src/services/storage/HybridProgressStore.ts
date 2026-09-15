@@ -4,6 +4,8 @@ import { ProgressStore, AttemptRecord } from './ProgressStore';
 import { FirestoreProgressStore } from './FirestoreProgressStore';
 import { LocalStorageProgressStore } from './LocalStorageProgressStore';
 import { notifyQuotaExceeded } from '../status/quotaMonitor';
+// 🔥 新增
+import { removeUndefined } from '../../domain/firestore/removeUndefined';
 
 // 待同步操作類型
 type SyncOperation =
@@ -15,6 +17,9 @@ type SyncOperation =
  *
  * 🔥 建構參數 studentKey 是 displayId，不是 uid。
  *   理由：跨 UID 追蹤學生，換裝置時同步佇列也能延續。
+ *
+ * 🔥 Firestore 拒絕 undefined 值，所有寫入雲端的資料
+ *   都先經過 removeUndefined 過濾（治本 + 防守）。
  */
 export class HybridProgressStore implements ProgressStore {
     private cloud: FirestoreProgressStore;
@@ -55,43 +60,74 @@ export class HybridProgressStore implements ProgressStore {
     }
 
     async saveState(studentId: string, wordId: string, state: ReviewState): Promise<void> {
-        await this.local.saveState(studentId, wordId, state);
+        // 🔥 過濾 undefined：本地與雲端都寫入乾淨版本
+        //    這樣同步佇列中的資料也是乾淨的，syncNow 就不需再次過濾
+        const cleanState = removeUndefined(
+            state as unknown as Record<string, unknown>
+        ) as unknown as ReviewState;
+
+        await this.local.saveState(studentId, wordId, cleanState);
 
         if (this.isCircuitBroken) {
-            await this.addToSyncQueue({ type: 'saveState', studentId, wordId, state, timestamp: Date.now() });
+            await this.addToSyncQueue({
+                type: 'saveState',
+                studentId,
+                wordId,
+                state: cleanState,  // 🔥 用乾淨版本
+                timestamp: Date.now(),
+            });
             return;
         }
 
         try {
-            await this.cloud.saveState(studentId, wordId, state);
+            await this.cloud.saveState(studentId, wordId, cleanState);  // 🔥
             await this.removeFromSyncQueue('saveState', studentId, wordId);
         } catch (error) {
             console.warn('⚠️ 雲端儲存失敗，加入同步佇列:', error);
-            await this.addToSyncQueue({ type: 'saveState', studentId, wordId, state, timestamp: Date.now() });
+            await this.addToSyncQueue({
+                type: 'saveState',
+                studentId,
+                wordId,
+                state: cleanState,  // 🔥
+                timestamp: Date.now(),
+            });
             this.checkCircuitBreaker(error);
         }
     }
 
     async recordAttempt(attempt: AttemptRecord): Promise<void> {
-        await this.local.recordAttempt(attempt);
+        // 🔥 過濾 undefined：AttemptRecord 也有 optional 欄位
+        const cleanAttempt = removeUndefined(
+            attempt as unknown as Record<string, unknown>
+        ) as unknown as AttemptRecord;
+
+        await this.local.recordAttempt(cleanAttempt);
 
         if (this.isCircuitBroken) {
-            await this.addToSyncQueue({ type: 'recordAttempt', attempt, timestamp: Date.now() });
+            await this.addToSyncQueue({
+                type: 'recordAttempt',
+                attempt: cleanAttempt,  // 🔥
+                timestamp: Date.now(),
+            });
             return;
         }
 
         try {
-            await this.cloud.recordAttempt(attempt);
+            await this.cloud.recordAttempt(cleanAttempt);  // 🔥
             await this.removeFromSyncQueue('recordAttempt', attempt.studentId, attempt.wordId);
         } catch (error) {
             console.warn('⚠️ 雲端記錄作答失敗，加入同步佇列:', error);
-            await this.addToSyncQueue({ type: 'recordAttempt', attempt, timestamp: Date.now() });
+            await this.addToSyncQueue({
+                type: 'recordAttempt',
+                attempt: cleanAttempt,  // 🔥
+                timestamp: Date.now(),
+            });
             this.checkCircuitBreaker(error);
         }
     }
 
     /**
-     * 🔥 修復：熔斷器改為「隔天太平洋午夜」重置
+     * 🔥 熔斷器改為「隔天太平洋午夜」重置
      *
      * 原因：Firestore 配額每天太平洋午夜重置，
      * 之前用 5 分鐘會導致「解鎖 → 撞牆 → 再熔斷」的無限迴圈。
@@ -187,6 +223,13 @@ export class HybridProgressStore implements ProgressStore {
         }
     }
 
+    /**
+     * 🔥 手動同步佇列。
+     *
+     * 注意：佇列中的資料已在加入時過濾過 undefined
+     *      （見 saveState / recordAttempt 的 cleanState / cleanAttempt），
+     *      所以這裡直接寫入雲端即可，不需再次過濾。
+     */
     async syncNow(): Promise<void> {
         if (this.isSyncing || this.isCircuitBroken) return;
         const queue = await this.getSyncQueue();

@@ -45,6 +45,23 @@ export interface QuizSessionApi {
   getSpeechFloorRate(): number | null;
 
   /**
+   * 🔥 是否允許學生主動繼續練習（done 頁面判斷用）。
+   *
+   * - true：顯示「繼續練習」按鈕
+   * - false：不顯示
+   * - 未實作：視為 false（例如 Placement 沒有「繼續」概念）
+   */
+  canOfferContinue?(): boolean;
+
+  /**
+   * 🔥 學生按下「繼續練習」按鈕時呼叫。
+   *
+   * 效果：切換 session 進入 continue 模式，之後不再停止。
+   * 幂等：多次呼叫只生效一次。
+   */
+  continueSession?(): void;
+
+  /**
    * 結束 session 時呼叫（可選）。
    */
   finalizeSession?(): Promise<void>;

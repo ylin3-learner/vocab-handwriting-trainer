@@ -110,19 +110,25 @@ export class AnswerProcessor {
     //   - 答錯 → 設為 true（永久追蹤）
     //   - 答對 + 之前 everWrong=true + correctStreak >= 5 → 清除為 false
     //   - 其他 → 保持不變
+    //
+    // 🔥 防禦 legacy 資料：
+    //   舊版資料可能沒寫入過 everWrong / correctStreak，
+    //   讀出來會是 undefined。這裡 coerce 成 boolean / number，
+    //   確保輸出永遠是乾淨的 ReviewState，
+    //   不會再撞回 Firestore 的 Unsupported field value: undefined。
     // ============================================================
     const mergedState = mergeSM2ResultWithState(currentState, scheduling, now);
 
+    const prevEverWrong = currentState.everWrong === true;
     const prevStreak = currentState.correctStreak ?? 0;
     const nextStreak = grading.isCorrect ? prevStreak + 1 : 0;
 
     const shouldClearEverWrong =
-      currentState.everWrong === true &&
-      nextStreak >= EVER_WRONG_CLEAR_THRESHOLD;
+      prevEverWrong && nextStreak >= EVER_WRONG_CLEAR_THRESHOLD;
 
     const nextEverWrong = !grading.isCorrect
       ? true
-      : (shouldClearEverWrong ? false : currentState.everWrong);
+      : (shouldClearEverWrong ? false : prevEverWrong);
 
     const nextState: ReviewState = {
       ...mergedState,
