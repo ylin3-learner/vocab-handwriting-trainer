@@ -37,22 +37,65 @@ export class AnalyticsService {
         return this.classStatsService.getAllClassStats();
     }
 
+    // ============================================================
+    // 🔥 修復：用 displayId 當 key，合併同一學生的多筆 UID profile
+    // ============================================================
     async getAllStudentsStats(): Promise<StudentStat[]> {
         const studentsSnap = await getDocs(collection(db, 'students'));
         const students = studentsSnap.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
-        })) as { id: string; name?: string; class?: string }[];
+        })) as {
+            id: string;
+            name?: string;
+            class?: string;
+            displayId?: string;
+            createdAt?: string;
+            updatedAt?: string;
+        }[];
 
         const attemptsSnap = await getDocs(collection(db, 'attempts'));
         const attempts = attemptsSnap.docs.map(doc => doc.data() as AttemptRecord);
 
+        // ============================================================
+        // 用 displayId 當 key 合併多筆 profile
+        //
+        // 為什麼？
+        //   匿名登入每次 refresh 產生新 UID，
+        //   但同一個學生的 displayId 固定不變。
+        //   用 displayId 當 key 才能正確合併。
+        //
+        // Fallback：
+        //   沒有 displayId 的舊資料 → 用 uid 當 key（不會合併，但也不會壞）
+        // ============================================================
         const statsMap = new Map<string, StudentStat>();
 
+        // 記錄每個 displayId 對應的所有 UID（給 attempts fallback 用）
+        const displayIdToUids = new Map<string, Set<string>>();
+
+        // 記錄每個 key 的最新 updatedAt（決定保留哪個 profile）
+        const keyToLatestUpdatedAt = new Map<string, string>();
+
         students.forEach(s => {
-            statsMap.set(s.id, {
-                id: s.id,
-                name: s.name || s.id,
+            const key = s.displayId || s.id;   // 🔥 優先用 displayId
+            const updatedAt = s.updatedAt || s.createdAt || '';
+
+            // 記錄 uid 映射
+            if (!displayIdToUids.has(key)) {
+                displayIdToUids.set(key, new Set());
+            }
+            displayIdToUids.get(key)!.add(s.id);
+
+            // 只保留 updatedAt 最新的 profile
+            const existingUpdatedAt = keyToLatestUpdatedAt.get(key);
+            if (existingUpdatedAt !== undefined && existingUpdatedAt >= updatedAt) {
+                return;  // 舊的，跳過
+            }
+
+            keyToLatestUpdatedAt.set(key, updatedAt);
+            statsMap.set(key, {
+                id: key,  // 🔥 id 是 displayId，與 getStudentDetail 一致
+                name: s.name || key,
                 class: s.class || '未分類',
                 totalAttempts: 0,
                 correctCount: 0,
@@ -62,14 +105,40 @@ export class AnalyticsService {
             });
         });
 
+        // ============================================================
+        // 統計 attempts
+        //
+        // 匹配策略：
+        //   1. 優先：用 attempt.studentDisplayId 匹配（新資料）
+        //   2. Fallback：用 attempt.studentId (uid) 反查（舊資料）
+        // ============================================================
         attempts.forEach(a => {
-            const stat = statsMap.get(a.studentId);
+            let stat: StudentStat | undefined;
+
+            // 優先：用 displayId 匹配
+            if (a.studentDisplayId) {
+                stat = statsMap.get(a.studentDisplayId);
+            }
+
+            // Fallback：用 uid 反查是哪個 displayId 的
+            if (!stat) {
+                for (const [displayId, uids] of displayIdToUids.entries()) {
+                    if (uids.has(a.studentId)) {
+                        stat = statsMap.get(displayId);
+                        break;
+                    }
+                }
+            }
+
             if (!stat) return;
             stat.totalAttempts += 1;
             if (a.isCorrect) stat.correctCount += 1;
             stat.avgResponseTime += a.responseTimeMs;
         });
 
+        // ============================================================
+        // 計算正確率、風險等級
+        // ============================================================
         const result: StudentStat[] = [];
         statsMap.forEach(stat => {
             if (stat.totalAttempts === 0) {
@@ -194,7 +263,7 @@ export class AnalyticsService {
             className: '未分類',
             currentLevel: 1,
         };
-        let customSpeechFloor: number | undefined;  // 🔥 新增
+        let customSpeechFloor: number | undefined;
 
         // 2.1：讀取 studentStates/{displayId}
         try {
@@ -202,7 +271,7 @@ export class AnalyticsService {
             if (stateDoc.exists()) {
                 const data = stateDoc.data();
                 profile.currentLevel = data.currentLevel ?? 1;
-                customSpeechFloor = data.customSpeechFloor; 
+                customSpeechFloor = data.customSpeechFloor;
                 console.log(`✅ [AnalyticsService] 從 studentStates 讀到 L${profile.currentLevel}`);
             }
         } catch (e) {
@@ -263,7 +332,7 @@ export class AnalyticsService {
         // ============================================================
         const result = analyzeStudent(attempts, profile, wordMap);
         result.dailySnapshots = dailySnapshots;
-        result.customSpeechFloor = customSpeechFloor; // 新增
+        result.customSpeechFloor = customSpeechFloor;
         return result;
     }
 }
