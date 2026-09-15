@@ -15,6 +15,13 @@ const CANVAS_HEIGHT = 120;
  */
 const SPEECH_CANCEL_DELAY_MS = 100;
 
+/**
+ * 🔥 語音保險時間（毫秒）。
+ * 若語音的 onend / onerror 在這麼久內都沒觸發，
+ * 強制啟動倒數，避免學生卡死。
+ */
+const SPEECH_FALLBACK_TIMEOUT_MS = 8000;
+
 async function callGoogleIME(trace: number[][][], language: string = 'en'): Promise<string[]> {
   const scaledTrace = trace.map(stroke => {
     const xs = (stroke[0] || []).map(x => x * CANVAS_WIDTH);
@@ -80,6 +87,10 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [storageError, setStorageError] = useState<boolean>(false);
   const [dailyProgress, setDailyProgress] = useState<{ answered: number; max: number }>({ answered: 0, max: 0 });
+
+  // 🔥 新增：倒數是否已啟動（語音結束後才 true）
+  const [countdownStarted, setCountdownStarted] = useState(false);
+
   const startTimeRef = useRef<number>(0);
   const timedOutRef = useRef<boolean>(false);
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -89,21 +100,54 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   const hasInitializedRef = useRef<boolean>(false);
   const speechIdRef = useRef<number>(0);
 
+  // 🔥 防止 onEnd 被重複呼叫
+  const countdownStartedRef = useRef<boolean>(false);
+
+  // 🔥 語音保險計時器
+  const speechFallbackTimerRef = useRef<number | null>(null);
+
   const cancelSpeech = () => {
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    // 🔥 清除保險計時器
+    if (speechFallbackTimerRef.current !== null) {
+      window.clearTimeout(speechFallbackTimerRef.current);
+      speechFallbackTimerRef.current = null;
+    }
+  };
+
+  /**
+   * 🔥 啟動倒數（冪等：多次呼叫只生效一次）
+   */
+  const startCountdown = () => {
+    if (countdownStartedRef.current) return;
+    countdownStartedRef.current = true;
+    setCountdownStarted(true);
+    console.log('⏱️ [QuizScreen] 倒數啟動');
   };
 
   /**
    * 播放單字 + 英文例句。
    *
+   * @param word 單字
+   * @param sentence 例句
    * @param rate 播放速度（1.0 = 標準）
+   * @param onEnd 語音結束（或無法播放）時的回調。重聽時不傳。
    */
-  const speakWord = async (word: string, sentence: string, rate: number) => {
+  const speakWord = async (
+    word: string,
+    sentence: string,
+    rate: number,
+    onEnd?: () => void
+  ) => {
     const myId = ++speechIdRef.current;
 
-    if (!window.speechSynthesis) return;
+    // 🔥 瀏覽器不支援語音 → 立刻觸發 onEnd
+    if (!window.speechSynthesis) {
+      onEnd?.();
+      return;
+    }
 
     window.speechSynthesis.cancel();
     await new Promise(resolve => setTimeout(resolve, SPEECH_CANCEL_DELAY_MS));
@@ -112,7 +156,10 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
       console.log(`🔇 [speakWord] 跳過過期語音：${word}`);
       return;
     }
-    if (!window.speechSynthesis) return;
+    if (!window.speechSynthesis) {
+      onEnd?.();
+      return;
+    }
 
     const text = `${word}. ${sentence}`;
 
@@ -120,15 +167,54 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     utterance.lang = 'en-US';
     utterance.rate = rate;
 
+    // 🔥 語音正常結束
+    utterance.onend = () => {
+      if (myId !== speechIdRef.current) {
+        // 過期語音（已被新的覆蓋），忽略
+        return;
+      }
+      console.log(`🔊 [speakWord] 語音結束：${word}`);
+      // 清除保險計時器
+      if (speechFallbackTimerRef.current !== null) {
+        window.clearTimeout(speechFallbackTimerRef.current);
+        speechFallbackTimerRef.current = null;
+      }
+      onEnd?.();
+    };
+
+    // 🔥 語音錯誤
     utterance.onerror = (e) => {
       if (e.error !== 'interrupted') {
         console.warn('🔇 語音播放錯誤:', e.error);
       }
+      if (myId !== speechIdRef.current) return;
+
+      // 被中斷（例如換題、重聽）不算錯誤，不觸發 onEnd
+      if (e.error === 'interrupted') return;
+
+      // 其他錯誤 → 也要啟動倒數
+      if (speechFallbackTimerRef.current !== null) {
+        window.clearTimeout(speechFallbackTimerRef.current);
+        speechFallbackTimerRef.current = null;
+      }
+      onEnd?.();
     };
 
     console.log(`🔊 [speakWord] 播放：${word}（rate=${rate}）`);
     speechRef.current = utterance;
     window.speechSynthesis.speak(utterance);
+
+    // 🔥 保險：若 N 秒內 onend/onerror 都沒觸發，強制啟動
+    if (onEnd) {
+      if (speechFallbackTimerRef.current !== null) {
+        window.clearTimeout(speechFallbackTimerRef.current);
+      }
+      speechFallbackTimerRef.current = window.setTimeout(() => {
+        console.warn(`⚠️ [speakWord] 語音 ${SPEECH_FALLBACK_TIMEOUT_MS}ms 未回應，強制啟動倒數`);
+        speechFallbackTimerRef.current = null;
+        onEnd();
+      }, SPEECH_FALLBACK_TIMEOUT_MS);
+    }
   };
 
   const loadNext = async () => {
@@ -154,12 +240,24 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     setResult(null);
     setStorageError(false);
     setStatus('answering');
+
+    // 🔥 重置倒數狀態
+    countdownStartedRef.current = false;
+    setCountdownStarted(false);
+
+    // 🔥 elapsedMs 起點：從語音開始前
     startTimeRef.current = Date.now();
+
     timedOutRef.current = false;
     submitLockRef.current = false;
 
-    // 用「首次播放語速」播放
-    await speakWord(q.word.word, q.word.sentence, orchestrator.getSpeechRate());
+    // 🔥 播放語音，語音結束時啟動倒數
+    await speakWord(
+      q.word.word,
+      q.word.sentence,
+      orchestrator.getSpeechRate(),
+      () => startCountdown()
+    );
   };
 
   useEffect(() => {
@@ -178,11 +276,14 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
   /**
    * 「🐢 重聽一次（慢速）」按鈕處理。
+   *
+   * 🔥 注意：重聽不會重新啟動倒數（不傳 onEnd）。
    */
   const handleReplaySlow = () => {
     if (!question || status !== 'answering') return;
     const floorRate = orchestrator.getSpeechFloorRate();
     if (floorRate === null) return;
+    // 🔥 不傳 onEnd：重聽不影響倒數
     void speakWord(question.word.word, question.word.sentence, floorRate);
   };
 
@@ -208,12 +309,14 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         }
       }
 
+      // 🔥 elapsedMs：從語音開始到提交（含語音時間）
       const elapsedMs = Date.now() - startTimeRef.current;
       console.log('🔍 [TIMING]', {
         word: question.word.word,
         recognizedText,
         elapsedMs,
         timedOut: timedOutRef.current,
+        countdownStarted: countdownStartedRef.current,
       });
       const submission = {
         recognizedText,
@@ -333,9 +436,11 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ margin: 0 }}>{question.word.meaning}</h2>
+        {/* 🔥 傳入 started；語音結束後才啟動倒數 */}
         <Countdown
           key={question.word.id}
           durationMs={question.timeLimitMs}
+          started={countdownStarted}
           onTimeout={handleTimeout}
         />
       </div>

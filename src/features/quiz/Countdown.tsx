@@ -3,12 +3,15 @@ import React, { useEffect, useRef, useState } from 'react';
 
 interface CountdownProps {
   durationMs: number;
+  /** 🔥 新增：false 時靜止顯示 durationMs，true 時開始倒數 */
+  started: boolean;
   onTimeout: () => void;
   onTick?: (remainingMs: number) => void;
 }
 
 export const Countdown: React.FC<CountdownProps> = ({
   durationMs,
+  started,
   onTimeout,
   onTick,
 }) => {
@@ -26,21 +29,28 @@ export const Countdown: React.FC<CountdownProps> = ({
   });
 
   // ============================================================
-  // 倒數計時：每個 durationMs 只建立一次 interval
+  // 倒數計時：只有 started === true 時才啟動
   // ============================================================
   useEffect(() => {
+    // 🔥 未啟動：靜止顯示完整時間，不建立 interval
+    if (!started) {
+      setRemaining(durationMs);
+      hasTimedOutRef.current = false;
+      return;
+    }
+
+    // 🔥 已啟動：建立 interval，開始倒數
     hasTimedOutRef.current = false;
     setRemaining(durationMs);
 
     const startTime = Date.now();
     const interval = setInterval(() => {
-      // 🔥 用「實際經過時間」計算，避免累積誤差
+      // 用「實際經過時間」計算，避免累積誤差
       const next = Math.max(0, durationMs - (Date.now() - startTime));
       setRemaining(next);
 
       if (next <= 0) {
         clearInterval(interval);
-        // 🔥 在 interval callback 中呼叫（非 render 期間），不會觸發 React 警告
         if (!hasTimedOutRef.current) {
           hasTimedOutRef.current = true;
           onTimeoutRef.current();
@@ -49,7 +59,7 @@ export const Countdown: React.FC<CountdownProps> = ({
     }, 100);
 
     return () => clearInterval(interval);
-  }, [durationMs]);
+  }, [durationMs, started]);
 
   // ============================================================
   // onTick：改由 effect 統一通知，不在 render 期間呼叫
@@ -66,7 +76,8 @@ export const Countdown: React.FC<CountdownProps> = ({
       style={{
         fontSize: '2rem',
         fontWeight: 'bold',
-        color: remaining < 3000 ? 'red' : 'black',
+        // 🔥 未啟動時用灰色，啟動後才依剩餘時間變色
+        color: !started ? '#adb5bd' : remaining < 3000 ? 'red' : 'black',
       }}
     >
       ⏱️ {seconds}s
