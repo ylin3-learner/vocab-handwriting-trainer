@@ -185,6 +185,30 @@ export class QuizOrchestrator implements QuizSessionApi {
   }
 
   // ============================================================
+  // 🔥 選項 3：學生主動繼續練習
+  // ============================================================
+
+  /**
+   * 是否允許學生主動繼續練習（done 頁面判斷用）。
+   *
+   * 條件：老師設定為 continue 模式 + 已達配額 + 尚未選擇繼續。
+   */
+  canOfferContinue(): boolean {
+    return this.quotaPolicy.canOfferContinue(this.dailyAnsweredCount);
+  }
+
+  /**
+   * 學生按下「繼續練習」按鈕時呼叫。
+   *
+   * 效果：切換 quotaPolicy 進入 continue 模式，之後不再停止。
+   * 幂等：多次呼叫只生效一次。
+   */
+  continueSession(): void {
+    this.quotaPolicy.optInToContinue();
+    console.log('📚 [QuizOrchestrator] 學生選擇繼續練習，session 進入 continue 模式');
+  }
+
+  // ============================================================
   // init
   // ============================================================
 

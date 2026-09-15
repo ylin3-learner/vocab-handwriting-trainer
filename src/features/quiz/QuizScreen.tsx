@@ -368,15 +368,68 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
       ? '🎉 程度鑑定完成！'
       : '🎉 今日配額已完成！';
 
+    // 🔥 判斷是否顯示「繼續練習」按鈕
+    const canContinue = orchestrator.canOfferContinue?.() ?? false;
+
+    const handleContinue = () => {
+      orchestrator.continueSession?.();
+      setStatus('answering');
+      void loadNext();
+    };
+
     return (
       <div style={{ textAlign: 'center', padding: '2rem' }}>
         <h2>{doneMessage}</h2>
         {storageError && (
           <p style={{ color: '#ffc107' }}>⚠️ 部分資料儲存失敗，但已保留在本地，將自動同步</p>
         )}
-        <button onClick={onSessionEnd} style={{ padding: '0.5rem 2rem', fontSize: '1rem', cursor: 'pointer' }}>
-          返回登入
-        </button>
+
+        <div style={{
+          marginTop: '1.5rem',
+          display: 'flex',
+          gap: '0.75rem',
+          justifyContent: 'center',
+          flexWrap: 'wrap',
+        }}>
+          {canContinue && (
+            <button
+              onClick={handleContinue}
+              style={{
+                padding: '0.75rem 2rem',
+                fontSize: '1.1rem',
+                background: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+              }}
+            >
+              📚 繼續練習
+            </button>
+          )}
+
+          <button
+            onClick={onSessionEnd}
+            style={{
+              padding: '0.75rem 2rem',
+              fontSize: '1.1rem',
+              background: canContinue ? '#6c757d' : '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+            }}
+          >
+            返回登入
+          </button>
+        </div>
+
+        {canContinue && (
+          <p style={{ color: '#6c757d', marginTop: '1rem', fontSize: '0.9rem' }}>
+            已達建議題數。想多練一些可以按「繼續練習」。
+          </p>
+        )}
       </div>
     );
   }
