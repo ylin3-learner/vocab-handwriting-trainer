@@ -22,6 +22,12 @@ import { DailySnapshot } from '../../types/dailySnapshot';
 import { QuizSessionApi, SessionDisplayInfo } from './QuizSessionApi';
 import { AnswerProcessor } from './AnswerProcessor';
 
+// 🔥 新增
+import {
+  SessionQuotaPolicy,
+  QuotaExceededBehavior,
+} from '../../domain/quiz/SessionQuotaPolicy';
+
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 
@@ -78,7 +84,6 @@ export class QuizOrchestrator implements QuizSessionApi {
   private currentLevel: number = 1;
   private sessionAttempts: number = 0;
 
-  // 🔥 語音設定
   private customSpeechFloor: number | undefined;
 
   private attemptBatcher: AttemptBatcher;
@@ -88,6 +93,9 @@ export class QuizOrchestrator implements QuizSessionApi {
   private dailyCorrectCount = 0;
   private dailyTotalResponseTime = 0;
   private todaySnapshotDate: string | null = null;
+
+  // 🔥 配額政策（init 時依作業設定初始化）
+  private quotaPolicy: SessionQuotaPolicy;
 
   constructor(studentId: string, className: string, deps: QuizOrchestratorDeps) {
     this.studentId = studentId;
@@ -100,6 +108,12 @@ export class QuizOrchestrator implements QuizSessionApi {
     this.attemptBatcher = new AttemptBatcher();
     this.localStore = new LocalStorageProgressStore();
     this.answerProcessor = new AnswerProcessor();
+
+    // 🔥 預設：stop 模式（init 會依作業設定覆蓋）
+    this.quotaPolicy = new SessionQuotaPolicy({
+      dailyMaxQuota: deps.defaultDailyMaxQuota,
+      exceededBehavior: 'stop',
+    });
   }
 
   getCurrentLevel(): number {
@@ -115,8 +129,24 @@ export class QuizOrchestrator implements QuizSessionApi {
     );
   }
 
+  // 🔥 getDisplayInfo：加入「課後加強」模式
   getDisplayInfo(): SessionDisplayInfo {
-    const assignmentName = this.activeAssignment?.assignment.name ?? '每日練習（預設配額）';
+    const assignmentName =
+      this.activeAssignment?.assignment.name ?? '每日練習（預設配額）';
+    const isContinueMode = this.quotaPolicy.isInContinueMode(this.dailyAnsweredCount);
+
+    if (isContinueMode) {
+      return {
+        mode: 'normal',
+        title: `${assignmentName} · 課後加強`,
+        subtitle: '已達建議題數，可繼續練習',
+        progressCurrent: this.dailyAnsweredCount,
+        progressTotal: this.dailyMaxQuota,
+        progressLabel: '已答',
+        showProgress: true,
+      };
+    }
+
     return {
       mode: 'normal',
       title: assignmentName,
@@ -129,25 +159,13 @@ export class QuizOrchestrator implements QuizSessionApi {
   }
 
   // ============================================================
-  // 🔥 語音設定
+  // 語音設定
   // ============================================================
 
-  /**
-   * 首次播放語速。
-   * 從作業設定讀取，若無則用系統預設 1.0。
-   */
   getSpeechRate(): number {
     return this.activeAssignment?.assignment.speechRate ?? DEFAULT_SPEECH_RATE;
   }
 
-  /**
-   * 慢速重聽下限。
-   *
-   * 優先序：
-   *   1. 學生個人設定（customSpeechFloor）
-   *   2. 作業設定（speechFloorRate）
-   *   3. 系統預設 0.85
-   */
   getSpeechFloorRate(): number | null {
     if (this.customSpeechFloor !== undefined) {
       return this.customSpeechFloor;
@@ -173,7 +191,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       await this.studentStateService.initializeIfNeeded(displayId, 1);
       const learningState = await this.studentStateService.getState(displayId);
       this.currentLevel = learningState.currentLevel;
-      this.customSpeechFloor = learningState.customSpeechFloor; // 🔥 讀取個人語速下限
+      this.customSpeechFloor = learningState.customSpeechFloor;
       console.log(`   ✅ 當前等級：L${this.currentLevel}`);
       if (this.customSpeechFloor !== undefined) {
         console.log(`   🔊 個人語速下限：${this.customSpeechFloor}`);
@@ -219,6 +237,17 @@ export class QuizOrchestrator implements QuizSessionApi {
       this.dailyNewQuotaRemaining = this.deps.defaultDailyNewQuota;
       console.warn(`   ⚠️ 無生效作業，使用預設配額：${this.dailyMaxQuota} 題`);
     }
+
+    // 🔥 依作業設定初始化配額政策
+    const exceededBehavior: QuotaExceededBehavior =
+      this.activeAssignment?.assignment.quotaExceededBehavior ?? 'stop';
+    this.quotaPolicy = new SessionQuotaPolicy({
+      dailyMaxQuota: this.dailyMaxQuota,
+      exceededBehavior,
+    });
+    console.log(
+      `   📋 配額政策：${exceededBehavior === 'continue' ? '允許課後加強' : '達配額即停止'}`
+    );
 
     // 步驟 2：讀取學生進度狀態
     this.stateCache = await this.deps.progressStore.getAllStates(displayId);
@@ -396,8 +425,9 @@ export class QuizOrchestrator implements QuizSessionApi {
     return this.deps.now ? this.deps.now() : new Date();
   }
 
+  // 🔥 nextQuestion：改用 quotaPolicy
   async nextQuestion(): Promise<QuizQuestion | null> {
-    if (this.dailyAnsweredCount >= this.dailyMaxQuota) {
+    if (!this.quotaPolicy.shouldContinue(this.dailyAnsweredCount)) {
       return null;
     }
 

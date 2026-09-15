@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { selectActiveAssignment } from '../../domain/assignment/selectAssignment';
+import type { QuotaExceededBehavior } from '../../domain/quiz/SessionQuotaPolicy';
 
 export type ReviewFocus = 'strict' | 'balanced' | 'explore';
 
@@ -36,6 +37,9 @@ export interface Assignment {
   createdAt: string;
   speechRate?: number;
   speechFloorRate?: number;
+  // 新增：配額用盡後的行為
+  // 未設定時視為 'stop'（向後相容舊作業）
+  quotaExceededBehavior?: QuotaExceededBehavior;
 }
 
 export interface ActiveAssignment {
@@ -53,11 +57,30 @@ export interface StudentOption {
 
 function focusToExplorationRate(focus: ReviewFocus | undefined): number {
   switch (focus) {
-    case 'strict':   return 0.05;
-    case 'explore':  return 0.25;
+    case 'strict': return 0.05;
+    case 'explore': return 0.25;
     case 'balanced':
-    default:         return 0.10;
+    default: return 0.10;
   }
+}
+
+/**
+ * Firestore 不接受 undefined 值。
+ * 這個函式會過濾掉物件中所有值為 undefined 的欄位。
+ *
+ * 為什麼需要？
+ *   老師建立作業時，「目標等級」可以不選（undefined），
+ *   但 Firestore 會拒絕 undefined 欄位。
+ *   與其讓每個呼叫端自己處理，不如在 Service 層統一過濾。
+ */
+function removeUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const result: Partial<T> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key as keyof T] = value as T[keyof T];
+    }
+  }
+  return result;
 }
 
 export class AssignmentService {
@@ -88,8 +111,8 @@ export class AssignmentService {
     const target = selected.assignment;
     const matchLabel =
       selected.matchType === 'personal' ? '👤 個人' :
-      selected.matchType === 'class'    ? '🏫 班級' :
-                                          '🌐 全校';
+        selected.matchType === 'class' ? '🏫 班級' :
+          '🌐 全校';
 
     console.log(
       `${matchLabel} [AssignmentService] 作業「${target.name}」→ targetLevel=${target.targetLevel ?? '未指定'}`
@@ -169,21 +192,23 @@ export class AssignmentService {
     return { id: snap.id, ...snap.data() } as Assignment;
   }
 
+  // 修改：過濾 undefined
   async createAssignment(assignment: Omit<Assignment, 'id' | 'createdAt'>): Promise<string> {
     const assignmentsRef = collection(db, 'assignments');
     const docRef = await addDoc(assignmentsRef, {
-      ...assignment,
+      ...removeUndefined(assignment),
       createdAt: new Date().toISOString(),
     });
     return docRef.id;
   }
 
+  // 修改：過濾 undefined
   async updateAssignment(
     id: string,
     assignment: Partial<Omit<Assignment, 'id' | 'createdAt'>>
   ): Promise<void> {
     const docRef = doc(db, 'assignments', id);
-    await updateDoc(docRef, assignment);
+    await updateDoc(docRef, removeUndefined(assignment));
   }
 
   async deleteAssignment(id: string): Promise<void> {

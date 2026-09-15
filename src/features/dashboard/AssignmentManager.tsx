@@ -8,6 +8,8 @@ import {
   DEFAULT_SPEECH_RATE,
   DEFAULT_SPEECH_FLOOR_RATE,
 } from '../../services/assignment/AssignmentService';
+// 🔥 新增
+import type { QuotaExceededBehavior } from '../../domain/quiz/SessionQuotaPolicy';
 import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
 
 const service = new AssignmentService();
@@ -26,8 +28,10 @@ interface FormState {
   startDate: string;
   endDate: string;
   isActive: boolean;
-  speechRate: number;      // 🔥 新增
-  speechFloorRate: number; // 🔥 新增
+  speechRate: number;
+  speechFloorRate: number;
+  // 🔥 新增
+  quotaExceededBehavior: QuotaExceededBehavior;
 }
 
 const emptyForm = (): FormState => ({
@@ -44,6 +48,8 @@ const emptyForm = (): FormState => ({
   isActive: true,
   speechRate: DEFAULT_SPEECH_RATE,
   speechFloorRate: DEFAULT_SPEECH_FLOOR_RATE,
+  // 🔥 預設為「達配額即停止」，維持既有行為
+  quotaExceededBehavior: 'stop',
 });
 
 const FOCUS_LABEL: Record<ReviewFocus, string> = {
@@ -78,10 +84,6 @@ export const AssignmentManager: React.FC = () => {
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(false);
 
-  /**
-   * 偵測「同一對象存在多個生效中作業」的作業 ID 集合。
-   * 用於在列表中顯示警告徽章，提醒老師手動刪除重複。
-   */
   const duplicateAssignmentIds = useMemo(() => {
     const byTarget = new Map<string, Assignment[]>();
     for (const a of assignments) {
@@ -176,6 +178,8 @@ export const AssignmentManager: React.FC = () => {
       isActive: form.isActive,
       speechRate: form.speechRate,
       speechFloorRate: form.speechFloorRate,
+      // 🔥 新增
+      quotaExceededBehavior: form.quotaExceededBehavior,
     };
 
     try {
@@ -217,6 +221,8 @@ export const AssignmentManager: React.FC = () => {
       isActive: a.isActive,
       speechRate: a.speechRate ?? DEFAULT_SPEECH_RATE,
       speechFloorRate: a.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE,
+      // 🔥 舊作業 fallback 到 'stop'（向後相容）
+      quotaExceededBehavior: a.quotaExceededBehavior ?? 'stop',
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -422,6 +428,27 @@ export const AssignmentManager: React.FC = () => {
                 ⚠️ 每日題數低於建議值 {RECOMMENDED_MIN_QUOTA} 題
               </div>
             )}
+
+            {/* 🔥 配額用盡後的行為 */}
+            <div style={{ marginTop: '0.75rem' }}>
+              <label style={{ fontSize: '0.9rem' }}>配額用盡後</label>
+              <select
+                value={form.quotaExceededBehavior}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    quotaExceededBehavior: e.target.value as QuotaExceededBehavior,
+                  })
+                }
+                style={{ width: '100%', padding: '0.5rem' }}
+              >
+                <option value="stop">🛑 停止練習（比賽節奏）</option>
+                <option value="continue">📚 允許課後加強（初學建議）</option>
+              </select>
+              <small style={{ color: '#6c757d' }}>
+                剛接觸的學生建議「課後加強」，達到配額後仍可繼續練習。
+              </small>
+            </div>
           </div>
 
           {/* 🔥 預設語速 */}
@@ -568,6 +595,8 @@ export const AssignmentManager: React.FC = () => {
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>指派對象</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>目標等級</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>每日題數</th>
+              {/* 🔥 新增欄位 */}
+              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>配額後</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>語速</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>期間</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>狀態</th>
@@ -616,6 +645,10 @@ export const AssignmentManager: React.FC = () => {
                     {a.targetLevel ? `L${a.targetLevel}` : '自動'}
                   </td>
                   <td style={{ padding: '10px' }}>{a.dailyQuota}</td>
+                  {/* 🔥 新增欄位 */}
+                  <td style={{ padding: '10px', fontSize: '0.85rem' }}>
+                    {a.quotaExceededBehavior === 'continue' ? '📚 加強' : '🛑 停止'}
+                  </td>
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>
                     🔊 {rate}x / 🐢 {floor}x
                   </td>
