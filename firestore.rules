@@ -42,12 +42,32 @@ service cloud.firestore {
 
     // ========================================
     // 3. 學生資料 students/{studentId}
+    //
     //    students/{uid} 只保留為「登入身份映射」：
     //    name, class, seatNumber, displayId
+    //
+    // 🔥 修改：放寬 delete，讓學生清理自己的舊 uid profile
+    //
+    //    為什麼放寬？
+    //      - 匿名登入每次 refresh 產生新 uid，
+    //        舊 uid 的 profile 需要被清理，否則累積髒資料。
+    //      - 但刪除者（新 uid）與被刪者（舊 uid）不同，
+    //        原本的 isSelf() 會拒絕。
+    //
+    //    風險評估（為什麼安全）：
+    //      1. students/{uid} 只存 profile（無學習資料）
+    //      2. 學習資料在 studentStates/{displayId}，跨 UID，不受影響
+    //      3. uid 不可猜測，學生無法得知他人的 uid
+    //      4. 誤刪時，學生下次登入會重建 profile
+    //      5. 教師儀表板已按 displayId 合併，不受重複 profile 影響
+    //
+    //    最壞情況：某學生惡意刪除他人 profile
+    //      → 受害者下次登入時重建，學習進度完好無損
     // ========================================
     match /students/{studentId} {
       allow read: if isSelf(studentId) || isTeacher();
-      allow write: if isSelf(studentId);
+      allow create, update: if isSelf(studentId);
+      allow delete: if isSignedIn();  // 🔥 放寬
 
       match /{document=**} {
         allow read: if isSelf(studentId) || isTeacher();
@@ -57,12 +77,8 @@ service cloud.firestore {
 
     // ========================================
     // 4. 學生狀態 studentStates/{displayId}
-    //    包含：學習狀態、SM-2 進度、每日快照
-    //    Key 為 displayId（如 "709_1_林佑綸"）
     // ========================================
     match /studentStates/{displayId} {
-      // 教師可讀寫；學生（含匿名）可讀寫
-      // 安全性依賴「學生不知道別人的 displayId」
       allow read: if isTeacher() || isSignedIn();
       allow write: if isTeacher() || isSignedIn();
 
@@ -74,7 +90,6 @@ service cloud.firestore {
 
     // ========================================
     // 5. 作答紀錄 attempts
-    //    🔥 學生可讀（PerformanceTracker 在學生端執行）
     // ========================================
     match /attempts/{attemptId} {
       allow read: if isTeacher() || isSignedIn();
@@ -87,7 +102,6 @@ service cloud.firestore {
 
     // ========================================
     // 6. 班級統計 classStats
-    //    🔥 簡化驗證（嵌套結構 + increment 無法用頂層欄位檢查）
     // ========================================
     match /classStats/{className} {
       allow read: if isSignedIn();
