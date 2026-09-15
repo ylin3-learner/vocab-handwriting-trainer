@@ -56,9 +56,9 @@ export const TeacherDashboard: React.FC = () => {
 
         for (const cs of classStats) {
           // 🔥 臨時診斷
-          console.log('🔍 [診斷] classStats 文件:', JSON.stringify(cs, null, 2));
-          console.log('🔍 [診斷] cs.students 型別:', typeof cs.students);
-          console.log('🔍 [診斷] cs.students 內容:', cs.students);
+          // console.log('🔍 [診斷] classStats 文件:', JSON.stringify(cs, null, 2));
+          // console.log('🔍 [診斷] cs.students 型別:', typeof cs.students);
+          // console.log('🔍 [診斷] cs.students 內容:', cs.students);
 
           totalAttempts += cs.totalAttempts || 0;
           totalCorrect += cs.totalCorrect || 0;

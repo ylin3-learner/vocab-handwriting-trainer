@@ -10,6 +10,17 @@ import { StudentAnalytics } from '../../types/analytics';
 import { Word } from '../../types/word';
 import { DailySnapshot } from '../../types/dailySnapshot';
 
+/**
+ * 判斷錯誤是否為「元件卸載造成的請求取消」。
+ *
+ * 當 React 元件在非同步請求完成前被卸載（例如使用者切換頁面），
+ * Firebase SDK 會取消還在飛的請求並拋出 AbortError。
+ * 這是預期行為，不是真正的錯誤。
+ */
+function isAbortError(e: unknown): boolean {
+    return (e as Error)?.name === 'AbortError';
+}
+
 export interface StudentStat {
     id: string;
     name: string;
@@ -38,7 +49,7 @@ export class AnalyticsService {
     }
 
     // ============================================================
-    // 🔥 修復：用 displayId 當 key，合併同一學生的多筆 UID profile
+    // 用 displayId 當 key，合併同一學生的多筆 UID profile
     // ============================================================
     async getAllStudentsStats(): Promise<StudentStat[]> {
         const studentsSnap = await getDocs(collection(db, 'students'));
@@ -57,44 +68,27 @@ export class AnalyticsService {
         const attemptsSnap = await getDocs(collection(db, 'attempts'));
         const attempts = attemptsSnap.docs.map(doc => doc.data() as AttemptRecord);
 
-        // ============================================================
-        // 用 displayId 當 key 合併多筆 profile
-        //
-        // 為什麼？
-        //   匿名登入每次 refresh 產生新 UID，
-        //   但同一個學生的 displayId 固定不變。
-        //   用 displayId 當 key 才能正確合併。
-        //
-        // Fallback：
-        //   沒有 displayId 的舊資料 → 用 uid 當 key（不會合併，但也不會壞）
-        // ============================================================
         const statsMap = new Map<string, StudentStat>();
-
-        // 記錄每個 displayId 對應的所有 UID（給 attempts fallback 用）
         const displayIdToUids = new Map<string, Set<string>>();
-
-        // 記錄每個 key 的最新 updatedAt（決定保留哪個 profile）
         const keyToLatestUpdatedAt = new Map<string, string>();
 
         students.forEach(s => {
-            const key = s.displayId || s.id;   // 🔥 優先用 displayId
+            const key = s.displayId || s.id;
             const updatedAt = s.updatedAt || s.createdAt || '';
 
-            // 記錄 uid 映射
             if (!displayIdToUids.has(key)) {
                 displayIdToUids.set(key, new Set());
             }
             displayIdToUids.get(key)!.add(s.id);
 
-            // 只保留 updatedAt 最新的 profile
             const existingUpdatedAt = keyToLatestUpdatedAt.get(key);
             if (existingUpdatedAt !== undefined && existingUpdatedAt >= updatedAt) {
-                return;  // 舊的，跳過
+                return;
             }
 
             keyToLatestUpdatedAt.set(key, updatedAt);
             statsMap.set(key, {
-                id: key,  // 🔥 id 是 displayId，與 getStudentDetail 一致
+                id: key,
                 name: s.name || key,
                 class: s.class || '未分類',
                 totalAttempts: 0,
@@ -105,22 +99,13 @@ export class AnalyticsService {
             });
         });
 
-        // ============================================================
-        // 統計 attempts
-        //
-        // 匹配策略：
-        //   1. 優先：用 attempt.studentDisplayId 匹配（新資料）
-        //   2. Fallback：用 attempt.studentId (uid) 反查（舊資料）
-        // ============================================================
         attempts.forEach(a => {
             let stat: StudentStat | undefined;
 
-            // 優先：用 displayId 匹配
             if (a.studentDisplayId) {
                 stat = statsMap.get(a.studentDisplayId);
             }
 
-            // Fallback：用 uid 反查是哪個 displayId 的
             if (!stat) {
                 for (const [displayId, uids] of displayIdToUids.entries()) {
                     if (uids.has(a.studentId)) {
@@ -136,9 +121,6 @@ export class AnalyticsService {
             stat.avgResponseTime += a.responseTimeMs;
         });
 
-        // ============================================================
-        // 計算正確率、風險等級
-        // ============================================================
         const result: StudentStat[] = [];
         statsMap.forEach(stat => {
             if (stat.totalAttempts === 0) {
@@ -221,17 +203,6 @@ export class AnalyticsService {
 
     /**
      * 取得單一學生的完整個人化分析。
-     *
-     * 🔥 問題 10 修復：參數名改為 displayId，避免誤導。
-     *   呼叫端傳入的是 displayId（例如 "709_1_林佑綸"），不是 uid。
-     *
-     * 讀取策略：
-     *   1. 用 studentDisplayId 查 attempts
-     *   2. 從 studentStates/{displayId} 讀取 currentLevel
-     *   3. 從 classStats 反查 name/class
-     *   4. 批次取得弱點單字的 Word 物件
-     *   5. 從 studentStates/{displayId}/dailySnapshots 讀取每日快照
-     *   6. 用完整的 wordMap 重新分析
      */
     async getStudentDetail(displayId: string): Promise<StudentAnalytics> {
         // ============================================================
@@ -275,7 +246,9 @@ export class AnalyticsService {
                 console.log(`✅ [AnalyticsService] 從 studentStates 讀到 L${profile.currentLevel}`);
             }
         } catch (e) {
-            console.warn('⚠️ [AnalyticsService] 讀取 studentStates 失敗:', e);
+            if (!isAbortError(e)) {
+                console.warn('⚠️ [AnalyticsService] 讀取 studentStates 失敗:', e);
+            }
         }
 
         // 2.2：從 classStats 反查 name/class
@@ -290,7 +263,9 @@ export class AnalyticsService {
                 }
             }
         } catch (e) {
-            console.warn('⚠️ [AnalyticsService] 讀取 classStats 失敗:', e);
+            if (!isAbortError(e)) {
+                console.warn('⚠️ [AnalyticsService] 讀取 classStats 失敗:', e);
+            }
         }
 
         // ============================================================
@@ -308,12 +283,16 @@ export class AnalyticsService {
                 const words = await this.wordRepository.getWordsByIds(weakWordIds);
                 wordMap = new Map(words.map(w => [w.id, w]));
             } catch (e) {
-                console.warn('⚠️ [AnalyticsService] 取得弱點單字失敗，使用 wordId 顯示:', e);
+                if (!isAbortError(e)) {
+                    console.warn('⚠️ [AnalyticsService] 取得弱點單字失敗，使用 wordId 顯示:', e);
+                }
             }
         }
 
         // ============================================================
         // 步驟 5：讀取每日快照
+        //
+        // 🔥 修正：不要在這裡 return，讓流程繼續走到最後
         // ============================================================
         let dailySnapshots: DailySnapshot[] = [];
         try {
@@ -324,7 +303,11 @@ export class AnalyticsService {
                 .sort((a, b) => a.date.localeCompare(b.date));
             console.log(`📸 [AnalyticsService] 讀取 ${dailySnapshots.length} 筆每日快照`);
         } catch (e) {
-            console.warn('⚠️ [AnalyticsService] 讀取每日快照失敗（可能尚未建立）:', e);
+            // 🔥 忽略元件卸載造成的請求取消（不是真錯誤）
+            if (!isAbortError(e)) {
+                console.warn('⚠️ [AnalyticsService] 讀取每日快照失敗（可能尚未建立）:', e);
+            }
+            // dailySnapshots 保持空陣列，流程繼續
         }
 
         // ============================================================
