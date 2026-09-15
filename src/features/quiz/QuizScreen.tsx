@@ -4,6 +4,7 @@ import { QuizSessionApi } from './QuizSessionApi';
 import { QuizQuestion } from './QuizOrchestrator';
 import { Countdown } from './Countdown';
 import { HandwritingCanvas, HandwritingCanvasRef } from './HandwritingCanvas';
+import { maskWordInSentence } from '../../domain/string/maskWord';
 
 const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 120;
@@ -498,7 +499,11 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         />
       </div>
 
-      <p style={{ color: '#666' }}>例句：{question.word.sentence}</p>
+      <p style={{ color: '#666' }}>
+        例句：{status === 'submitted'
+          ? question.word.sentence
+          : maskWordInSentence(question.word.sentence, question.word.word)}
+      </p>
 
       <div style={{ margin: '1rem 0' }}>
         <label>✍️ 請在手寫區寫下單字</label>
