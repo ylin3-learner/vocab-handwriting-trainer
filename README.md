@@ -367,7 +367,7 @@ export, student archiving, `writeBatch` optimization, Firestore offline persiste
 circuit breaker + retry queue, quota monitoring, the `everWrong` mastery lifecycle (auto-clear
 after 5 consecutive correct answers), and automatic cleanup of orphaned UID profiles.
 
-Automated test coverage: pure-logic unit tests across `grader`, `sm2`,
+**Automated test coverage: 126 unit tests across 7 suites**, covering `grader`, `sm2`,
 `questionSelector`, `studentAnalyzer`, `RuleBasedStrategy`, `placementDecision`,
 `selectAssignment`, `evaluationGuard`, `AnswerProcessor`, and `maskWord` (which also covers
 `porterStemmer`). Tests focus on the highest-risk pure functions; I/O layers are
@@ -460,6 +460,8 @@ teacher-configurable assignments with target-tier weighted selection, per-studen
 rate control, per-question time limit control, the teacher dashboard with growth-chart
 visualization, per-student PDF report export, and role-based auth for
 students/teachers/admins.
+
+**Automated tests: 126 passing across 7 suites, 0 failing.**
 
 **Remaining work in Stage 7:** continue collecting recognition error cases, tune the
 handwriting pipeline against real student samples, and iterate on the pilot findings.

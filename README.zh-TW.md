@@ -331,11 +331,11 @@ Porter Stemmer 例句遮罩、單一學生 PDF 報告匯出、學生封存、`wr
 Firestore 離線持久化、熔斷器＋重試佇列、配額監控、`everWrong` 的掌握生命週期（連續
 答對 5 次後自動清除），以及孤兒 UID profile 的自動清理。
 
-自動化測試：涵蓋 `grader`、`sm2`、`questionSelector`、`studentAnalyzer`、
-`RuleBasedStrategy`、`placementDecision`、`selectAssignment`、`evaluationGuard`、
-`AnswerProcessor`，以及 `maskWord`（同時涵蓋 `porterStemmer`）的純邏輯單元測試。
-測試聚焦在最高風險的純函式；I/O 層刻意不寫單元測試（需要 Firestore emulator，延後
-到 Stage 7+ 處理）。
+**自動化測試：126 個單元測試、7 個 suites**，涵蓋 `grader`、`sm2`、
+`questionSelector`、`studentAnalyzer`、`RuleBasedStrategy`、`placementDecision`、
+`selectAssignment`、`evaluationGuard`、`AnswerProcessor`，以及 `maskWord`（同時涵蓋
+`porterStemmer`）的純邏輯單元測試。測試聚焦在最高風險的純函式；I/O 層刻意不寫單元
+測試（需要 Firestore emulator，延後到 Stage 7+ 處理）。
 
 Stage 6-A 之所以刻意排在 6-B 之前，是因為儀表板**只讀**、完全不影響現有測驗流程，而
 單字庫上傳需要重新接線核⼼的 `WordRepository`，是整個系統中風險最高的重構。
@@ -410,6 +410,8 @@ Stage 0 到 Stage 6-E 已完成，Stage 7（真實試點）**進行中**——�
 系統支援完整的練習流程（TTS → 手寫 → 判分 → SM-2 → Firestore）、適應性難度分級、
 老師可設定的作業與目標層級加權出題、個人化語速控制、每題作答時限控制、含成長曲線視
 覺化的教師儀表板、單一學生 PDF 報告匯出，以及學生／教師／管理員的角色權限。
+
+**自動化測試：126 個通過、7 個 suites、0 個失敗。**
 
 **Stage 7 剩下工作：** 繼續蒐集辨識錯誤案例、依真實學生樣本調整手寫辨識流程、依試點
 發現持續迭代。功能到此凍結——優先順序是真實世界的驗證，而不是繼續擴充功能。
