@@ -12,6 +12,17 @@ import {
 // 閾值常數（集中管理，方便未來調參）
 const THRESHOLDS = {
   FAST_MS: 3000,
+  /**
+   * 正常作答時間上限。
+   *
+   * ⚠️ 已知限制：
+   *   這個值是硬編碼的 8000ms，不會隨作業的 timeLimitMs 動態調整。
+   *   若老師把作業時限設為 15 秒，學生答錯且用時 10 秒的作答，
+   *   會被分類為「超時」而非「拼字錯」。
+   *
+   *   TODO（比賽後）：讓 analyzeStudent 接收 timeLimitMs 參數，
+   *   或在 AttemptRecord 記錄當下的時限，讓分析使用正確的閾值。
+   */
   NORMAL_MS: 8000,          // 與題目 8 秒限制一致
   SPELLING_MAX_EDIT: 3,     // editDistance 1~3 視為拼字小錯
   SPELLING_MIN_SIM: 0.5,    // similarity >= 0.5 才算「像」

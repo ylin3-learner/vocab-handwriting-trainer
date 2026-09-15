@@ -8,8 +8,9 @@ import {
   DEFAULT_SPEECH_RATE,
   DEFAULT_SPEECH_FLOOR_RATE,
 } from '../../services/assignment/AssignmentService';
-// 🔥 新增
 import type { QuotaExceededBehavior } from '../../domain/quiz/SessionQuotaPolicy';
+// 🔥 新增
+import { QuizTimingPolicy } from '../../domain/quiz/QuizTimingPolicy';
 import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
 
 const service = new AssignmentService();
@@ -30,8 +31,9 @@ interface FormState {
   isActive: boolean;
   speechRate: number;
   speechFloorRate: number;
-  // 🔥 新增
   quotaExceededBehavior: QuotaExceededBehavior;
+  // 🔥 新增：作答時限（用秒，UI 友善）
+  timeLimitSeconds: number;
 }
 
 const emptyForm = (): FormState => ({
@@ -48,8 +50,9 @@ const emptyForm = (): FormState => ({
   isActive: true,
   speechRate: DEFAULT_SPEECH_RATE,
   speechFloorRate: DEFAULT_SPEECH_FLOOR_RATE,
-  // 🔥 預設為「達配額即停止」，維持既有行為
   quotaExceededBehavior: 'stop',
+  // 🔥 預設 8 秒（比賽標準）
+  timeLimitSeconds: QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS / 1000,
 });
 
 const FOCUS_LABEL: Record<ReviewFocus, string> = {
@@ -178,8 +181,9 @@ export const AssignmentManager: React.FC = () => {
       isActive: form.isActive,
       speechRate: form.speechRate,
       speechFloorRate: form.speechFloorRate,
-      // 🔥 新增
       quotaExceededBehavior: form.quotaExceededBehavior,
+      // 🔥 秒 → 毫秒
+      timeLimitMs: form.timeLimitSeconds * 1000,
     };
 
     try {
@@ -221,8 +225,9 @@ export const AssignmentManager: React.FC = () => {
       isActive: a.isActive,
       speechRate: a.speechRate ?? DEFAULT_SPEECH_RATE,
       speechFloorRate: a.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE,
-      // 🔥 舊作業 fallback 到 'stop'（向後相容）
       quotaExceededBehavior: a.quotaExceededBehavior ?? 'stop',
+      // 🔥 毫秒 → 秒；舊作業 fallback 到 8 秒
+      timeLimitSeconds: (a.timeLimitMs ?? QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS) / 1000,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -429,7 +434,7 @@ export const AssignmentManager: React.FC = () => {
               </div>
             )}
 
-            {/* 🔥 配額用盡後的行為 */}
+            {/* 配額用盡後的行為 */}
             <div style={{ marginTop: '0.75rem' }}>
               <label style={{ fontSize: '0.9rem' }}>配額用盡後</label>
               <select
@@ -451,7 +456,30 @@ export const AssignmentManager: React.FC = () => {
             </div>
           </div>
 
-          {/* 🔥 預設語速 */}
+          {/* 🔥 每題作答時限 */}
+          <div>
+            <label>⏱️ 每題作答時限</label>
+            <select
+              value={form.timeLimitSeconds}
+              onChange={(e) => setForm({ ...form, timeLimitSeconds: Number(e.target.value) })}
+              style={{ width: '100%', padding: '0.5rem' }}
+            >
+              {QuizTimingPolicy.PRESETS_SECONDS.map((sec) => (
+                <option key={sec} value={sec}>
+                  {sec} 秒
+                  {sec === 8 && '（比賽標準）'}
+                  {sec === 5 && '（進階挑戰）'}
+                  {sec === 15 && '（初學建議）'}
+                  {sec === 20 && '（非常寬鬆）'}
+                </option>
+              ))}
+            </select>
+            <small style={{ color: '#6c757d' }}>
+              剛接觸的學生建議 15 秒，熟練後可縮短至 8 秒（比賽標準）。
+            </small>
+          </div>
+
+          {/* 預設語速 */}
           <div>
             <label>🔊 預設語速（首次播放）</label>
             <select
@@ -468,7 +496,7 @@ export const AssignmentManager: React.FC = () => {
             </small>
           </div>
 
-          {/* 🔥 全班語速下限 */}
+          {/* 全班語速下限 */}
           <div>
             <label>🐢 全班最低速度（慢速重聽用）</label>
             <select
@@ -595,8 +623,9 @@ export const AssignmentManager: React.FC = () => {
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>指派對象</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>目標等級</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>每日題數</th>
-              {/* 🔥 新增欄位 */}
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>配額後</th>
+              {/* 🔥 新增欄位 */}
+              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>時限</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>語速</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>期間</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>狀態</th>
@@ -608,6 +637,8 @@ export const AssignmentManager: React.FC = () => {
               const personal = isPersonal(a.className);
               const rate = a.speechRate ?? DEFAULT_SPEECH_RATE;
               const floor = a.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE;
+              const timeSec = (a.timeLimitMs ?? QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS) / 1000;
+              const isDefaultTime = timeSec === QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS / 1000;
               return (
                 <tr key={a.id} style={{ borderBottom: '1px solid #f1f3f5' }}>
                   <td style={{ padding: '10px' }}>
@@ -645,9 +676,15 @@ export const AssignmentManager: React.FC = () => {
                     {a.targetLevel ? `L${a.targetLevel}` : '自動'}
                   </td>
                   <td style={{ padding: '10px' }}>{a.dailyQuota}</td>
-                  {/* 🔥 新增欄位 */}
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>
                     {a.quotaExceededBehavior === 'continue' ? '📚 加強' : '🛑 停止'}
+                  </td>
+                  {/* 🔥 新增欄位 */}
+                  <td style={{ padding: '10px', fontSize: '0.85rem' }}>
+                    ⏱️ {timeSec}s
+                    {isDefaultTime && (
+                      <span style={{ color: '#6c757d', marginLeft: '0.3rem' }}>（標準）</span>
+                    )}
                   </td>
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>
                     🔊 {rate}x / 🐢 {floor}x
