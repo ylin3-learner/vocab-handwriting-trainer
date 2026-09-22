@@ -23,6 +23,14 @@ const SPEECH_CANCEL_DELAY_MS = 100;
  */
 const SPEECH_FALLBACK_TIMEOUT_MS = 8000;
 
+/**
+ * 答對（或 Placement 模式）自動跳到下一題的延遲。
+ *
+ * 普通模式答錯時不會自動跳——會等待學生主動按下「下一題」按鈕，
+ * 讓學生有時間看清楚正確答案。
+ */
+const AUTO_ADVANCE_DELAY_MS = 1200;
+
 async function callGoogleIME(trace: number[][][], language: string = 'en'): Promise<string[]> {
   const scaledTrace = trace.map(stroke => {
     const xs = (stroke[0] || []).map(x => x * CANVAS_WIDTH);
@@ -91,6 +99,10 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
   // 🔥 新增：倒數是否已啟動（語音結束後才 true）
   const [countdownStarted, setCountdownStarted] = useState(false);
+
+  // 🔥 新增：是否等待學生按「下一題」才繼續
+  //    情境：普通模式答錯時，阻塞等學生看清楚正確答案
+  const [waitingForNext, setWaitingForNext] = useState(false);
 
   const startTimeRef = useRef<number>(0);
   const timedOutRef = useRef<boolean>(false);
@@ -221,6 +233,9 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   const loadNext = async () => {
     cancelSpeech();
 
+    // 🔥 重置「等待下一題」狀態
+    setWaitingForNext(false);
+
     const q = await orchestrator.nextQuestion();
     setDailyProgress(orchestrator.getDailyProgress());
 
@@ -288,6 +303,16 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     void speakWord(question.word.word, question.word.sentence, floorRate);
   };
 
+  /**
+   * 🔥 學生按下「下一題」按鈕時呼叫。
+   * 只在普通模式答錯、阻塞狀態下顯示。
+   */
+  const handleNextAfterWrong = () => {
+    if (!waitingForNext) return;
+    setWaitingForNext(false);
+    void loadNext();
+  };
+
   const handleSubmit = async () => {
     if (submitLockRef.current) return;
     if (status !== 'answering' || !question) return;
@@ -344,7 +369,23 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
       setResult({ correct: isCorrect, message });
 
-      setTimeout(() => loadNext(), 1200);
+      // ============================================================
+      // 🔥 決定是否自動跳下一題
+      //
+      // 規則：
+      //   答對 + 任何模式        → 自動跳（1.2 秒）
+      //   答錯 + Placement 模式  → 自動跳（模擬考試節奏）
+      //   答錯 + 普通模式        → 阻塞，等學生按「下一題」
+      // ============================================================
+      const isPlacementMode = orchestrator.getDisplayInfo().mode === 'placement';
+
+      if (!isCorrect && !isPlacementMode) {
+        // 普通模式答錯：阻塞，等學生主動按鈕
+        setWaitingForNext(true);
+      } else {
+        // 其他情況：自動跳
+        setTimeout(() => loadNext(), AUTO_ADVANCE_DELAY_MS);
+      }
     } catch (error) {
       console.error('提交錯誤:', error);
       setResult({ correct: false, message: '發生錯誤，請重試' });
@@ -571,6 +612,30 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         >
           {result.message}
         </div>
+      )}
+
+      {/* ============================================================
+          🔥 新增：普通模式答錯時，等待學生按「下一題」
+          其他情況不顯示（自動跳、或 Placement 模式）
+          ============================================================ */}
+      {waitingForNext && (
+        <button
+          onClick={handleNextAfterWrong}
+          style={{
+            marginTop: '1rem',
+            padding: '0.75rem 2rem',
+            fontSize: '1.2rem',
+            background: '#007bff',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            width: '100%',
+          }}
+        >
+          👉 下一題
+        </button>
       )}
     </div>
   );
