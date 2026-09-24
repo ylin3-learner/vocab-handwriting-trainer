@@ -21,6 +21,7 @@ import { LocalStorageProgressStore } from '../../services/storage/LocalStoragePr
 import { DailySnapshot } from '../../types/dailySnapshot';
 import { QuizSessionApi, SessionDisplayInfo } from './QuizSessionApi';
 import { AnswerProcessor } from './AnswerProcessor';
+import { DailyStatsTracker } from '../../services/storage/DailyStatsTracker';
 
 import {
   SessionQuotaPolicy,
@@ -28,9 +29,6 @@ import {
 } from '../../domain/quiz/SessionQuotaPolicy';
 
 import { QuizTimingPolicy } from '../../domain/quiz/QuizTimingPolicy';
-
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
 
 import { buildDisplayId } from '../../domain/string/displayId';
 
@@ -93,7 +91,9 @@ export class QuizOrchestrator implements QuizSessionApi {
 
   private dailyCorrectCount = 0;
   private dailyTotalResponseTime = 0;
-  private todaySnapshotDate: string | null = null;
+
+  // 新增：跨 session 累計今日統計
+  private dailyStatsTracker = new DailyStatsTracker();
 
   private quotaPolicy: SessionQuotaPolicy;
 
@@ -220,18 +220,15 @@ export class QuizOrchestrator implements QuizSessionApi {
       this.currentLevel = 1;
     }
 
+    // 步驟 0.5：從 localStorage 載入今日累計統計
     const today = this.getNow().toISOString().slice(0, 10);
-    try {
-      const snapDoc = await getDoc(
-        doc(db, 'studentStates', displayId, 'dailySnapshots', today)
-      );
-      if (snapDoc.exists()) {
-        this.todaySnapshotDate = today;
-        console.log(`   ✅ 今日快照已存在，跳過建立`);
-      }
-    } catch (e) {
-      console.warn('⚠️ 檢查每日快照失敗（不影響測驗）:', e);
-    }
+    const todayStats = this.dailyStatsTracker.load(displayId, today);
+    this.dailyAnsweredCount = todayStats.answeredCount;
+    this.dailyCorrectCount = todayStats.correctCount;
+    this.dailyTotalResponseTime = todayStats.totalResponseTimeMs;
+    console.log(
+      `   📊 今日累計：${todayStats.answeredCount} 題（答對 ${todayStats.correctCount}）`
+    );
 
     try {
       this.activeAssignment = await this.assignmentService.getActiveAssignment(
@@ -531,10 +528,19 @@ export class QuizOrchestrator implements QuizSessionApi {
       now,
     });
 
-    this.dailyAnsweredCount += 1;
+    // 🔥 透過 tracker 累計今日統計（跨 session 持久化）
+    const today = now.toISOString().slice(0, 10);
+    const todayStats = this.dailyStatsTracker.increment(
+      displayId,
+      today,
+      processed.grading.isCorrect,
+      submission.elapsedMs
+    );
+    this.dailyAnsweredCount = todayStats.answeredCount;
+    this.dailyCorrectCount = todayStats.correctCount;
+    this.dailyTotalResponseTime = todayStats.totalResponseTimeMs;
+
     this.sessionAttempts += 1;
-    this.dailyCorrectCount += processed.grading.isCorrect ? 1 : 0;
-    this.dailyTotalResponseTime += submission.elapsedMs;
 
     if (processed.grading.isCorrect) {
       if (currentState.reviewCount === 0 && !currentState.lastReviewed) {
@@ -542,25 +548,20 @@ export class QuizOrchestrator implements QuizSessionApi {
       }
     }
 
-    const today = now.toISOString().slice(0, 10);
-    let dailySnapshot: DailySnapshot | undefined;
-
-    if (this.todaySnapshotDate !== today) {
-      dailySnapshot = {
-        date: today,
-        totalAttempts: this.dailyAnsweredCount,
-        correctCount: this.dailyCorrectCount,
-        correctRate: this.dailyAnsweredCount > 0
-          ? Math.round((this.dailyCorrectCount / this.dailyAnsweredCount) * 100)
-          : 0,
-        avgResponseTimeMs: this.dailyAnsweredCount > 0
-          ? Math.round(this.dailyTotalResponseTime / this.dailyAnsweredCount)
-          : 0,
-        level: this.currentLevel,
-        capturedAt: now.toISOString(),
-      };
-      this.todaySnapshotDate = today;
-    }
+    // 🔥 每次答題都更新每日快照（反映今日累計，而非只記錄第一題）
+    const dailySnapshot: DailySnapshot = {
+      date: today,
+      totalAttempts: todayStats.answeredCount,
+      correctCount: todayStats.correctCount,
+      correctRate: todayStats.answeredCount > 0
+        ? Math.round((todayStats.correctCount / todayStats.answeredCount) * 100)
+        : 0,
+      avgResponseTimeMs: todayStats.answeredCount > 0
+        ? Math.round(todayStats.totalResponseTimeMs / todayStats.answeredCount)
+        : 0,
+      level: this.currentLevel,
+      capturedAt: now.toISOString(),
+    };
 
     try {
       await this.localStore.saveState(displayId, wordId, processed.nextState);
