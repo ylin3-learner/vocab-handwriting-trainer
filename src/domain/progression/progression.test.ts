@@ -148,3 +148,35 @@ describe('RuleBasedStrategy', () => {
     assert.strictEqual(result.action, 'hold');
   });
 });
+
+// ============================================================
+  // 🔥 下界保護：連續答錯在最低等級仍 hold
+  // ============================================================
+  test('L1 + 正確率 70% + 連續答錯 5 題 → hold（不能降 L0）', () => {
+    const input = makeInput({
+      currentLevel: 1,
+      metrics: makeMetrics({
+        correctRate: 0.7,
+        consecutiveWrong: 5,
+        attemptsInCurrentLevel: 50,
+      }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'hold');
+    assert.strictEqual(result.newLevel, 1);
+    assert.ok(result.reason.includes('最低等級'));
+  });
+
+  test('L1 + 正確率 30% + 連續答錯 10 題 → hold（雙重降級條件仍不能降）', () => {
+    const input = makeInput({
+      currentLevel: 1,
+      metrics: makeMetrics({
+        correctRate: 0.3,
+        consecutiveWrong: 10,
+        attemptsInCurrentLevel: 50,
+      }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'hold');
+    assert.strictEqual(result.newLevel, 1);
+  });

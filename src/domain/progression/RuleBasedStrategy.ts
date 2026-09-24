@@ -55,12 +55,18 @@ export class RuleBasedStrategy implements LevelProgressionStrategy {
 
     // ============================================================
     // 防護 2：已在最高/最低等級 → 不動作
+    //
+    // 🔥 修正：把「已在最低等級」的判斷獨立出來，
+    //    不再只在「正確率 < 50%」時才擋。
+    //    現在無論是「正確率太低」或「連續答錯」導致的降級，
+    //    只要 currentLevel <= minLevel 就一律 hold。
     // ============================================================
     if (currentLevel >= maxLevel) {
       return this.hold(currentLevel, `已達最高等級 L${maxLevel}`);
     }
-    if (currentLevel <= minLevel && metrics.correctRate < T.DEMOTE_MAX_CORRECT_RATE) {
-      return this.hold(currentLevel, `已達最低等級 L${minLevel}`);
+    if (currentLevel <= minLevel) {
+      // 已在最低等級：無法再降，但還是可以嘗試升級
+      // （升級邏輯在下面，若符合升級條件會 promote）
     }
 
     // ============================================================
@@ -94,6 +100,14 @@ export class RuleBasedStrategy implements LevelProgressionStrategy {
       metrics.attemptsInCurrentLevel >= T.DEMOTE_MIN_ATTEMPTS_IN_LEVEL;
 
     if (canDemoteByRate || canDemoteByStreak) {
+      // 🔥 修正：降級前檢查下界
+      if (currentLevel <= minLevel) {
+        return this.hold(
+          currentLevel,
+          `已達最低等級 L${minLevel}，無法再降`
+        );
+      }
+
       const reason = canDemoteByRate
         ? `正確率 ${(metrics.correctRate * 100).toFixed(0)}%，需要加強基礎`
         : `連續答錯 ${metrics.consecutiveWrong} 題，需要加強基礎`;
