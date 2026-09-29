@@ -13,11 +13,11 @@ import {
   startAt,
   endAt,
   documentId,
+  deleteField,          // 新增
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { selectActiveAssignment } from '../../domain/assignment/selectAssignment';
 import type { QuotaExceededBehavior } from '../../domain/quiz/SessionQuotaPolicy';
-// 🔥 新增
 import { removeUndefined } from '../../domain/firestore/removeUndefined';
 
 export type ReviewFocus = 'strict' | 'balanced' | 'explore';
@@ -40,7 +40,6 @@ export interface Assignment {
   speechRate?: number;
   speechFloorRate?: number;
   quotaExceededBehavior?: QuotaExceededBehavior;
-  // 🔥 新增：每題作答時限（毫秒）。未設定時用系統預設 8000ms。
   timeLimitMs?: number;
 }
 
@@ -169,7 +168,12 @@ export class AssignmentService {
     return { id: snap.id, ...snap.data() } as Assignment;
   }
 
-  // 🔥 使用全域 removeUndefined
+  /**
+   * 建立作業。
+   *
+   * `undefined` 欄位會被 removeUndefined 過濾掉，不會寫入 Firestore。
+   * 這符合「新建作業時，未填的欄位就是不存在」的預期。
+   */
   async createAssignment(assignment: Omit<Assignment, 'id' | 'createdAt'>): Promise<string> {
     const assignmentsRef = collection(db, 'assignments');
     const docRef = await addDoc(assignmentsRef, {
@@ -179,13 +183,36 @@ export class AssignmentService {
     return docRef.id;
   }
 
-  // 🔥 使用全域 removeUndefined
+  /**
+   * 更新作業。
+   *
+   * 修正：把 `undefined` 轉成 Firestore 的 `deleteField()`。
+   *
+   * 為什麼？
+   *   老師從「L2」改回「不指定」，表單會送出 `targetLevel: undefined`。
+   *   如果只用 removeUndefined，這個欄位會被過濾掉，
+   *   Firestore 的 updateDoc 就不會動它 → 舊值 L2 永遠留著。
+   *
+   *   deleteField() 是 Firestore 的「刪除此欄位」指令，
+   *   讓「改回不指定」變成「真的清空」。
+   */
   async updateAssignment(
     id: string,
     assignment: Partial<Omit<Assignment, 'id' | 'createdAt'>>
   ): Promise<void> {
     const docRef = doc(db, 'assignments', id);
-    await updateDoc(docRef, removeUndefined(assignment as Record<string, unknown>));
+
+    // 把 undefined 轉成 deleteField（表達「清空此欄位」）
+    const payload: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(assignment)) {
+      if (value === undefined) {
+        payload[key] = deleteField();
+      } else {
+        payload[key] = value;
+      }
+    }
+
+    await updateDoc(docRef, payload);
   }
 
   async deleteAssignment(id: string): Promise<void> {
