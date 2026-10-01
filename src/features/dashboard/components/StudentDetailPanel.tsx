@@ -21,6 +21,10 @@ interface Props {
     isCurrentlyArchived: boolean,
     archivedBy: string
   ) => Promise<void>;
+  /** 資料最後抓取時間（毫秒 timestamp）。用於顯示「最後更新」提示。 */
+  lastFetchedAt?: number | null;
+  /** 手動觸發重新抓取。 */
+  onRefetch?: () => void;
 }
 
 const LEARNING_STYLE_LABELS: Record<LearningStyle, { text: string; color: string; emoji: string }> = {
@@ -61,10 +65,27 @@ function getLevelBadgeColor(level: number): string {
   return '#6c757d';
 }
 
+/**
+ * 把 timestamp 轉成「x 分鐘前」的友善顯示。
+ */
+function formatLastUpdated(ts: number | null): string {
+  if (!ts) return '尚未載入';
+  const diffMs = Date.now() - ts;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return '剛剛';
+  if (diffMin < 60) return `${diffMin} 分鐘前`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} 小時前`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay} 天前`;
+}
+
 export const StudentDetailPanel: React.FC<Props> = ({
   analytics,
   isArchived = false,
   onArchiveToggle,
+  lastFetchedAt = null,
+  onRefetch,
 }) => {
   const reportRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -151,43 +172,75 @@ export const StudentDetailPanel: React.FC<Props> = ({
 
   return (
     <div>
-      {/* ===== 按鈕列：歸檔 + 匯出 PDF ===== */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '0.75rem' }}>
-        {onArchiveToggle && (
+      {/* ===== 按鈕列：最後更新 + 重新整理 + 歸檔 + 匯出 PDF ===== */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: '0.5rem',
+        marginBottom: '0.75rem',
+        flexWrap: 'wrap',
+      }}>
+        {/* 🔥 左側：最後更新 + 重新整理 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#6c757d' }}>
+          <span>🕐 最後更新：{formatLastUpdated(lastFetchedAt)}</span>
+          {onRefetch && (
+            <button
+              onClick={onRefetch}
+              title="重新從雲端讀取此學生的最新資料"
+              style={{
+                padding: '0.25rem 0.75rem',
+                background: '#f8f9fa',
+                color: '#495057',
+                border: '1px solid #dee2e6',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+              }}
+            >
+              🔄 重新整理
+            </button>
+          )}
+        </div>
+
+        {/* 🔥 右側：歸檔 + PDF */}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {onArchiveToggle && (
+            <button
+              onClick={handleArchiveClick}
+              disabled={isArchiving}
+              style={{
+                padding: '0.5rem 1.25rem',
+                background: isArchiving ? '#adb5bd' : isArchived ? '#17a2b8' : '#6c757d',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: isArchiving ? 'default' : 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: 'bold',
+              }}
+            >
+              {isArchiving ? '⏳ 處理中...' : isArchived ? '📤 取消歸檔' : '📦 歸檔此學生'}
+            </button>
+          )}
+
           <button
-            onClick={handleArchiveClick}
-            disabled={isArchiving}
+            onClick={handleExportPdf}
+            disabled={isExporting}
             style={{
               padding: '0.5rem 1.25rem',
-              background: isArchiving ? '#adb5bd' : isArchived ? '#17a2b8' : '#6c757d',
+              background: isExporting ? '#6c757d' : '#28a745',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
-              cursor: isArchiving ? 'default' : 'pointer',
+              cursor: isExporting ? 'default' : 'pointer',
               fontSize: '0.9rem',
               fontWeight: 'bold',
             }}
           >
-            {isArchiving ? '⏳ 處理中...' : isArchived ? '📤 取消歸檔' : '📦 歸檔此學生'}
+            {isExporting ? '⏳ 產生 PDF 中...' : '📥 匯出 PDF 報告'}
           </button>
-        )}
-
-        <button
-          onClick={handleExportPdf}
-          disabled={isExporting}
-          style={{
-            padding: '0.5rem 1.25rem',
-            background: isExporting ? '#6c757d' : '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: isExporting ? 'default' : 'pointer',
-            fontSize: '0.9rem',
-            fontWeight: 'bold',
-          }}
-        >
-          {isExporting ? '⏳ 產生 PDF 中...' : '📥 匯出 PDF 報告'}
-        </button>
+        </div>
       </div>
 
       {/* 🔥 個人語速下限設定 */}

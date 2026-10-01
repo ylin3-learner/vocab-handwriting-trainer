@@ -10,13 +10,6 @@ import { StudentAnalytics } from '../../types/analytics';
 import { Word } from '../../types/word';
 import { DailySnapshot } from '../../types/dailySnapshot';
 
-/**
- * 判斷錯誤是否為「元件卸載造成的請求取消」。
- *
- * 當 React 元件在非同步請求完成前被卸載（例如使用者切換頁面），
- * Firebase SDK 會取消還在飛的請求並拋出 AbortError。
- * 這是預期行為，不是真正的錯誤。
- */
 function isAbortError(e: unknown): boolean {
     return (e as Error)?.name === 'AbortError';
 }
@@ -48,9 +41,6 @@ export class AnalyticsService {
         return this.classStatsService.getAllClassStats();
     }
 
-    // ============================================================
-    // 用 displayId 當 key，合併同一學生的多筆 UID profile
-    // ============================================================
     async getAllStudentsStats(): Promise<StudentStat[]> {
         const studentsSnap = await getDocs(collection(db, 'students'));
         const students = studentsSnap.docs.map(doc => ({
@@ -270,8 +260,13 @@ export class AnalyticsService {
 
         // ============================================================
         // 步驟 3：先做一次「不帶 word 的」分析，取得弱點單字 ID 清單
+        //
+        // 🔥 注意：這裡必須用相同的 options（7 天窗口），
+        //   否則 preAnalysis 抓到的 wordIds 與最終結果會不一致。
         // ============================================================
-        const preAnalysis = analyzeStudent(attempts, profile, new Map());
+        const preAnalysis = analyzeStudent(attempts, profile, new Map(), {
+            weakWordsWindowDays: 7,
+        });
         const weakWordIds = preAnalysis.weakestWords.map(w => w.wordId);
 
         // ============================================================
@@ -291,8 +286,6 @@ export class AnalyticsService {
 
         // ============================================================
         // 步驟 5：讀取每日快照
-        //
-        // 🔥 修正：不要在這裡 return，讓流程繼續走到最後
         // ============================================================
         let dailySnapshots: DailySnapshot[] = [];
         try {
@@ -303,17 +296,20 @@ export class AnalyticsService {
                 .sort((a, b) => a.date.localeCompare(b.date));
             console.log(`📸 [AnalyticsService] 讀取 ${dailySnapshots.length} 筆每日快照`);
         } catch (e) {
-            // 🔥 忽略元件卸載造成的請求取消（不是真錯誤）
             if (!isAbortError(e)) {
                 console.warn('⚠️ [AnalyticsService] 讀取每日快照失敗（可能尚未建立）:', e);
             }
-            // dailySnapshots 保持空陣列，流程繼續
         }
 
         // ============================================================
         // 步驟 6：用完整的 wordMap 重新分析
+        //
+        // 🔥 弱點單字 Top 5 只看最近 7 天（形成性評估）。
+        //   其他指標（正確率、錯誤分佈、成長曲線）仍為全部歷史。
         // ============================================================
-        const result = analyzeStudent(attempts, profile, wordMap);
+        const result = analyzeStudent(attempts, profile, wordMap, {
+            weakWordsWindowDays: 7,
+        });
         result.dailySnapshots = dailySnapshots;
         result.customSpeechFloor = customSpeechFloor;
         return result;

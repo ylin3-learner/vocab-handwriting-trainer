@@ -24,7 +24,13 @@ export const TeacherDashboard: React.FC = () => {
   const [showArchived, setShowArchived] = useState(false);
 
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
-  const { data: detail, loading: detailLoading, error: detailError } = useStudentDetail(selectedStudentId);
+  const {
+    data: detail,
+    loading: detailLoading,
+    error: detailError,
+    lastFetchedAt,
+    refetch: refetchStudentDetail,
+  } = useStudentDetail(selectedStudentId);
 
   const displayedStudents = useMemo(() => {
     return students.filter(s => {
@@ -351,6 +357,8 @@ export const TeacherDashboard: React.FC = () => {
               analytics={detail}
               isArchived={archivedIds.has(selectedStudentId)}
               onArchiveToggle={handleArchiveToggle}
+              lastFetchedAt={lastFetchedAt}
+              onRefetch={refetchStudentDetail}
             />
           )}
         </div>

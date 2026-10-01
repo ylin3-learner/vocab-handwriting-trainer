@@ -34,11 +34,31 @@ const THRESHOLDS = {
 } as const;
 
 /**
+ * analyzeStudent 的可選參數。
+ */
+export interface AnalyzeStudentOptions {
+  /**
+   * 弱點單字 Top 5 的統計時間窗口（天）。
+   *
+   * - 未設定：統計全部歷史
+   * - 設定數字（例如 7）：只統計最近 N 天
+   *
+   * 為什麼需要時間窗口？
+   *   形成性評估（Formative Assessment）的核心是「及時、可操作的介入」。
+   *   使用全部歷史時，學生幾週前的錯誤會持續占據 Top 5，
+   *   掩蓋他「現在」真正需要解決的問題。
+   *   學術與工業實踐推薦 7 天（每週一次教學節奏）。
+   */
+  weakWordsWindowDays?: number;
+}
+
+/**
  * 純函式：分析單一學生的學習狀況
  *
  * @param attempts 該學生的所有作答紀錄
  * @param profile 學生的基本資料（name, class, currentLevel）
  * @param wordMap wordId -> Word 的映射（用於顯示單字）
+ * @param options 可選參數（時間窗口等）
  * @returns StudentAnalytics
  *
  * 注意：dailySnapshots 由 AnalyticsService 讀取後填入，此純函式不負責。
@@ -51,7 +71,8 @@ export function analyzeStudent(
     className: string;
     currentLevel?: number;
   },
-  wordMap: Map<string, Word>
+  wordMap: Map<string, Word>,
+  options?: AnalyzeStudentOptions
 ): StudentAnalytics {
   // ===== 邊界情境：無作答紀錄 =====
   if (attempts.length === 0) {
@@ -74,8 +95,17 @@ export function analyzeStudent(
   // ===== 4. 錯誤類型分類（只統計錯誤的題目） =====
   const errorBreakdown = calculateErrorBreakdown(attempts);
 
-  // ===== 5. 弱點單字 Top 5 =====
-  const weakestWords = calculateWeakestWords(attempts, wordMap, THRESHOLDS.WEAK_WORDS_LIMIT);
+  // ===== 5. 弱點單字 Top 5（可選時間窗口過濾） =====
+  //   只有這部分受 options.weakWordsWindowDays 影響。
+  //   其他指標（正確率、錯誤分佈、成長曲線）仍為全部歷史。
+  const weakWordsAttempts = options?.weakWordsWindowDays
+    ? filterByTimeWindow(attempts, options.weakWordsWindowDays)
+    : attempts;
+  const weakestWords = calculateWeakestWords(
+    weakWordsAttempts,
+    wordMap,
+    THRESHOLDS.WEAK_WORDS_LIMIT
+  );
 
   // ===== 6. 學習風格標籤 =====
   const learningStyle = determineLearningStyle(
@@ -96,7 +126,7 @@ export function analyzeStudent(
     studentId: profile.studentId,
     name: profile.name,
     className: profile.className,
-    currentLevel: profile.currentLevel ?? 1, // 🔥 需求 B
+    currentLevel: profile.currentLevel ?? 1,
     totalAttempts,
     correctCount,
     correctRate,
@@ -108,7 +138,7 @@ export function analyzeStudent(
     learningStyle,
     firstAttemptAt,
     lastAttemptAt,
-    dailySnapshots: [], // 🔥 需求 C：由 AnalyticsService 填入
+    dailySnapshots: [],
   };
 }
 
@@ -126,7 +156,7 @@ function createEmptyAnalytics(profile: {
     studentId: profile.studentId,
     name: profile.name,
     className: profile.className,
-    currentLevel: profile.currentLevel ?? 1, // 🔥 需求 B
+    currentLevel: profile.currentLevel ?? 1,
     totalAttempts: 0,
     correctCount: 0,
     correctRate: 0,
@@ -138,8 +168,29 @@ function createEmptyAnalytics(profile: {
     learningStyle: 'insufficient-data',
     firstAttemptAt: null,
     lastAttemptAt: null,
-    dailySnapshots: [], // 🔥 需求 C
+    dailySnapshots: [],
   };
+}
+
+/**
+ * 純函式：過濾出「最近 N 天」的作答。
+ *
+ * 為什麼？
+ *   弱點單字 Top 5 需要反映「當前」的學習狀況，
+ *   而不是被幾個月前的錯誤長期佔據。
+ */
+function filterByTimeWindow(
+  attempts: AttemptRecord[],
+  windowDays: number
+): AttemptRecord[] {
+  if (windowDays <= 0) return attempts;
+
+  const cutoffMs = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+  return attempts.filter((a) => {
+    if (!a.timestamp) return false;
+    const ts = new Date(a.timestamp).getTime();
+    return !isNaN(ts) && ts >= cutoffMs;
+  });
 }
 
 function calculateActiveDays(attempts: AttemptRecord[], windowDays: number): number {
