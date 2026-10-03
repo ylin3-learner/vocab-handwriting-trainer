@@ -493,6 +493,15 @@ As a partial mitigation, the deployed site is marked `noindex, nofollow` and shi
 automated tests. The pure logic they delegate to *is* tested. Adding emulator-based
 integration tests is planned for Stage 7+.
 
+### Future Work: Root-Based Leverage Analysis
+
+The current question selector treats each word independently. A future
+direction is to model the vocabulary as a graph where words sharing a
+root form connected components, and to weight the selection toward
+words that "unlock" other words. This resembles the bottleneck
+analysis in max-flow problems, but the graph is small enough that a
+simple weighting scheme should suffice.
+
 ## 📌 Status
 
 Stages 0 through 6-E are complete, and Stage 7 (real-world pilot) is **in progress** — the
