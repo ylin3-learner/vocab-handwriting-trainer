@@ -429,6 +429,11 @@ export const StudentDetailPanel: React.FC<Props> = ({
           <StudentGrowthChart snapshots={analytics.dailySnapshots} />
         </div>
 
+        <div style={{ marginBottom: '0.5rem', padding: '0.5rem 0.75rem', background: '#f1f3f5', borderRadius: '4px', fontSize: '0.8rem', color: '#6c757d' }}>
+          ℹ️ 以下圖表基於<strong>最近 100 題</strong>（用於診斷近期學習狀態）；
+          上方累積題數為歷史總和。兩者語意不同。
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
           <LearningStyleRadar metrics={radarMetrics} />
           <ErrorBreakdownPie breakdown={analytics.errorBreakdown} />
