@@ -1,4 +1,6 @@
-# 📖 Vocabulary King Trainer (英語單字王比賽訓練系統)
+# 📖 Vocabulary King Trainer 
+
+**🌐 Language / 語言：[English](./README.md) ・ [繁體中文](./README.zh-TW.md)**
 
 An adaptive, offline-friendly vocabulary training platform built to help a small cohort of
 middle-school students prepare for a live English vocabulary competition ("英語單字王比賽").
@@ -296,19 +298,19 @@ vocab-handwriting-trainer/
   than overlap.
 
 - **Level-progression thresholds must leave headroom below the sliding window.**
-`PerformanceTracker` uses a 30-attempt sliding window, and buildDefaultNewWords
-reserves roughly 10% of each new-word pool for probe questions above the current
-level. An earlier version set `PROMOTE_MIN_ATTEMPTS_IN_LEVEL = 30` and counted only
-exact-level matches — which made promotion mathematically unreachable: the window
-could never contain 30 same-level attempts once probe words were mixed in. The symptom
-was a student who scored 76–98% for six consecutive days and never left L1. The fix
-relaxes the threshold to 20 and counts attempts at or below the current level
-(probe questions at a higher level are excluded, since they are out-of-syllabus
-challenges rather than evidence about the current tier). The average-response-time
-gate was also loosened from 5 s to 7 s, because the 8-second competition limit makes
-5 s an unreasonably tight bar. All thresholds are exported as `RULE_BASED_THRESHOLDS`
-so the unit tests reference them symbolically instead of hardcoding numbers — the next
-time a threshold is tuned, only one file changes.
+  `PerformanceTracker` uses a 30-attempt sliding window, and buildDefaultNewWords
+  reserves roughly 10% of each new-word pool for probe questions above the current
+  level. An earlier version set `PROMOTE_MIN_ATTEMPTS_IN_LEVEL = 30` and counted only
+  exact-level matches — which made promotion mathematically unreachable: the window
+  could never contain 30 same-level attempts once probe words were mixed in. The symptom
+  was a student who scored 76–98% for six consecutive days and never left L1. The fix
+  relaxes the threshold to 20 and counts attempts at or below the current level
+  (probe questions at a higher level are excluded, since they are out-of-syllabus
+  challenges rather than evidence about the current tier). The average-response-time
+  gate was also loosened from 5 s to 7 s, because the 8-second competition limit makes
+  5 s an unreasonably tight bar. All thresholds are exported as `RULE_BASED_THRESHOLDS`
+  so the unit tests reference them symbolically instead of hardcoding numbers — the next
+  time a threshold is tuned, only one file changes.
 
 - **Pure decision logic is extracted for testability.** The highest-risk algorithms live as
   pure functions in `domain/`: `placementDecision.ts` (placement ladder),
@@ -323,6 +325,25 @@ time a threshold is tuned, only one file changes.
   (`field?: T`) make `undefined` very easy to produce. The `removeUndefined` helper
   (`domain/firestore/removeUndefined.ts`) is applied at every Firestore write boundary, so
   optional fields either have a value or are omitted, never stored as `undefined`.
+
+- **Dashboard reads are bounded and split by semantic intent.** The teacher
+  dashboard's per-student detail used to load a student's full attempt history on
+  every click (~1,000–1,500 reads per student as of Oct 2026, growing linearly).
+  The service now uses three bounded queries: the most recent 100 attempts (for
+  diagnosis charts — error breakdown, response-time distribution, weak-word
+  analysis), the most recent 30 daily snapshots (for the growth chart), and one
+  `studentStates/{displayId}` document (for the current level). The student's name
+  and class are parsed from `displayId` rather than requiring a separate
+  `classStats` scan. Net effect: ~110 reads per student detail view, down from
+  ~1,500, and the number no longer grows over time.
+
+  Crucially, the *cumulative* totals shown in the detail panel's header
+  ("共 1,074 題") are read from the pre-aggregated `classStats` document (passed
+  down as a prop from `TeacherDashboard`), not from the 100-attempt window. This
+  keeps the numbers a teacher sees consistent with the student list and preserves
+  the "practice volume" signal that has motivational value, while the charts still
+  reflect recent behavior. Three different data sources for three different
+  semantic purposes — deliberately, not by accident.
 
 ## 🔐 Roles & Authentication
 
@@ -385,7 +406,7 @@ override, configurable per-question time limit (`QuizTimingPolicy`), after-quota
 (`SessionQuotaPolicy`), example-sentence masking via Porter Stemmer, per-student PDF report
 export, student archiving, `writeBatch` optimization, Firestore offline persistence,
 circuit breaker + retry queue, quota monitoring, the `everWrong` mastery lifecycle (auto-clear
-after 5 consecutive correct answers), and automatic cleanup of orphaned UID profiles, and a threshold correction in
+after 5 consecutive correct answers), and automatic cleanup of orphaned UID profiles, plus a threshold correction in
 `RuleBasedStrategy` that fixed a promotion gate which had been mathematically
 unreachable under the 30-attempt sliding window (see "Design decisions worth calling
 out").
