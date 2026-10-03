@@ -50,10 +50,10 @@ project centers on:
 | **Example-sentence masking** | The target word is masked (underscores of matching length) while answering, revealed after submission. Uses **Porter Stemmer** normalization so `recite` / `recited` / `reciting` are all masked, but does not over-stem (`art` and `artist` stay distinct) |
 | **Configurable per-question time limit** | Each assignment can set the answer window (3–30 s; presets 5/8/10/15/20 s). Resolved via `QuizTimingPolicy` with three-layer priority: student override > assignment > system default (8 s) |
 | **After-quota practice** | When a student finishes their daily quota, the done screen offers "📚 Continue practicing" if the teacher enabled it. This is a two-layer opt-in: teacher chooses `stop` vs `continue`, then the student actively chooses whether to extend |
-| Adaptive difficulty | `PlacementOrchestrator` places new students at roughly the right tier using a binary-search-style ladder (start L3, 3 questions per tier); `LevelProgressionService` + `RuleBasedStrategy` continuously promote/demote based on rolling performance |
-| Assignment system | Teacher-configurable daily quota, new-vs-review ratio, exploration focus, **target difficulty tier** (weighted question selection mixes target + current + probe), per-assignment speech-rate floor, per-assignment time limit, and per-assignment quota-exceeded behavior. Priority order: individual > class > school-wide |
-| Word bank management | Teachers upload a `.xlsx` file → schema validation → preview → batched publish with 1-second delays between 400-row chunks, avoiding quota blowouts |
-| Teacher dashboard | Student overview, at-risk detection, Top-K weakness analysis, response-time distribution, learning-style radar, error-type pie, memory-curve growth chart (unlocked after 7 days of practice), per-student PDF report export, student archiving |
+| **Adaptive difficulty** | `PlacementOrchestrator` places new students at roughly the right tier using a binary-search-style ladder (start L3, 3 questions per tier); `LevelProgressionService` + `RuleBasedStrategy` continuously promote/demote based on rolling performance over a 30-attempt window (promotion gate: ≥ 85% correct, < 7 s average, ≥ 20 attempts at or below the current level) |
+| **Assignment system** | Teacher-configurable daily quota, new-vs-review ratio, exploration focus, **target difficulty tier** (weighted question selection mixes target + current + probe), per-assignment speech-rate floor, per-assignment time limit, and per-assignment quota-exceeded behavior. Priority order: individual > class > school-wide |
+| **Word bank management** | Teachers upload a `.xlsx` file → schema validation → preview → batched publish with 1-second delays between 400-row chunks, avoiding quota blowouts |
+| **Teacher dashboard** | Student overview, at-risk detection, Top-K weakness analysis, response-time distribution, learning-style radar, error-type pie, memory-curve growth chart (unlocked after 7 days of practice), per-student PDF report export, student archiving |
 | Roles & auth | Anonymous auth for students, Email/Password for teachers/admins, Firestore security rules enforcing per-role access, custom claims read via `getIdTokenResult(true)` |
 | Anti-cheat signals | Edit-distance + response-time based "random guessing" detection, flagged separately from genuine spelling mistakes |
 | Performance | Top-K candidate pooling (not full-table scans), pre-aggregated class stats, batched writes (`AttemptBatcher` merging 5 writes per attempt into a single atomic commit), random-sampling word selection via a `random` field, live Firestore quota monitoring with a global banner when exhausted |
@@ -79,6 +79,11 @@ vocab-handwriting-trainer/
 │ ├── set-role.mjs # Assign teacher/admin custom claims to a Firebase user
 │ ├── cleanupAnonymousProfiles.mjs # Remove duplicate students/{uid} profiles
 │ ├── deleteStudentData.mjs # One-off: delete all attempts+profile for a displayId
+│ ├── inspectStudent.mjs # Print a student's learning state, daily snapshots, recent attempts
+│ ├── diagnoseDDA.mjs # Diagnose why level evaluation isn't triggering (count vs totalAttempts, time gaps, classStats)
+│ ├── diagnoseAttemptsGap.mjs # Find mismatches between totalAttempts and the real attempts count (by displayId vs by uid)
+│ ├── fixStudentStates.mjs # Backfill missing StudentLearningState fields (totalAttempts, levelLockedUntil, levelHistory)
+│ ├── simulateEvaluation.mjs # Replay RuleBasedStrategy on a student's real attempts, old vs new thresholds
 │ └── tsconfig.json
 │
 ├── vocab_csv/
@@ -290,6 +295,21 @@ vocab-handwriting-trainer/
   separately from SM-2's *which specific word is due today*. The two systems compose rather
   than overlap.
 
+- **Level-progression thresholds must leave headroom below the sliding window.**
+`PerformanceTracker` uses a 30-attempt sliding window, and buildDefaultNewWords
+reserves roughly 10% of each new-word pool for probe questions above the current
+level. An earlier version set `PROMOTE_MIN_ATTEMPTS_IN_LEVEL = 30` and counted only
+exact-level matches — which made promotion mathematically unreachable: the window
+could never contain 30 same-level attempts once probe words were mixed in. The symptom
+was a student who scored 76–98% for six consecutive days and never left L1. The fix
+relaxes the threshold to 20 and counts attempts at or below the current level
+(probe questions at a higher level are excluded, since they are out-of-syllabus
+challenges rather than evidence about the current tier). The average-response-time
+gate was also loosened from 5 s to 7 s, because the 8-second competition limit makes
+5 s an unreasonably tight bar. All thresholds are exported as `RULE_BASED_THRESHOLDS`
+so the unit tests reference them symbolically instead of hardcoding numbers — the next
+time a threshold is tuned, only one file changes.
+
 - **Pure decision logic is extracted for testability.** The highest-risk algorithms live as
   pure functions in `domain/`: `placementDecision.ts` (placement ladder),
   `evaluationGuard.ts` (DDA "should we evaluate now?" gate), `selectAssignment.ts`
@@ -365,9 +385,12 @@ override, configurable per-question time limit (`QuizTimingPolicy`), after-quota
 (`SessionQuotaPolicy`), example-sentence masking via Porter Stemmer, per-student PDF report
 export, student archiving, `writeBatch` optimization, Firestore offline persistence,
 circuit breaker + retry queue, quota monitoring, the `everWrong` mastery lifecycle (auto-clear
-after 5 consecutive correct answers), and automatic cleanup of orphaned UID profiles.
+after 5 consecutive correct answers), and automatic cleanup of orphaned UID profiles, and a threshold correction in
+`RuleBasedStrategy` that fixed a promotion gate which had been mathematically
+unreachable under the 30-attempt sliding window (see "Design decisions worth calling
+out").
 
-**Automated test coverage: 126 unit tests across 7 suites**, covering `grader`, `sm2`,
+**Automated test coverage: 131 unit tests across 7 suites**, covering `grader`, `sm2`,
 `questionSelector`, `studentAnalyzer`, `RuleBasedStrategy`, `placementDecision`,
 `selectAssignment`, `evaluationGuard`, `AnswerProcessor`, and `maskWord` (which also covers
 `porterStemmer`). Tests focus on the highest-risk pure functions; I/O layers are
@@ -461,7 +484,7 @@ rate control, per-question time limit control, the teacher dashboard with growth
 visualization, per-student PDF report export, and role-based auth for
 students/teachers/admins.
 
-**Automated tests: 126 passing across 7 suites, 0 failing.**
+**Automated tests: 131 passing across 7 suites, 0 failing.**
 
 **Remaining work in Stage 7:** continue collecting recognition error cases, tune the
 handwriting pipeline against real student samples, and iterate on the pilot findings.

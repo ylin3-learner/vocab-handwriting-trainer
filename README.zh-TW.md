@@ -41,7 +41,7 @@
 | **例句遮罩** | 作答期間目標單字以同長度下底線遮罩，答完才揭露。使用 **Porter Stemmer** 正規化，`recite` / `recited` / `reciting` 都會被遮罩；但不會過度詞幹化（`art` 與 `artist` 保持區分） |
 | **可調每題作答時限** | 每份作業可設定作答秒數（3–30 秒，預設選項 5/8/10/15/20 秒）。由 `QuizTimingPolicy` 三層優先序解析：學生個人覆蓋 > 作業設定 > 系統預設（8 秒） |
 | **課後加強** | 學生答完每日配額後，若老師允許，完成頁面會顯示「📚 繼續練習」按鈕。這是兩層選擇：老師選 `stop` 或 `continue`，學生再主動決定是否延長 |
-| 適應性分級 | `PlacementOrchestrator` 用二分搜尋式的階梯（L3 起始、每級 3 題）將新學生放到合適層級；`LevelProgressionService` ＋ `RuleBasedStrategy` 依滾動表現持續升／降級 |
+| 適應性分級 | `PlacementOrchestrator` 用二分搜尋式的階梯（L3 起始、每級 3 題）將新學生放到合適層級；`LevelProgressionService` ＋ `RuleBasedStrategy` 依滾動表現持續升／降級（30 筆滑動視窗；升級門檻：正確率 ≥ 85%、平均 < 7 秒、當前等級或以下的作答 ≥ 20 筆） |
 | 作業系統 | 老師可設定每日配額、新舊字比例、複習專注度、**目標難度層級**（加權出題：目標 ＋ 當前 ＋ 探針）、每份作業的語速下限、每份作業的作答時限、每份作業的配額用盡後行為。優先序：個人 > 班級 > 全校 |
 | 單字庫管理 | ⽼師上傳 `.xlsx` → Schema 驗證 → 預覽 → 每 400 筆為一批、批間延遲 1 秒的批次發布，避免配額暴衝 |
 | 教師儀表板 | 學⽣總覽、⾵險偵測、Top-K 弱點分析、作答時間分佈、學習風格雷達圖、錯誤類型圓餅圖、成長曲線（累積 7 天後解鎖）、單一學生 PDF 報告匯出、學生封存 |
@@ -70,6 +70,11 @@ vocab-handwriting-trainer/
 │ ├── set-role.mjs # 幫 Firebase 使用者設定 teacher/admin 自訂聲明
 │ ├── cleanupAnonymousProfiles.mjs # 清理重複的 students/{uid} profile
 │ ├── deleteStudentData.mjs # 一次性刪除指定 displayId 的所有測試資料
+│ ├── inspectStudent.mjs # 印出學生學習狀態、每日快照、最近作答
+│ ├── diagnoseDDA.mjs # 診斷等級評估為何沒觸發（count vs totalAttempts、時間缺口、classStats）
+│ ├── diagnoseAttemptsGap.mjs # 找出 totalAttempts 與 attempts 實際筆數的落差（by displayId vs by uid）
+│ ├── fixStudentStates.mjs # 補齊 StudentLearningState 缺漏欄位（totalAttempts、levelLockedUntil、levelHistory）
+│ ├── simulateEvaluation.mjs # 用真實 attempts 重播 RuleBasedStrategy，對比新舊門檻
 │ └── tsconfig.json
 │
 ├── vocab_csv/
@@ -259,6 +264,18 @@ vocab-handwriting-trainer/
   `PlacementOrchestrator.ts` 負責決定學生「該被放在哪個難度層級」，這跟 SM-2 決定
   「今天該複習哪個字」是兩件事、分開處理，只在系統邊界互相組合。
 
+- **等級升降的門檻必須低於滑動視窗，否則會出現「數學上不可能升級」。**
+`PerformanceTracker` 使用 30 筆的滑動視窗，而 `buildDefaultNewWords` 每次固定
+混入約 10% 的 probe（比當前等級更高的單字）。舊版把
+`PROMOTE_MIN_ATTEMPTS_IN_LEVEL` 設為 30，且 `attemptsInCurrentLevel` 只計「嚴
+格等於當前等級」的筆數——這讓升級在數學上不可能發生：視窗內永遠湊不到
+30 筆同級作答。症狀是一位學生連續六天正確率 76–98%，卻一直停在 L1。修正方式
+是把門檻放寬到 20，並把計算改為「小於或等於當前等級」的筆數（probe 的更
+高難度題目不計入，因為它們是超綱挑戰，不是對當前等級的證據）。平均反應時間
+門檻也從 5 秒放寬到 7 秒——8 秒的比賽題限讓 5 秒成為不合理的嚴苛門檻。所有門
+檻值集中匯出為 `RULE_BASED_THRESHOLDS`，讓單元測試以符號引用而非寫死數字；
+下次調參只要改一個檔案。
+
 - **關鍵決策邏輯抽出為可測試的純函式。** 最高風險的演算法放在 `domain/` 底下的純函
   式：`placementDecision.ts`（分級階梯）、`evaluationGuard.ts`（DDA 的「現在該不該
   評估」守衛）、`selectAssignment.ts`（作業優先序）、`QuizTimingPolicy.ts`（時限解
@@ -329,9 +346,10 @@ vocab-handwriting-trainer/
 覆蓋、可調每題作答時限（`QuizTimingPolicy`）、課後加強（`SessionQuotaPolicy`）、
 Porter Stemmer 例句遮罩、單一學生 PDF 報告匯出、學生封存、`writeBatch` 最佳化、
 Firestore 離線持久化、熔斷器＋重試佇列、配額監控、`everWrong` 的掌握生命週期（連續
-答對 5 次後自動清除），以及孤兒 UID profile 的自動清理。
+答對 5 次後自動清除），孤兒 UID profile 的自動清理，以及 `RuleBasedStrategy` 的門檻修正——修復了一個
+在 30 筆滑動視窗下數學上不可能達成的升級條件（詳見「值得特別說明的設計決策」）。
 
-**自動化測試：126 個單元測試、7 個 suites**，涵蓋 `grader`、`sm2`、
+**自動化測試：131 個單元測試、7 個 suites**，涵蓋 `grader`、`sm2`、
 `questionSelector`、`studentAnalyzer`、`RuleBasedStrategy`、`placementDecision`、
 `selectAssignment`、`evaluationGuard`、`AnswerProcessor`，以及 `maskWord`（同時涵蓋
 `porterStemmer`）的純邏輯單元測試。測試聚焦在最高風險的純函式；I/O 層刻意不寫單元
@@ -411,7 +429,7 @@ Stage 0 到 Stage 6-E 已完成，Stage 7（真實試點）**進行中**——�
 老師可設定的作業與目標層級加權出題、個人化語速控制、每題作答時限控制、含成長曲線視
 覺化的教師儀表板、單一學生 PDF 報告匯出，以及學生／教師／管理員的角色權限。
 
-**自動化測試：126 個通過、7 個 suites、0 個失敗。**
+**自動化測試：131 個通過、7 個 suites、0 個失敗。**
 
 **Stage 7 剩下工作：** 繼續蒐集辨識錯誤案例、依真實學生樣本調整手寫辨識流程、依試點
 發現持續迭代。功能到此凍結——優先順序是真實世界的驗證，而不是繼續擴充功能。
