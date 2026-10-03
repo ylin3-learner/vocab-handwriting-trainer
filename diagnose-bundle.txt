@@ -1,0 +1,844 @@
+
+
+===== src/services/analytics/ClassStatsService.ts =====
+
+// src/services/analytics/ClassStatsService.ts
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, increment } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { sanitizeFirestoreId } from '../../domain/string/sanitizeId';
+
+export interface StudentSummary {
+  name: string;
+  attempts: number;
+  correct: number;
+}
+
+export interface WordErrorStat {
+  errorCount: number;
+  totalCount: number;
+}
+
+export interface ClassStats {
+  className: string;
+  totalAttempts: number;
+  totalCorrect: number;
+  students: Record<string, StudentSummary>; // key = displayId
+  wordErrors: Record<string, WordErrorStat>;
+  lastUpdated: string;
+}
+
+export interface RecordAttemptParams {
+  className: string;
+  studentId: string;
+  studentName?: string;
+  studentSeatNumber?: string;
+  wordId: string;
+  isCorrect: boolean;
+}
+
+export class ClassStatsService {
+  private getDocRef(className: string) {
+    return doc(db, 'classStats', className);
+  }
+
+  async getStats(className: string): Promise<ClassStats | null> {
+    const snap = await getDoc(this.getDocRef(className));
+    if (!snap.exists()) return null;
+    return snap.data() as ClassStats;
+  }
+
+  async getAllClassStats(): Promise<ClassStats[]> {
+    const ref = collection(db, 'classStats');
+    const snap = await getDocs(ref);
+    return snap.docs.map(d => d.data() as ClassStats);
+  }
+
+  async recordAttempt(params: RecordAttemptParams): Promise<void> {
+    const { className, studentId, studentName, studentSeatNumber, wordId, isCorrect } = params;
+
+    if (!className || !className.trim()) return;
+
+    // field path å®‰å…¨?–ï??•ç? Mrs.?O.K. ç­‰å« . ?„å–®å­—ï?
+    const safeWordId = sanitizeFirestoreId(wordId);
+
+    const studentDisplayId = studentName && studentSeatNumber
+      ? `${className}_${studentSeatNumber}_${studentName}`
+      : studentId;
+
+    const studentDisplayName = studentName || studentId;
+
+    const ref = this.getDocRef(className);
+    const now = new Date().toISOString();
+
+    try {
+      const snap = await getDoc(ref);
+
+      if (!snap.exists()) {
+        const initial: ClassStats = {
+          className,
+          totalAttempts: 1,
+          totalCorrect: isCorrect ? 1 : 0,
+          students: {
+            [studentDisplayId]: {
+              name: studentDisplayName,
+              attempts: 1,
+              correct: isCorrect ? 1 : 0,
+            },
+          },
+          wordErrors: {
+            [safeWordId]: {          // ??safeWordId ??key
+              errorCount: isCorrect ? 0 : 1,
+              totalCount: 1,
+            },
+          },
+          lastUpdated: now,
+        };
+        await setDoc(ref, initial);
+        return;
+      }
+
+      await updateDoc(ref, {
+        [`students.${studentDisplayId}.name`]: studentDisplayName,
+        [`students.${studentDisplayId}.attempts`]: increment(1),
+        [`students.${studentDisplayId}.correct`]: increment(isCorrect ? 1 : 0),
+        [`wordErrors.${safeWordId}.errorCount`]: increment(isCorrect ? 0 : 1),  // ?”¥
+        [`wordErrors.${safeWordId}.totalCount`]: increment(1),                  // ?”¥
+        totalAttempts: increment(1),
+        totalCorrect: increment(isCorrect ? 1 : 0),
+        lastUpdated: now,
+      });
+    } catch (error) {
+      console.warn('? ï? [ClassStatsService] ?´æ–°?­ç?çµ±è?å¤±æ?ï¼ˆä?å½±éŸ¿ä¸»æ?ç¨‹ï?:', error);
+    }
+  }
+}
+
+===== src/services/storage/DailyStatsTracker.ts =====
+
+// src/services/storage/DailyStatsTracker.ts
+
+/**
+ * è¿½è¹¤å­¸ç??Œç•¶å¤©ç´¯è¨ˆã€ç?ç­”é?çµ±è?ï¼ˆè·¨ session ?ä??–ï???
+ *
+ * ?ºä?éº¼é?è¦ï?
+ *   QuizOrchestrator ??dailyAnsweredCount / dailyCorrectCount ?Ÿæœ¬??session ç´šç?ï¼?
+ *   æ¯æ¬¡?é¢?·æ–°å°±æ­¸?¶ã€‚é€™é€ æ??©å€‹å?é¡Œï?
+ *     1. æ¯æ—¥å¿«ç…§?ªå?? ã€Œç•¶å¤©ç¬¬ä¸€æ¬¡ç?é¡Œã€ç??¸æ?ï¼Œæ­£ç¢ºç?æ°¸é??ä?
+ *     2. æ¯æ—¥?é??¯ä»¥è¢«åˆ·?°ç???
+ *
+ *   localStorage ?ä??–è??Œç•¶å¤©ç´¯è¨ˆã€è·¨ session å»¶ç???
+ *
+ * Key è¨­è?ï¼?
+ *   dailyStats_{displayId}_{YYYY-MM-DD}
+ *   æ¯å¤©ä¸€??keyï¼Œé?å¤©è‡ª?•è??æ–° keyï¼Œä??€è¦ä¸»?•æ??†ã€?
+ *   ??key ä½”ç”¨æ¥µå?ç©ºé?ï¼? 100 bytes/dayï¼‰ã€?
+ */
+export interface DailyStats {
+  date: string;                  // YYYY-MM-DD
+  answeredCount: number;
+  correctCount: number;
+  totalResponseTimeMs: number;
+}
+
+export class DailyStatsTracker {
+  private getKey(displayId: string, date: string): string {
+    return `dailyStats_${displayId}_${date}`;
+  }
+
+  /**
+   * è®€?–æ?å®šæ—¥?Ÿç?ç´¯è?çµ±è???
+   * ?¥ä?å­˜åœ¨?æ—¥?Ÿä?ç¬¦ã€æ?è§??å¤±æ?ï¼Œå??³æ­¸?¶ç?çµ±è???
+   */
+  load(displayId: string, date: string): DailyStats {
+    try {
+      const raw = localStorage.getItem(this.getKey(displayId, date));
+      if (!raw) return this.empty(date);
+
+      const parsed = JSON.parse(raw) as Partial<DailyStats>;
+      if (parsed.date !== date) return this.empty(date);
+
+      return {
+        date,
+        answeredCount: parsed.answeredCount ?? 0,
+        correctCount: parsed.correctCount ?? 0,
+        totalResponseTimeMs: parsed.totalResponseTimeMs ?? 0,
+      };
+    } catch (e) {
+      console.warn('? ï? [DailyStatsTracker] è®€?–å¤±??', e);
+      return this.empty(date);
+    }
+  }
+
+  /**
+   * ç´¯å?ä¸€æ¬¡ä?ç­”ï?ä¸¦å??³ç´¯? å??„çµ±è¨ˆã€?
+   */
+  increment(
+    displayId: string,
+    date: string,
+    isCorrect: boolean,
+    responseTimeMs: number
+  ): DailyStats {
+    const stats = this.load(displayId, date);
+    stats.answeredCount += 1;
+    if (isCorrect) stats.correctCount += 1;
+    stats.totalResponseTimeMs += responseTimeMs;
+    this.save(displayId, stats);
+    return stats;
+  }
+
+  /**
+   * æ¸…é™¤?‡å??¥æ??„çµ±è¨ˆï?æ¸¬è©¦?–æ??•é?ç½®ç”¨ï¼‰ã€?
+   */
+  clear(displayId: string, date: string): void {
+    try {
+      localStorage.removeItem(this.getKey(displayId, date));
+    } catch {
+      // ignore
+    }
+  }
+
+  private save(displayId: string, stats: DailyStats): void {
+    try {
+      localStorage.setItem(
+        this.getKey(displayId, stats.date),
+        JSON.stringify(stats)
+      );
+    } catch (e) {
+      console.warn('? ï? [DailyStatsTracker] å¯«å…¥å¤±æ?:', e);
+    }
+  }
+
+  private empty(date: string): DailyStats {
+    return { date, answeredCount: 0, correctCount: 0, totalResponseTimeMs: 0 };
+  }
+}
+
+===== src/features/login/StudentLogin.tsx =====
+
+// src/features/login/StudentLogin.tsx
+import React, { useState } from 'react';
+import { signInAnonymously } from 'firebase/auth';
+import { auth } from '../../firebase';
+import { FirestoreWordRepository } from '../../services/wordRepository/FirestoreWordRepository';
+import { InMemoryWordRepository } from '../../services/wordRepository/InMemoryWordRepository';
+import { HybridProgressStore } from '../../services/storage/HybridProgressStore';
+import { ProfileService } from '../../services/profile/ProfileService';
+import { QuizOrchestrator } from '../quiz/QuizOrchestrator';
+import { PlacementOrchestrator } from '../placement/PlacementOrchestrator';
+import { StudentStateService } from '../../services/progression/StudentStateService';
+import { QuizSessionApi } from '../quiz/QuizSessionApi';
+import type { Word } from '../../types/word';
+import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
+import { buildDisplayId } from '../../domain/string/displayId';
+
+const FALLBACK_WORDS: Word[] = [
+  { id: 'apple', word: 'apple', meaning: '?‹æ?', sentence: 'I eat an apple every day.' },
+  { id: 'book', word: 'book', meaning: '??, sentence: 'This is my book.' },
+  { id: 'cat', word: 'cat', meaning: 'è²?, sentence: 'The cat is sleeping.' },
+  { id: 'dog', word: 'dog', meaning: '??, sentence: 'The dog runs fast.' },
+  { id: 'elephant', word: 'elephant', meaning: 'å¤§è±¡', sentence: 'The elephant is huge.' },
+];
+
+interface StudentLoginProps {
+  onStart: (orchestrator: QuizSessionApi) => void;
+}
+
+export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
+  const [studentName, setStudentName] = useState('');
+  const [className, setClassName] = useState('');
+  const [seatNumber, setSeatNumber] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const unlockSpeech = () => {
+    if (!window.speechSynthesis) return;
+    try {
+      // 1. ?±èº«ï¼šè§¸??voices ?—è¡¨è¼‰å…¥
+      const voices = window.speechSynthesis.getVoices();
+
+      // 2. iOS è§??ï¼šåœ¨ user gesture ??speak() ä¸€?‹ç„¡?²ã€æ¥µ?­ç? utterance
+      //    - volume = 0ï¼šç„¡??
+      //    - rate = 10ï¼šæ¥µå¿«ï?æ¯«ç?ç´šå??ï?
+      //    - ä¸å‘¼??cancel()ï¼šè?å®ƒè‡ª?¶æ’­å®Œï??¿å?ç«¶æ?æ®˜ç?
+      const unlock = new SpeechSynthesisUtterance('a');
+      unlock.volume = 0;
+      unlock.rate = 10;
+      unlock.lang = 'en-US';
+      window.speechSynthesis.speak(unlock);
+
+      console.log(`??èªéŸ³å¼•æ?å·²è§£?–ï??¯ç”¨èªéŸ³ ${voices.length} ?‹ï?`);
+    } catch (e) {
+      console.log('èªéŸ³?Ÿèƒ½ä¸å¯??);
+    }
+  };
+
+  const handleStart = async () => {
+    // ?”¥ ä¸‰æ??½å?å¡?
+    if (!studentName.trim()) {
+      alert('è«‹è¼¸?¥å???);
+      return;
+    }
+    if (!className.trim()) {
+      alert('è«‹è¼¸?¥ç­ç´?);
+      return;
+    }
+    if (!seatNumber.trim()) {
+      alert('è«‹è¼¸?¥åº§??);
+      return;
+    }
+
+    unlockSpeech();
+    setIsLoading(true);
+
+    try {
+      // ===== æ­¥é? 1ï¼šåŒ¿?ç™»??=====
+      console.log('?? [StudentLogin] ?‹å??¿å??»å…¥...');
+      const cred = await signInAnonymously(auth);
+      const uid = cred.user.uid;
+      console.log(`?? [StudentLogin] ?¿å??»å…¥?å?ï¼ŒUID: ${uid}`);
+
+      // ===== æ­¥é? 2ï¼šå„²å­˜å­¸??Profileï¼ˆå« displayIdï¼?=====
+      const profileService = new ProfileService();
+      await profileService.saveProfile(
+        uid,
+        studentName.trim(),
+        className.trim(),
+        seatNumber.trim()
+      );
+
+      const displayId = buildDisplayId(
+        className.trim(),
+        seatNumber.trim(),
+        studentName.trim(),
+        uid  // fallbackï¼ˆç?è«–ä?ä¸æ??¨åˆ°ï¼Œå??ºä?æ¬„éƒ½å¿…å¡«ï¼?
+      );
+
+      console.log(`??[StudentLogin] Profile å·²å„²å­˜ï?${displayId}`);
+
+      // ===== æ­¥é? 3ï¼šå»ºç«?WordRepository =====
+      const firestoreRepo = new FirestoreWordRepository();
+      let repo;
+      try {
+        const testQuery = await firestoreRepo.getNewWords(new Set(), 1);
+        if (testQuery.length === 0) {
+          console.warn('? ï? Firestore ?¡å–®å­—è??™ï?ä½¿ç”¨?™ç”¨?®å?åº?);
+          repo = new InMemoryWordRepository(FALLBACK_WORDS);
+        } else {
+          repo = firestoreRepo;
+        }
+      } catch (e) {
+        console.warn('? ï? Firestore ???å¤±æ?ï¼Œä½¿?¨å??¨å–®å­—åº«:', e);
+        repo = new InMemoryWordRepository(FALLBACK_WORDS);
+      }
+
+      // ===== æ­¥é? 4ï¼šè??–é?å®šç??‹ï?æ±ºå?ä½¿ç”¨?ªå€?Orchestrator =====
+      const stateService = new StudentStateService();
+      const placementStatus = await stateService.getPlacementStatus(displayId);
+      console.log(
+        `?? [StudentLogin] ?‘å??€?‹ï?needsPlacement=${placementStatus.needsPlacement}, currentLevel=L${placementStatus.currentLevel}`
+      );
+
+      let orchestrator: QuizSessionApi;
+
+      if (placementStatus.needsPlacement) {
+        // ?”¥ Placement æ¨¡å?
+        console.log('?¯ [StudentLogin] ?²å…¥ç¨‹åº¦?‘å?æ¨¡å?');
+        orchestrator = new PlacementOrchestrator(uid, className.trim(), {
+          wordRepository: repo,
+          timeLimitMs: 8000,
+          studentName: studentName.trim(),
+          studentSeatNumber: seatNumber.trim(),
+        });
+      } else {
+        // ?”¥ æ­?¸¸ç·´ç?æ¨¡å?
+        console.log('?? [StudentLogin] ?²å…¥æ­?¸¸ç·´ç?æ¨¡å?');
+        const store = new HybridProgressStore(displayId);
+        orchestrator = new QuizOrchestrator(uid, className.trim(), {
+          wordRepository: repo,
+          progressStore: store,
+          timeLimitMs: 8000,
+          defaultDailyMaxQuota: RECOMMENDED_MIN_QUOTA,
+          defaultDailyNewQuota: 3,
+          studentName: studentName.trim(),
+          studentSeatNumber: seatNumber.trim(),
+        });
+      }
+
+      await orchestrator.init();
+      onStart(orchestrator);
+    } catch (error) {
+      console.error('?Ÿå?æ¸¬é?å¤±æ?:', error);
+      alert('è¼‰å…¥?®å?åº«å¤±?—ï?è«‹ç¢ºèªç¶²è·¯é€??å¾Œé?è©?);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: '400px', margin: '2rem auto', padding: '1rem' }}>
+      <h2>?? ?»å…¥ç·´ç?</h2>
+      <div style={{ marginBottom: '1rem' }}>
+        <label>å§“å? *</label>
+        <input
+          type="text"
+          value={studentName}
+          onChange={(e) => setStudentName(e.target.value)}
+          style={{ width: '100%', padding: '0.5rem', fontSize: '1rem' }}
+          placeholder="ä¾‹å?ï¼šç?å°æ?"
+          disabled={isLoading}
+        />
+      </div>
+      <div style={{ marginBottom: '1rem' }}>
+        <label>?­ç? *</label>
+        <input
+          type="text"
+          value={className}
+          onChange={(e) => setClassName(e.target.value)}
+          style={{ width: '100%', padding: '0.5rem', fontSize: '1rem' }}
+          placeholder="ä¾‹å?ï¼?01"
+          disabled={isLoading}
+        />
+      </div>
+      <div style={{ marginBottom: '1rem' }}>
+        <label>åº§è? *</label>
+        <input
+          type="text"
+          value={seatNumber}
+          onChange={(e) => setSeatNumber(e.target.value)}
+          style={{ width: '100%', padding: '0.5rem', fontSize: '1rem' }}
+          placeholder="ä¾‹å?ï¼?2"
+          disabled={isLoading}
+        />
+      </div>
+      <button
+        onClick={handleStart}
+        disabled={isLoading}
+        style={{
+          padding: '0.75rem 2rem',
+          fontSize: '1.2rem',
+          background: isLoading ? '#6c757d' : '#28a745',
+          color: '#fff',
+          border: 'none',
+          borderRadius: '8px',
+          cursor: isLoading ? 'default' : 'pointer',
+          width: '100%',
+        }}
+      >
+        {isLoading ? 'è¼‰å…¥ä¸?..' : '?‹å?ç·´ç?'}
+      </button>
+    </div>
+  );
+};
+
+===== src/services/progression/PerformanceTracker.ts =====
+
+// src/services/progression/PerformanceTracker.ts
+import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { AttemptRecord } from '../storage/ProgressStore';
+import { Word } from '../../types/word';
+import { FirestoreWordRepository } from '../wordRepository/FirestoreWordRepository';
+import { calculateMetrics } from '../../domain/progression/metricsCalculator';
+import { PerformanceMetrics } from '../../types/progression';
+
+/**
+ * ?·è²¬ï¼šå? Firestore ?ˆå?å­¸ç??„ä?ç­”ç??„ï??šå??ç??¥é?è¦ç??‡æ?
+ *
+ * Key ??studentDisplayIdï¼?
+ *   attempts ?‡ä»¶?Œæ?å­˜æ? studentIdï¼ˆuidï¼‰å? studentDisplayIdï¼ˆè??ˆè??¥ç¢¼ï¼‰ï?
+ *   ?¥è©¢?‚ç”¨ studentDisplayId ?èƒ½è·?UID è¿½è¹¤?Œä?ä½å­¸?Ÿã€?
+ *
+ * è¨­è??Ÿå?ï¼?
+ * - ä¸æ±ºå®šã€Œè?ä¸è??‡ç??ï??™æ˜¯ç­–ç•¥?„è·è²¬ï?
+ * - ä¸ç¢° UI
+ * - ?ªå??Œè??™ç²??+ å§”æ´¾ç´”å‡½å¼è?ç®—ã€?
+ */
+export class PerformanceTracker {
+  private wordRepository = new FirestoreWordRepository();
+
+  /** æ»‘å?è¦–ç?å¤§å?ï¼ˆæ?è¿?N é¡Œï? */
+  private static readonly WINDOW_SIZE = 30;
+
+  /**
+   * ?–å?å­¸ç?è¿‘æ??„è¡¨?¾æ?æ¨?
+   *
+   * @param displayId å­¸ç??„è??ˆè??¥ç¢¼ï¼ˆä?å¦?"709_1_?—ä?ç¶?ï¼?
+   * @param currentLevel ?¶å?ç­‰ç?ï¼ˆç”¨?¼è?ç®?attemptsInCurrentLevelï¼?
+   */
+  async getRecentMetrics(
+    displayId: string,
+    currentLevel: number
+  ): Promise<PerformanceMetrics> {
+    // ============================================================
+    // æ­¥é? 1ï¼šå?å¾—æ?è¿?N ç­?attempts
+    // ============================================================
+    const attemptsRef = collection(db, 'attempts');
+    const q = query(
+      attemptsRef,
+      where('studentDisplayId', '==', displayId), // ?”¥ ä¿®æ­£ï¼šæ?ä½å???studentDisplayId
+      orderBy('timestamp', 'desc'),
+      limit(PerformanceTracker.WINDOW_SIZE)
+    );
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      return this.emptyMetrics();
+    }
+
+    const attempts: AttemptRecord[] = snap.docs.map(
+      (d) => d.data() as AttemptRecord
+    );
+
+    // ============================================================
+    // æ­¥é? 2ï¼šå?å¾—é€™ä? attempts å°æ??„å–®å­—ç?ç´?
+    // ============================================================
+    const wordIds = Array.from(new Set(attempts.map((a) => a.wordId)));
+    let words: Word[] = [];
+    try {
+      words = await this.wordRepository.getWordsByIds(wordIds);
+    } catch (e) {
+      console.warn('? ï? [PerformanceTracker] ?¡æ??–å??®å?ç­‰ç?ï¼Œä½¿?¨ä?å®ˆä¼°è¨?', e);
+    }
+    const wordLevelMap = new Map<string, string>();
+    for (const w of words) {
+      wordLevelMap.set(w.id, w.level ?? '1');
+    }
+
+    // ============================================================
+    // æ­¥é? 3ï¼šè?ç®?attemptsInCurrentLevel
+    // ============================================================
+    const attemptsInCurrentLevel = attempts.filter(
+      (a) => Number(wordLevelMap.get(a.wordId)) === currentLevel
+    ).length;
+
+    // ============================================================
+    // æ­¥é? 4ï¼šå?æ´¾ç??½å?è¨ˆç??‡æ?
+    // ============================================================
+    return calculateMetrics(attempts, attemptsInCurrentLevel);
+  }
+
+  // ============================================================
+  // ?Šç??…å?ï¼šå??¨æ??‰ä?ç­”ç???
+  // ============================================================
+  private emptyMetrics(): PerformanceMetrics {
+    return {
+      recentAttempts: 0,
+      correctRate: 0,
+      avgResponseTimeMs: 0,
+      timeoutRate: 0,
+      attemptsInCurrentLevel: 0,
+      consecutiveCorrect: 0,
+      consecutiveWrong: 0,
+    };
+  }
+}
+
+===== src/domain/progression/metricsCalculator.ts =====
+
+// src/domain/progression/metricsCalculator.ts
+import { AttemptRecord } from '../../services/storage/ProgressStore';
+import { PerformanceMetrics } from '../../types/progression';
+
+/** ?æ??‚é?è¶…é?æ­¤å€¼è???timeoutï¼ˆè?é¡Œç›®?åˆ¶ä¸€?´ï? */
+const TIMEOUT_THRESHOLD_MS = 8000;
+
+/**
+ * ç´”å‡½å¼ï?å¾ä?ç­”ç??„è?ç®—è¡¨?¾æ?æ¨?
+ *
+ * @param recentAttempts ?€è¿?N ç­†ä?ç­”ï?å·²ç”± Service å±¤æ?å¥½å?ï¼?
+ * @param currentLevelAttempts ?¶å? level ç´¯è??„ä?ç­”ï??¨æ–¼?¤æ–·?¯å¦å¤ æ¨£?¬ï?
+ */
+export function calculateMetrics(
+  recentAttempts: AttemptRecord[],
+  currentLevelAttempts: number
+): PerformanceMetrics {
+  // ===== ?Šç??…å?ï¼šç„¡è³‡æ? =====
+  if (recentAttempts.length === 0) {
+    return {
+      recentAttempts: 0,
+      correctRate: 0,
+      avgResponseTimeMs: 0,
+      timeoutRate: 0,
+      attemptsInCurrentLevel: currentLevelAttempts,
+      consecutiveCorrect: 0,
+      consecutiveWrong: 0,
+    };
+  }
+
+  // ===== ?†é?ï¼štimeout vs. ?‰æ?ä½œç? =====
+  const timeouts = recentAttempts.filter(
+    (a) => (a.responseTimeMs || 0) > TIMEOUT_THRESHOLD_MS
+  );
+  const validAttempts = recentAttempts.filter(
+    (a) => (a.responseTimeMs || 0) <= TIMEOUT_THRESHOLD_MS
+  );
+
+  const timeoutRate = timeouts.length / recentAttempts.length;
+
+  // ===== æ­?¢º?‡ï??†æ??’é™¤ timeout =====
+  const correctRate =
+    validAttempts.length > 0
+      ? validAttempts.filter((a) => a.isCorrect).length / validAttempts.length
+      : 0;
+
+  // ===== å¹³å??æ??‚é?ï¼šæ???timeout =====
+  const avgResponseTimeMs =
+    validAttempts.length > 0
+      ? validAttempts.reduce((sum, a) => sum + (a.responseTimeMs || 0), 0) /
+        validAttempts.length
+      : 0;
+
+  // ===== ???ç­”å?/ç­”éŒ¯ï¼šå??€?°ä?ç­†å??ç? =====
+  // æ³¨æ?ï¼šé€™è£¡??recentAttempts ?‰ç‚º?Œç”±?°åˆ°?Šã€æ?åº?
+  const sorted = [...recentAttempts].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  let consecutiveCorrect = 0;
+  let consecutiveWrong = 0;
+  for (const attempt of sorted) {
+    const isTimeout = (attempt.responseTimeMs || 0) > TIMEOUT_THRESHOLD_MS;
+    if (isTimeout) break; // Timeout ä¸­æ–·???è¨ˆç?
+    if (attempt.isCorrect) {
+      if (consecutiveWrong > 0) break;
+      consecutiveCorrect++;
+    } else {
+      if (consecutiveCorrect > 0) break;
+      consecutiveWrong++;
+    }
+  }
+
+  return {
+    recentAttempts: recentAttempts.length,
+    correctRate,
+    avgResponseTimeMs,
+    timeoutRate,
+    attemptsInCurrentLevel: currentLevelAttempts,
+    consecutiveCorrect,
+    consecutiveWrong,
+  };
+}
+
+===== src/services/assignment/AssignmentService.ts =====
+
+// src/services/assignment/AssignmentService.ts
+import {
+  collection,
+  getDocs,
+  doc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  getDoc,
+  query,
+  where,
+  orderBy,
+  startAt,
+  endAt,
+  documentId,
+  deleteField,          // ?°å?
+} from 'firebase/firestore';
+import { db } from '../../firebase';
+import { selectActiveAssignment } from '../../domain/assignment/selectAssignment';
+import type { QuotaExceededBehavior } from '../../domain/quiz/SessionQuotaPolicy';
+import { removeUndefined } from '../../domain/firestore/removeUndefined';
+
+export type ReviewFocus = 'strict' | 'balanced' | 'explore';
+
+export const DEFAULT_SPEECH_RATE = 1.0;
+export const DEFAULT_SPEECH_FLOOR_RATE = 0.85;
+
+export interface Assignment {
+  id: string;
+  name: string;
+  className: string | null;
+  targetLevel?: number;
+  dailyQuota: number;
+  newRatio: number;
+  reviewFocus?: ReviewFocus;
+  startDate: string;
+  endDate: string;
+  isActive: boolean;
+  createdAt: string;
+  speechRate?: number;
+  speechFloorRate?: number;
+  quotaExceededBehavior?: QuotaExceededBehavior;
+  timeLimitMs?: number;
+}
+
+export interface ActiveAssignment {
+  assignment: Assignment;
+  newWordCount: number;
+  reviewWordCount: number;
+  explorationRate: number;
+}
+
+export interface StudentOption {
+  displayId: string;
+  seatNumber: string;
+  name: string;
+}
+
+function focusToExplorationRate(focus: ReviewFocus | undefined): number {
+  switch (focus) {
+    case 'strict':   return 0.05;
+    case 'explore':  return 0.25;
+    case 'balanced':
+    default:         return 0.10;
+  }
+}
+
+export class AssignmentService {
+  async getActiveAssignment(
+    className: string,
+    displayId?: string
+  ): Promise<ActiveAssignment | null> {
+    const assignmentsRef = collection(db, 'assignments');
+    const q = query(assignmentsRef, where('isActive', '==', true));
+    const snapshot = await getDocs(q);
+
+    const all = snapshot.docs.map(d => ({
+      id: d.id,
+      ...d.data()
+    } as Assignment));
+
+    const now = new Date().toISOString();
+    const selected = selectActiveAssignment(all, className, displayId, now);
+
+    if (!selected) return null;
+
+    const target = selected.assignment;
+    const matchLabel =
+      selected.matchType === 'personal' ? '?‘¤ ?‹äºº' :
+      selected.matchType === 'class'    ? '?« ?­ç?' :
+                                          '?? ?¨æ ¡';
+
+    console.log(
+      `${matchLabel} [AssignmentService] ä½œæ¥­??{target.name}?â? targetLevel=${target.targetLevel ?? '?ªæ?å®?}`
+    );
+
+    const newWordCount = Math.floor(target.dailyQuota * target.newRatio);
+    const explorationRate = focusToExplorationRate(target.reviewFocus);
+
+    return {
+      assignment: target,
+      newWordCount,
+      reviewWordCount: target.dailyQuota - newWordCount,
+      explorationRate,
+    };
+  }
+
+  async getAllClasses(): Promise<string[]> {
+    try {
+      const snap = await getDocs(collection(db, 'classStats'));
+      return snap.docs
+        .map(d => d.id)
+        .sort((a, b) => a.localeCompare(b));
+    } catch (e) {
+      console.error('??[AssignmentService] ?–å??­ç??—è¡¨å¤±æ?:', e);
+      return [];
+    }
+  }
+
+  async getStudentsByClass(className: string): Promise<StudentOption[]> {
+    if (!className || !className.trim()) return [];
+
+    try {
+      const q = query(
+        collection(db, 'studentStates'),
+        orderBy(documentId()),
+        startAt(`${className}_`),
+        endAt(`${className}_\uf8ff`)
+      );
+      const snap = await getDocs(q);
+
+      return snap.docs
+        .map(d => {
+          const parts = d.id.split('_');
+          return {
+            displayId: d.id,
+            seatNumber: parts[1] ?? '',
+            name: parts.slice(2).join('_') || d.id,
+          };
+        })
+        .sort((a, b) => {
+          const na = parseInt(a.seatNumber, 10);
+          const nb = parseInt(b.seatNumber, 10);
+          if (isNaN(na) && isNaN(nb)) return a.seatNumber.localeCompare(b.seatNumber);
+          if (isNaN(na)) return 1;
+          if (isNaN(nb)) return -1;
+          return na - nb;
+        });
+    } catch (e) {
+      console.error(`??[AssignmentService] ?–å? ${className} å­¸ç??—è¡¨å¤±æ?:`, e);
+      return [];
+    }
+  }
+
+  async getAllAssignments(): Promise<Assignment[]> {
+    const assignmentsRef = collection(db, 'assignments');
+    const snapshot = await getDocs(assignmentsRef);
+    return snapshot.docs.map(d => ({
+      id: d.id,
+      ...d.data()
+    } as Assignment));
+  }
+
+  async getAssignment(id: string): Promise<Assignment | null> {
+    const docRef = doc(db, 'assignments', id);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() } as Assignment;
+  }
+
+  /**
+   * å»ºç?ä½œæ¥­??
+   *
+   * `undefined` æ¬„ä??ƒè¢« removeUndefined ?æ¿¾?‰ï?ä¸æ?å¯«å…¥ Firestore??
+   * ?™ç¬¦?ˆã€Œæ–°å»ºä?æ¥­æ?ï¼Œæœªå¡«ç?æ¬„ä?å°±æ˜¯ä¸å??¨ã€ç??æ???
+   */
+  async createAssignment(assignment: Omit<Assignment, 'id' | 'createdAt'>): Promise<string> {
+    const assignmentsRef = collection(db, 'assignments');
+    const docRef = await addDoc(assignmentsRef, {
+      ...removeUndefined(assignment as Record<string, unknown>),
+      createdAt: new Date().toISOString(),
+    });
+    return docRef.id;
+  }
+
+  /**
+   * ?´æ–°ä½œæ¥­??
+   *
+   * ä¿®æ­£ï¼šæ? `undefined` è½‰æ? Firestore ??`deleteField()`??
+   *
+   * ?ºä?éº¼ï?
+   *   ?å¸«å¾ã€ŒL2?æ”¹?ã€Œä??‡å??ï?è¡¨å–®?ƒé€å‡º `targetLevel: undefined`??
+   *   å¦‚æ??ªç”¨ removeUndefinedï¼Œé€™å€‹æ?ä½æ?è¢«é?æ¿¾æ?ï¼?
+   *   Firestore ??updateDoc å°±ä??ƒå?å®????Šå€?L2 æ°¸é??™è???
+   *
+   *   deleteField() ??Firestore ?„ã€Œåˆª?¤æ­¤æ¬„ä??æ?ä»¤ï?
+   *   è®“ã€Œæ”¹?ä??‡å??è??ã€Œç??„æ?ç©ºã€ã€?
+   */
+  async updateAssignment(
+    id: string,
+    assignment: Partial<Omit<Assignment, 'id' | 'createdAt'>>
+  ): Promise<void> {
+    const docRef = doc(db, 'assignments', id);
+
+    // ??undefined è½‰æ? deleteFieldï¼ˆè¡¨?”ã€Œæ?ç©ºæ­¤æ¬„ä??ï?
+    const payload: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(assignment)) {
+      if (value === undefined) {
+        payload[key] = deleteField();
+      } else {
+        payload[key] = value;
+      }
+    }
+
+    await updateDoc(docRef, payload);
+  }
+
+  async deleteAssignment(id: string): Promise<void> {
+    const docRef = doc(db, 'assignments', id);
+    await deleteDoc(docRef);
+  }
+}

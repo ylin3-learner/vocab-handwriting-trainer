@@ -15,6 +15,21 @@ import {
  * - 所有閾值集中在 THRESHOLDS 物件，方便調參
  * - 若「升級條件」與「降級條件」同時不滿足 → hold
  */
+
+// 從 private 改成 public（或 export 一個常數）
+export const RULE_BASED_THRESHOLDS = {
+  PROMOTE_MIN_CORRECT_RATE: 0.85,
+  PROMOTE_MAX_AVG_TIME_MS: 7000,
+  PROMOTE_MIN_ATTEMPTS_IN_LEVEL: 20,
+  PROMOTE_MIN_RECENT_ATTEMPTS: 15,
+  DEMOTE_MAX_CORRECT_RATE: 0.5,
+  DEMOTE_MIN_ATTEMPTS_IN_LEVEL: 15,
+  DEMOTE_MIN_RECENT_ATTEMPTS: 15,
+  LOCK_ATTEMPTS_AFTER_CHANGE: 30,
+  PROMOTE_MIN_CONSECUTIVE_CORRECT: 5,
+  DEMOTE_MIN_CONSECUTIVE_WRONG: 5,
+} as const;
+
 export class RuleBasedStrategy implements LevelProgressionStrategy {
   readonly name = 'RuleBased-v1';
 
@@ -22,25 +37,7 @@ export class RuleBasedStrategy implements LevelProgressionStrategy {
    * 所有閾值集中管理。未來若要調參，只改這裡。
    * 這些數值是根據 8 秒題目限制、國中生認知負荷推估的合理值。
    */
-  private static readonly THRESHOLDS = {
-    // === 升級條件 ===
-    PROMOTE_MIN_CORRECT_RATE: 0.85,    // 最近 20 題正確率 ≥ 85%
-    PROMOTE_MAX_AVG_TIME_MS: 5000,     // 平均反應時間 < 5 秒
-    PROMOTE_MIN_ATTEMPTS_IN_LEVEL: 30, // 當前 level 至少答過 30 題
-    PROMOTE_MIN_RECENT_ATTEMPTS: 15,   // 至少要有 15 題樣本才評估
-
-    // === 降級條件 ===
-    DEMOTE_MAX_CORRECT_RATE: 0.5,      // 最近 20 題正確率 < 50%
-    DEMOTE_MIN_ATTEMPTS_IN_LEVEL: 20,  // 當前 level 至少答過 20 題
-    DEMOTE_MIN_RECENT_ATTEMPTS: 15,    // 至少要有 15 題樣本才評估
-
-    // === 防抖動 ===
-    LOCK_ATTEMPTS_AFTER_CHANGE: 30,    // 升/降級後鎖 30 題
-
-    // === 連續表現條件（輔助訊號）===
-    PROMOTE_MIN_CONSECUTIVE_CORRECT: 5, // 連續答對 5 題（額外加分）
-    DEMOTE_MIN_CONSECUTIVE_WRONG: 5,    // 連續答錯 5 題（額外加分）
-  };
+  private static readonly THRESHOLDS = RULE_BASED_THRESHOLDS;
 
   evaluate(input: ProgressionInput): ProgressionDecision {
     const { metrics, currentLevel, minLevel, maxLevel, totalAttempts } = input;

@@ -1,7 +1,7 @@
 // src/domain/progression/progression.test.ts
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { RuleBasedStrategy } from './RuleBasedStrategy';
+import { RuleBasedStrategy, RULE_BASED_THRESHOLDS as T } from './RuleBasedStrategy';
 import { ProgressionInput, PerformanceMetrics } from '../../types/progression';
 
 // ============================================================
@@ -39,6 +39,9 @@ const strategy = new RuleBasedStrategy();
 // ============================================================
 
 describe('RuleBasedStrategy', () => {
+  // ============================================================
+  // 基本行為
+  // ============================================================
   test('樣本不足 → hold', () => {
     const input = makeInput({ metrics: makeMetrics({ recentAttempts: 5 }) });
     const result = strategy.evaluate(input);
@@ -67,7 +70,10 @@ describe('RuleBasedStrategy', () => {
 
   test('正確率高但反應慢 → hold（差一個條件）', () => {
     const input = makeInput({
-      metrics: makeMetrics({ correctRate: 0.9, avgResponseTimeMs: 7000 }),
+      metrics: makeMetrics({
+        correctRate: 0.9,
+        avgResponseTimeMs: T.PROMOTE_MAX_AVG_TIME_MS,  // 剛好等於門檻 → 不算快
+      }),
     });
     const result = strategy.evaluate(input);
     assert.strictEqual(result.action, 'hold');
@@ -89,6 +95,9 @@ describe('RuleBasedStrategy', () => {
     assert.strictEqual(result.action, 'demote');
   });
 
+  // ============================================================
+  // 等級上下界
+  // ============================================================
   test('已在最高等級 L6 → hold', () => {
     const input = makeInput({
       currentLevel: 6,
@@ -109,49 +118,6 @@ describe('RuleBasedStrategy', () => {
     assert.strictEqual(result.newLevel, 1);
   });
 
-  test('在當前 level 累計題數不足 → hold（即使表現好）', () => {
-    const input = makeInput({
-      metrics: makeMetrics({
-        correctRate: 0.95,
-        avgResponseTimeMs: 2500,
-        attemptsInCurrentLevel: 10,
-      }),
-    });
-    const result = strategy.evaluate(input);
-    assert.strictEqual(result.action, 'hold');
-  });
-
-  test('純函式：相同輸入必定相同輸出', () => {
-    const input = makeInput({
-      metrics: makeMetrics({ correctRate: 0.9, avgResponseTimeMs: 3000 }),
-    });
-    const r1 = strategy.evaluate(input);
-    const r2 = strategy.evaluate(input);
-    const r3 = strategy.evaluate(input);
-    assert.deepStrictEqual(r1, r2);
-    assert.deepStrictEqual(r2, r3);
-  });
-
-  test('邊界：正確率剛好 = 0.85 → promote', () => {
-    const input = makeInput({
-      metrics: makeMetrics({ correctRate: 0.85, avgResponseTimeMs: 4000 }),
-    });
-    const result = strategy.evaluate(input);
-    assert.strictEqual(result.action, 'promote');
-  });
-
-  test('邊界：反應時間剛好 = 5000 → hold（不算快）', () => {
-    const input = makeInput({
-      metrics: makeMetrics({ correctRate: 0.9, avgResponseTimeMs: 5000 }),
-    });
-    const result = strategy.evaluate(input);
-    assert.strictEqual(result.action, 'hold');
-  });
-});
-
-// ============================================================
-  // 🔥 下界保護：連續答錯在最低等級仍 hold
-  // ============================================================
   test('L1 + 正確率 70% + 連續答錯 5 題 → hold（不能降 L0）', () => {
     const input = makeInput({
       currentLevel: 1,
@@ -180,3 +146,92 @@ describe('RuleBasedStrategy', () => {
     assert.strictEqual(result.action, 'hold');
     assert.strictEqual(result.newLevel, 1);
   });
+
+  // ============================================================
+  // 樣本數門檻
+  // ============================================================
+  test('在當前 level 累計題數不足 → hold（即使表現好）', () => {
+    const input = makeInput({
+      metrics: makeMetrics({
+        correctRate: 0.95,
+        avgResponseTimeMs: 2500,
+        attemptsInCurrentLevel: T.PROMOTE_MIN_ATTEMPTS_IN_LEVEL - 1,
+      }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'hold');
+  });
+
+  test('邊界：attemptsInCurrentLevel = PROMOTE_MIN_ATTEMPTS_IN_LEVEL → promote', () => {
+    const input = makeInput({
+      metrics: makeMetrics({
+        correctRate: 0.9,
+        avgResponseTimeMs: 3000,
+        attemptsInCurrentLevel: T.PROMOTE_MIN_ATTEMPTS_IN_LEVEL,
+      }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'promote');
+  });
+
+  // ============================================================
+  // 邊界值（相對 THRESHOLDS）
+  // ============================================================
+  test('邊界：正確率剛好 = PROMOTE_MIN_CORRECT_RATE → promote', () => {
+    const input = makeInput({
+      metrics: makeMetrics({
+        correctRate: T.PROMOTE_MIN_CORRECT_RATE,
+        avgResponseTimeMs: 4000,
+      }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'promote');
+  });
+
+  test('邊界：反應時間剛好 = PROMOTE_MAX_AVG_TIME_MS → hold（不算快）', () => {
+    const input = makeInput({
+      metrics: makeMetrics({
+        correctRate: T.PROMOTE_MIN_CORRECT_RATE,
+        avgResponseTimeMs: T.PROMOTE_MAX_AVG_TIME_MS,
+      }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'hold');
+  });
+
+  test('邊界：反應時間 = PROMOTE_MAX_AVG_TIME_MS - 1 → promote', () => {
+    const input = makeInput({
+      metrics: makeMetrics({
+        correctRate: T.PROMOTE_MIN_CORRECT_RATE,
+        avgResponseTimeMs: T.PROMOTE_MAX_AVG_TIME_MS - 1,
+      }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'promote');
+  });
+
+  test('邊界：正確率 = DEMOTE_MAX_CORRECT_RATE → 不降級（嚴格 < 才降）', () => {
+    const input = makeInput({
+      metrics: makeMetrics({
+        correctRate: T.DEMOTE_MAX_CORRECT_RATE,
+        attemptsInCurrentLevel: 50,
+      }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'hold');
+  });
+
+  // ============================================================
+  // 純函式性質
+  // ============================================================
+  test('純函式：相同輸入必定相同輸出', () => {
+    const input = makeInput({
+      metrics: makeMetrics({ correctRate: 0.9, avgResponseTimeMs: 3000 }),
+    });
+    const r1 = strategy.evaluate(input);
+    const r2 = strategy.evaluate(input);
+    const r3 = strategy.evaluate(input);
+    assert.deepStrictEqual(r1, r2);
+    assert.deepStrictEqual(r2, r3);
+  });
+});

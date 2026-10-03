@@ -65,17 +65,27 @@ export class PerformanceTracker {
     } catch (e) {
       console.warn('⚠️ [PerformanceTracker] 無法取得單字等級，使用保守估計:', e);
     }
-    const wordLevelMap = new Map<string, string>();
+    // 加一層保護：
+    const wordLevelMap = new Map<string, number>();
     for (const w of words) {
-      wordLevelMap.set(w.id, w.level ?? '1');
+      const lv = Number(w.level ?? '1');
+      if (!isNaN(lv)) wordLevelMap.set(w.id, lv);
     }
 
     // ============================================================
-    // 步驟 3：計算 attemptsInCurrentLevel
+    // 步驟 3：計算 attemptsInCurrentLevel 
     // ============================================================
-    const attemptsInCurrentLevel = attempts.filter(
-      (a) => Number(wordLevelMap.get(a.wordId)) === currentLevel
-    ).length;
+    // 舊：只算「等於 currentLevel」
+    // 新：算「小於等於 currentLevel」（probe 的更高難度不懲罰學生）
+    /*
+    理由：對 L1 學生來說，probe 的 L2 單字是「超綱挑戰」，不應該算進「當前難度的表現」。
+    反之，如果學生從 L2 被降級到 L1，那些 L2 的作答也不該算進 L1 的分母。
+    */
+    const attemptsInCurrentLevel = attempts.filter((a) => {
+      const lv = wordLevelMap.get(a.wordId);
+      if (lv === undefined) return true;  // 查不到的保守算入
+      return lv <= currentLevel;
+    }).length;
 
     // ============================================================
     // 步驟 4：委派純函式計算指標
