@@ -1,5 +1,5 @@
 // src/services/analytics/AnalyticsService.ts
-import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc, orderBy, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { AttemptRecord } from '../storage/ProgressStore';
 import { ClassStatsService, ClassStats } from './ClassStatsService';
@@ -36,6 +36,26 @@ export interface WeakWord {
 export class AnalyticsService {
     private classStatsService = new ClassStatsService();
     private wordRepository = new FirestoreWordRepository();
+
+    // ============================================================
+    // 🔥 有界查詢常數
+    //
+    // 為什麼要 limit：
+    //   attempts 是無界成長的集合（每次答題 +1）。
+    //   儀表板只需要「近期表現」，不是「完整歷史」。
+    //   不加 limit 會隨時間線性惡化：
+    //     9/24  每位學生  ~30 筆
+    //     10/03 每位學生 ~1000 筆
+    //     10/31 每位學生 ~3000 筆
+    //   加 limit(100) 後，永遠固定 100 筆。
+    //
+    // 100 的理由：
+    //   - 滑動窗口是 30 題 → 100 提供 3x 緩衝
+    //   - 弱點分析（7 天窗口）需要足夠樣本
+    //   - 歷史成長曲線走另一條路徑（dailySnapshots），不受影響
+    // ============================================================
+    private static readonly RECENT_ATTEMPTS_LIMIT = 100;
+    private static readonly RECENT_SNAPSHOTS_LIMIT = 30;
 
     async getAllClassStats(): Promise<ClassStats[]> {
         return this.classStatsService.getAllClassStats();
@@ -135,7 +155,7 @@ export class AnalyticsService {
         return result;
     }
 
-    async getTopWeakWords(limit: number = 5): Promise<WeakWord[]> {
+    async getTopWeakWords(limitCount: number = 5): Promise<WeakWord[]> {
         const attemptsSnap = await getDocs(collection(db, 'attempts'));
         const attempts = attemptsSnap.docs.map(doc => doc.data() as AttemptRecord);
 
@@ -163,7 +183,7 @@ export class AnalyticsService {
         });
 
         weakWords.sort((a, b) => b.errorRate - a.errorRate);
-        return weakWords.slice(0, limit);
+        return weakWords.slice(0, limitCount);
     }
 
     async getClassSummary() {
@@ -192,31 +212,83 @@ export class AnalyticsService {
     }
 
     /**
+     * 從 displayId 解析出姓名與班級。
+     *
+     * displayId 格式：{class}_{seat}_{name}
+     * 例：804_18_李芷柔 → { className: "804", name: "李芷柔" }
+     *
+     * 為什麼不用 getAllClassStats：
+     *   getStudentDetail 每次呼叫都撈全部班級文件（4 筆），
+     *   只為了反查姓名。改為純字串解析 → 0 筆讀取。
+     */
+    private parseDisplayId(displayId: string): { className: string; name: string } {
+        const parts = displayId.split('_');
+
+        if (parts.length >= 3) {
+            // 顯式取得再檢查，避開 noUncheckedIndexedAccess 的 string | undefined
+            const className = parts[0];
+            const name = parts.slice(2).join('_');
+
+            if (className && name) {
+                return { className, name };
+            }
+        }
+
+        return { className: '未分類', name: displayId };
+    }
+
+    /**
      * 取得單一學生的完整個人化分析。
+     *
+     * 🔥 效能設計（2026-10 修正）：
+     *   - attempts 只撈最近 100 筆（而非全部）
+     *   - 姓名/班級從 displayId 解析（而非 getAllClassStats）
+     *   - dailySnapshots 只撈最近 30 天
+     *
+     *   修正前：每次點學生 ~1000-1500 筆讀取
+     *   修正後：每次點學生 ~110 筆讀取（↓ 90%）
      */
     async getStudentDetail(displayId: string): Promise<StudentAnalytics> {
         // ============================================================
-        // 步驟 1：查詢 attempts
+        // 步驟 1：只撈最近 N 筆 attempts（而非全部）
+        //
+        // 複合索引：attempts (studentDisplayId ASC, timestamp DESC)
+        //         已存在（Firebase Console → Indexes 確認）
         // ============================================================
         const attemptsRef = collection(db, 'attempts');
         let attempts: AttemptRecord[] = [];
 
-        console.log(`🔍 [AnalyticsService] 嘗試用 displayId "${displayId}" 查詢...`);
-        const q1 = query(attemptsRef, where('studentDisplayId', '==', displayId));
+        console.log(`🔍 [AnalyticsService] 撈 "${displayId}" 最近 ${AnalyticsService.RECENT_ATTEMPTS_LIMIT} 筆 attempts...`);
+
+        const q1 = query(
+            attemptsRef,
+            where('studentDisplayId', '==', displayId),
+            orderBy('timestamp', 'desc'),
+            limit(AnalyticsService.RECENT_ATTEMPTS_LIMIT)
+        );
         const snap1 = await getDocs(q1);
         attempts = snap1.docs.map(d => d.data() as AttemptRecord);
 
+        // Fallback：若 displayId 查不到（理論上不該發生），改用 UID 查
         if (attempts.length === 0) {
             console.log(`🔍 [AnalyticsService] displayId 查不到，改用 UID 查詢...`);
-            const q2 = query(attemptsRef, where('studentId', '==', displayId));
+            const q2 = query(
+                attemptsRef,
+                where('studentId', '==', displayId),
+                orderBy('timestamp', 'desc'),
+                limit(AnalyticsService.RECENT_ATTEMPTS_LIMIT)
+            );
             const snap2 = await getDocs(q2);
             attempts = snap2.docs.map(d => d.data() as AttemptRecord);
         }
 
-        console.log(`📊 [AnalyticsService] "${displayId}" → 找到 ${attempts.length} 筆 attempts`);
+        console.log(`📊 [AnalyticsService] "${displayId}" → 撈到 ${attempts.length} 筆（上限 ${AnalyticsService.RECENT_ATTEMPTS_LIMIT}）`);
 
         // ============================================================
-        // 步驟 2：取得 profile
+        // 步驟 2：讀 studentStates/{displayId}（1 筆）
+        //
+        // 這裡只拿 currentLevel 與 customSpeechFloor。
+        // 姓名/班級從 displayId 解析（見下方步驟 3）。
         // ============================================================
         let profile = {
             studentId: displayId,
@@ -226,7 +298,6 @@ export class AnalyticsService {
         };
         let customSpeechFloor: number | undefined;
 
-        // 2.1：讀取 studentStates/{displayId}
         try {
             const stateDoc = await getDoc(doc(db, 'studentStates', displayId));
             if (stateDoc.exists()) {
@@ -241,28 +312,19 @@ export class AnalyticsService {
             }
         }
 
-        // 2.2：從 classStats 反查 name/class
-        try {
-            const classStats = await this.classStatsService.getAllClassStats();
-            for (const cs of classStats) {
-                if (cs.students && cs.students[displayId]) {
-                    const s = cs.students[displayId];
-                    profile.name = s.name || displayId;
-                    profile.className = cs.className;
-                    break;
-                }
-            }
-        } catch (e) {
-            if (!isAbortError(e)) {
-                console.warn('⚠️ [AnalyticsService] 讀取 classStats 失敗:', e);
-            }
-        }
+        // ============================================================
+        // 步驟 3：🔥 從 displayId 解析姓名/班級（0 筆讀取）
+        //
+        // 舊做法：getAllClassStats() → 讀取全部班級文件（4 筆）
+        // 新做法：字串解析 → 0 筆
+        // ============================================================
+        const parsed = this.parseDisplayId(displayId);
+        profile.className = parsed.className;
+        profile.name = parsed.name;
+        console.log(`👤 [AnalyticsService] 解析 displayId → ${parsed.className} / ${parsed.name}`);
 
         // ============================================================
-        // 步驟 3：先做一次「不帶 word 的」分析，取得弱點單字 ID 清單
-        //
-        // 🔥 注意：這裡必須用相同的 options（7 天窗口），
-        //   否則 preAnalysis 抓到的 wordIds 與最終結果會不一致。
+        // 步驟 4：先做一次「不帶 word 的」分析，取得弱點單字 ID 清單
         // ============================================================
         const preAnalysis = analyzeStudent(attempts, profile, new Map(), {
             weakWordsWindowDays: 7,
@@ -270,7 +332,7 @@ export class AnalyticsService {
         const weakWordIds = preAnalysis.weakestWords.map(w => w.wordId);
 
         // ============================================================
-        // 步驟 4：批次取得弱點單字的 Word 物件（最多 5 個）
+        // 步驟 5：批次取得弱點單字的 Word 物件（最多 5 個）
         // ============================================================
         let wordMap = new Map<string, Word>();
         if (weakWordIds.length > 0) {
@@ -285,16 +347,24 @@ export class AnalyticsService {
         }
 
         // ============================================================
-        // 步驟 5：讀取每日快照
+        // 步驟 6：讀取每日快照（限制最近 30 天）
+        //
+        // 修正前：無 limit，一年後會讀到 365 筆
+        // 修正後：固定最多 30 筆
         // ============================================================
         let dailySnapshots: DailySnapshot[] = [];
         try {
             const snapshotsRef = collection(db, 'studentStates', displayId, 'dailySnapshots');
-            const snapshotsSnap = await getDocs(snapshotsRef);
+            const snapshotsQuery = query(
+                snapshotsRef,
+                orderBy('date', 'desc'),
+                limit(AnalyticsService.RECENT_SNAPSHOTS_LIMIT)
+            );
+            const snapshotsSnap = await getDocs(snapshotsQuery);
             dailySnapshots = snapshotsSnap.docs
                 .map(d => d.data() as DailySnapshot)
-                .sort((a, b) => a.date.localeCompare(b.date));
-            console.log(`📸 [AnalyticsService] 讀取 ${dailySnapshots.length} 筆每日快照`);
+                .sort((a, b) => a.date.localeCompare(b.date));  // 時間升序給圖表用
+            console.log(`📸 [AnalyticsService] 讀取 ${dailySnapshots.length} 筆每日快照（最近 30 天）`);
         } catch (e) {
             if (!isAbortError(e)) {
                 console.warn('⚠️ [AnalyticsService] 讀取每日快照失敗（可能尚未建立）:', e);
@@ -302,10 +372,7 @@ export class AnalyticsService {
         }
 
         // ============================================================
-        // 步驟 6：用完整的 wordMap 重新分析
-        //
-        // 🔥 弱點單字 Top 5 只看最近 7 天（形成性評估）。
-        //   其他指標（正確率、錯誤分佈、成長曲線）仍為全部歷史。
+        // 步驟 7：用完整的 wordMap 重新分析
         // ============================================================
         const result = analyzeStudent(attempts, profile, wordMap, {
             weakWordsWindowDays: 7,

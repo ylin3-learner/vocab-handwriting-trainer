@@ -41,6 +41,13 @@ export const TeacherDashboard: React.FC = () => {
 
   const archivedCount = students.filter(s => archivedIds.has(s.id)).length;
 
+  // 🔥 從 students 陣列找出當前選中的學生，拿它的累積統計
+  //    這些數據來自 classStats（累積），而非 AnalyticsService 的「最近 100 筆」
+  const selectedStudentStat = useMemo(() => {
+    if (!selectedStudentId) return undefined;
+    return students.find(s => s.id === selectedStudentId);
+  }, [students, selectedStudentId]);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -61,11 +68,6 @@ export const TeacherDashboard: React.FC = () => {
         let totalCorrect = 0;
 
         for (const cs of classStats) {
-          // 🔥 臨時診斷
-          // console.log('🔍 [診斷] classStats 文件:', JSON.stringify(cs, null, 2));
-          // console.log('🔍 [診斷] cs.students 型別:', typeof cs.students);
-          // console.log('🔍 [診斷] cs.students 內容:', cs.students);
-
           totalAttempts += cs.totalAttempts || 0;
           totalCorrect += cs.totalCorrect || 0;
 
@@ -355,6 +357,8 @@ export const TeacherDashboard: React.FC = () => {
           {selectedStudentId && detail && !detailLoading && !detailError && (
             <StudentDetailPanel
               analytics={detail}
+              cumulativeTotalAttempts={selectedStudentStat?.totalAttempts}
+              cumulativeCorrectCount={selectedStudentStat?.correctCount}
               isArchived={archivedIds.has(selectedStudentId)}
               onArchiveToggle={handleArchiveToggle}
               lastFetchedAt={lastFetchedAt}

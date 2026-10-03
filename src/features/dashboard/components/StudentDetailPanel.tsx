@@ -13,6 +13,21 @@ import { StudentStateService } from '../../../services/progression/StudentStateS
 
 interface Props {
   analytics: StudentAnalytics;
+
+  // ============================================================
+  // 🔥 累積統計（來自 classStats）
+  //
+  // 為什麼獨立傳入：
+  //   analytics.totalAttempts / correctCount 是「最近 100 筆」的窗口統計
+  //   （AnalyticsService 為了效能只撈最近 100 筆）。
+  //   對老師來說，「累積練習量」比「窗口內題數」更有意義——可以用來鼓勵學生。
+  //
+  //   若未提供（例如 fallback 情境），則顯示 analytics 的窗口值，
+  //   並加上「（最近）」標籤提示語意不同。
+  // ============================================================
+  cumulativeTotalAttempts?: number;
+  cumulativeCorrectCount?: number;
+
   isArchived?: boolean;
   onArchiveToggle?: (
     displayId: string,
@@ -82,6 +97,8 @@ function formatLastUpdated(ts: number | null): string {
 
 export const StudentDetailPanel: React.FC<Props> = ({
   analytics,
+  cumulativeTotalAttempts,
+  cumulativeCorrectCount,
   isArchived = false,
   onArchiveToggle,
   lastFetchedAt = null,
@@ -114,6 +131,19 @@ export const StudentDetailPanel: React.FC<Props> = ({
       setIsUpdatingSpeech(false);
     }
   };
+
+  // ============================================================
+  // 🔥 顯示用的統計值
+  //
+  // 累積值（若有提供）→ 顯示「總共答了 X 題」
+  // 窗口值（fallback）→ 顯示「最近 X 題」
+  //
+  // 圖表與分析（錯誤分佈、反應時間分佈、弱點單字）仍用 analytics，
+  // 因為那些指標本來就該反映「近期行為」，不是「歷史累積」。
+  // ============================================================
+  const hasCumulative = cumulativeTotalAttempts !== undefined;
+  const displayTotalAttempts = cumulativeTotalAttempts ?? analytics.totalAttempts;
+  const displayCorrectCount = cumulativeCorrectCount ?? analytics.correctCount;
 
   const radarMetrics = useMemo(() => calculateRadarMetrics(analytics), [analytics]);
   const styleInfo = LEARNING_STYLE_LABELS[analytics.learningStyle];
@@ -161,7 +191,10 @@ export const StudentDetailPanel: React.FC<Props> = ({
     }
   };
 
-  if (analytics.totalAttempts === 0) {
+  // 🔥 用累積值判斷「尚無練習紀錄」，而非窗口值
+  //    理由：若學生今天答了 0 題，但歷史上有 500 題，
+  //         不該顯示「尚無練習紀錄」。
+  if (displayTotalAttempts === 0) {
     return (
       <div style={{ background: '#f8f9fa', padding: '3rem', borderRadius: '8px', textAlign: 'center' }}>
         <h2 style={{ color: '#6c757d' }}>📭 尚無練習紀錄</h2>
@@ -341,10 +374,34 @@ export const StudentDetailPanel: React.FC<Props> = ({
                 L{analytics.currentLevel}
               </span>
             </h2>
+
+            {/* ============================================================
+                🔥 累積統計（若有提供，優先用；否則顯示窗口值）
+                ============================================================ */}
             <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#6c757d' }}>
-              共 {analytics.totalAttempts} 題，答對 {analytics.correctCount} 題，
+              共 {displayTotalAttempts} 題，答對 {displayCorrectCount} 題，
               平均 {(analytics.avgResponseTimeMs / 1000).toFixed(1)} 秒
+              {hasCumulative ? (
+                <span style={{
+                  marginLeft: '0.4rem',
+                  fontSize: '0.72rem',
+                  color: '#adb5bd',
+                  fontStyle: 'italic',
+                }}>
+                  （累積）
+                </span>
+              ) : (
+                <span style={{
+                  marginLeft: '0.4rem',
+                  fontSize: '0.72rem',
+                  color: '#adb5bd',
+                  fontStyle: 'italic',
+                }}>
+                  （最近 100 筆）
+                </span>
+              )}
             </p>
+
             <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '0.8rem', color: '#6c757d' }}>
                 📅 近 7 天活躍 {analytics.activeDaysLast7} 天
