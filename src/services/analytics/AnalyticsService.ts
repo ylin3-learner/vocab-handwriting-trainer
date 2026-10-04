@@ -247,6 +247,7 @@ export class AnalyticsService {
             currentLevel: 1,
         };
         let customSpeechFloor: number | undefined;
+        let studentTimeZone: string | undefined;  // 新增
 
         const stateRef = doc(db, 'studentStates', displayId);
         let stateData: any = null;
@@ -277,6 +278,7 @@ export class AnalyticsService {
         if (stateData) {
             profile.currentLevel = stateData.currentLevel ?? 1;
             customSpeechFloor = stateData.customSpeechFloor;
+            studentTimeZone = stateData.timeZone;  // 新增
             console.log(`✅ [AnalyticsService] 當前等級 L${profile.currentLevel}`);
         }
 
@@ -356,6 +358,7 @@ export class AnalyticsService {
         });
         result.dailySnapshots = dailySnapshots;
         result.customSpeechFloor = customSpeechFloor;
+        result.timeZone = studentTimeZone;  // 新增
 
         console.log(`✅ [AnalyticsService] "${displayId}" 完成（attempts 來源：${attemptsSource}）`);
 

@@ -34,6 +34,18 @@ export interface StudentLearningState {
    * 老師可在「學生詳情」面板為個別學生設定（例如特殊生需要更慢）。
    */
   customSpeechFloor?: number;
+
+  // 新增：學生的時區（IANA 名稱，例如 'Asia/Taipei'）
+  //
+  // 為什麼需要：
+  //   dailySnapshots 的「每日」邊界應該由使用者的本地時間決定，
+  //   而非 UTC。學生在台北凌晨 00:30 答題，應該算「今天」而非「昨天」。
+  //
+  // 為什麼存在 studentStates/{displayId} 而非 students/{uid}：
+  //   displayId 是跨 session 穩定的識別碼，換裝置或重新登入不會遺失。
+  //   （實際上一位學生通常只用一台裝置，時區不會變動，但這樣的設計
+  //     在推廣到多校、多國時仍然正確。）
+  timeZone?: string;
 }
 
 export interface LevelHistoryEntry {

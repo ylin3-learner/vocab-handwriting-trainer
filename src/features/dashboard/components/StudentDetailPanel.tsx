@@ -10,6 +10,7 @@ import { StudentGrowthChart } from './StudentGrowthChart';
 import { generateStudentReportPdf } from '../../../services/export/studentReportPdf';
 import { useAuth } from '../../../contexts/AuthContext';
 import { StudentStateService } from '../../../services/progression/StudentStateService';
+import { formatLocalDate, getLocalDateString, DEFAULT_TIME_ZONE } from '../../../domain/date/timezone';
 
 interface Props {
   analytics: StudentAnalytics;
@@ -55,8 +56,11 @@ function getEngagementStatus(analytics: StudentAnalytics): {
   color: string;
   bgColor: string;
 } {
-  const today = new Date().toISOString().slice(0, 10);
-  const lastDate = analytics.lastAttemptAt?.slice(0, 10);
+  const tz = analytics.timeZone ?? DEFAULT_TIME_ZONE;
+  const today = getLocalDateString(new Date(), tz);
+  const lastDate = analytics.lastAttemptAt
+    ? getLocalDateString(new Date(analytics.lastAttemptAt), tz)
+    : undefined;
 
   if (lastDate === today) {
     return { label: '✅ 今天有練', color: '#155724', bgColor: '#d4edda' };
@@ -460,7 +464,7 @@ export const StudentDetailPanel: React.FC<Props> = ({
               <span style={{ fontSize: '0.8rem', color: '#6c757d' }}>
                 📅 近 7 天活躍 {analytics.activeDaysLast7} 天
                 {analytics.lastAttemptAt && (
-                  <> ・ 最後練習：{new Date(analytics.lastAttemptAt).toLocaleDateString('zh-TW')}</>
+                  <> ・ 最後練習：{formatLocalDate(analytics.lastAttemptAt, analytics.timeZone ?? DEFAULT_TIME_ZONE)}</>
                 )}
               </span>
               <span style={{

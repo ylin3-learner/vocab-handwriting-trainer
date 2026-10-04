@@ -13,6 +13,7 @@ import { QuizSessionApi } from '../quiz/QuizSessionApi';
 import type { Word } from '../../types/word';
 import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
 import { buildDisplayId } from '../../domain/string/displayId';
+import { detectTimeZone } from '../../domain/date/timezone';
 
 const FALLBACK_WORDS: Word[] = [
   { id: 'apple', word: 'apple', meaning: '蘋果', sentence: 'I eat an apple every day.' },
@@ -119,6 +120,22 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({ onStart }) => {
       console.log(
         `📋 [StudentLogin] 鑑定狀態：needsPlacement=${placementStatus.needsPlacement}, currentLevel=L${placementStatus.currentLevel}`
       );
+
+      // 偵測並儲存學生的時區
+      //    為什麼在登入時做：
+      //      - 這是唯一保證會執行的地方
+      //      - 若學生換裝置或旅行，下次登入會自動更新
+      //    為什麼不是「檢查是否已存在才寫」：
+      //      - 寫入成本低（1 次寫入/登入）
+      //      - 換裝置時必須更新，否則還是用舊時區
+      const timeZone = detectTimeZone();
+      console.log(`🌐 [StudentLogin] 偵測到時區：${timeZone}`);
+      try {
+        await stateService.updateTimeZone(displayId, timeZone);
+      } catch (e) {
+        console.warn('⚠️ 時區儲存失敗，將使用系統預設時區', e);
+      }
+
 
       let orchestrator: QuizSessionApi;
 

@@ -42,6 +42,7 @@ export class StudentStateService {
       placementDone: state.placementDone === true,
       placementHistory: state.placementHistory,
       customSpeechFloor: state.customSpeechFloor,
+      timeZone: state.timeZone,  // 新增
     };
   }
 
@@ -129,5 +130,16 @@ export class StudentStateService {
       await updateDoc(ref, { customSpeechFloor: value });
       console.log(`🔊 [StudentStateService] ${displayId} 個人語速下限 → ${value}`);
     }
+  }
+
+  /**
+ * 更新學生的時區。
+ *
+ * 由 StudentLogin 在每次登入時呼叫。若值沒變，仍然寫入（成本低，
+ * 且能處理「學生換裝置」的情境）。
+ */
+  async updateTimeZone(displayId: string, timeZone: string): Promise<void> {
+    const ref = this.getDocRef(displayId);
+    await setDoc(ref, { timeZone }, { merge: true });
   }
 }

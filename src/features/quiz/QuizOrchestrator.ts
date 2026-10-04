@@ -32,6 +32,8 @@ import { QuizTimingPolicy } from '../../domain/quiz/QuizTimingPolicy';
 
 import { buildDisplayId } from '../../domain/string/displayId';
 
+import { getLocalDateString } from '../../domain/date/timezone';
+
 export interface QuizQuestion {
   word: Word;
   timeLimitMs: number;
@@ -99,6 +101,8 @@ export class QuizOrchestrator implements QuizSessionApi {
 
   private timingPolicy = new QuizTimingPolicy();
   private resolvedTimeLimitMs: number = QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS;
+
+  private studentTimeZone: string = 'Asia/Taipei';
 
   constructor(studentId: string, className: string, deps: QuizOrchestratorDeps) {
     this.studentId = studentId;
@@ -211,6 +215,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       const learningState = await this.studentStateService.getState(displayId);
       this.currentLevel = learningState.currentLevel;
       this.customSpeechFloor = learningState.customSpeechFloor;
+      this.studentTimeZone = learningState.timeZone ?? 'Asia/Taipei'; // 新增
       console.log(`   ✅ 當前等級：L${this.currentLevel}`);
       if (this.customSpeechFloor !== undefined) {
         console.log(`   🔊 個人語速下限：${this.customSpeechFloor}`);
@@ -221,7 +226,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     }
 
     // 步驟 0.5：從 localStorage 載入今日累計統計
-    const today = this.getNow().toISOString().slice(0, 10);
+    const today = getLocalDateString(this.getNow(), this.studentTimeZone);
     const todayStats = this.dailyStatsTracker.load(displayId, today);
     this.dailyAnsweredCount = todayStats.answeredCount;
     this.dailyCorrectCount = todayStats.correctCount;
@@ -529,7 +534,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     });
 
     // 🔥 透過 tracker 累計今日統計（跨 session 持久化）
-    const today = now.toISOString().slice(0, 10);
+    const today = getLocalDateString(now, this.studentTimeZone);
     const todayStats = this.dailyStatsTracker.increment(
       displayId,
       today,

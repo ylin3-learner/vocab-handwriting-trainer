@@ -67,4 +67,7 @@ export interface StudentAnalytics {
 
   // 個人語速下限（若未設定則 undefined）
   customSpeechFloor?: number;
+
+  // 新增：學生的時區（用於顯示本地日期）
+  timeZone?: string;
 }
