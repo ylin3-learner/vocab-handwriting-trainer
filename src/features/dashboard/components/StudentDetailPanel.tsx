@@ -80,19 +80,38 @@ function getLevelBadgeColor(level: number): string {
   return '#6c757d';
 }
 
-/**
- * 把 timestamp 轉成「x 分鐘前」的友善顯示。
- */
-function formatLastUpdated(ts: number | null): string {
-  if (!ts) return '尚未載入';
+// ============================================================
+// 🔥 資料新鮮度判斷
+//
+// 學習進度的變化速度是「小時～天」級，不是「秒」級。
+// 因此 30 分鐘的門檻是合理的：超過就提示老師資料可能已過期。
+//
+// 為什麼選 30 分鐘：
+//   - 覆蓋「一節課」的時間長度（老師通常在一節課內對照多位學生）
+//   - 超過 30 分鐘的資料，可能已經有學生完成新一輪練習
+// ============================================================
+const STALE_THRESHOLD_MS = 30 * 60 * 1000;
+
+interface LastUpdatedInfo {
+  text: string;
+  isStale: boolean;
+}
+
+function getLastUpdatedInfo(ts: number | null): LastUpdatedInfo {
+  if (!ts) return { text: '尚未載入', isStale: false };
+
   const diffMs = Date.now() - ts;
+  const isStale = diffMs >= STALE_THRESHOLD_MS;
   const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return '剛剛';
-  if (diffMin < 60) return `${diffMin} 分鐘前`;
+
+  if (diffMin < 1) return { text: '剛剛', isStale };
+  if (diffMin < 60) return { text: `${diffMin} 分鐘前`, isStale };
+
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr} 小時前`;
+  if (diffHr < 24) return { text: `${diffHr} 小時前`, isStale };
+
   const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay} 天前`;
+  return { text: `${diffDay} 天前`, isStale };
 }
 
 export const StudentDetailPanel: React.FC<Props> = ({
@@ -112,6 +131,24 @@ export const StudentDetailPanel: React.FC<Props> = ({
   // 🔥 語速下限
   const [speechFloor, setSpeechFloor] = useState<number | undefined>(analytics.customSpeechFloor);
   const [isUpdatingSpeech, setIsUpdatingSpeech] = useState(false);
+
+  // 🔥 資料新鮮度（每 60 秒重新計算，讓 isStale 能自動從 false 變 true）
+  const [lastUpdatedInfo, setLastUpdatedInfo] = useState<LastUpdatedInfo>(
+    () => getLastUpdatedInfo(lastFetchedAt)
+  );
+
+  useEffect(() => {
+    setLastUpdatedInfo(getLastUpdatedInfo(lastFetchedAt));
+
+    // 沒有 lastFetchedAt 就不需要定時器
+    if (!lastFetchedAt) return;
+
+    const timer = setInterval(() => {
+      setLastUpdatedInfo(getLastUpdatedInfo(lastFetchedAt));
+    }, 60_000);
+
+    return () => clearInterval(timer);
+  }, [lastFetchedAt]);
 
   // 當切換學生時同步
   useEffect(() => {
@@ -215,20 +252,37 @@ export const StudentDetailPanel: React.FC<Props> = ({
         flexWrap: 'wrap',
       }}>
         {/* 🔥 左側：最後更新 + 重新整理 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#6c757d' }}>
-          <span>🕐 最後更新：{formatLastUpdated(lastFetchedAt)}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+          <span
+            style={{
+              color: lastUpdatedInfo.isStale ? '#856404' : '#6c757d',
+              fontWeight: lastUpdatedInfo.isStale ? 'bold' : 'normal',
+            }}
+          >
+            🕐 最後更新：{lastUpdatedInfo.text}
+            {lastUpdatedInfo.isStale && (
+              <span style={{
+                marginLeft: '0.4rem',
+                fontSize: '0.8rem',
+                fontWeight: 'normal',
+              }}>
+                ⚠️ 資料可能已過期，點「🔄」更新
+              </span>
+            )}
+          </span>
           {onRefetch && (
             <button
               onClick={onRefetch}
               title="重新從雲端讀取此學生的最新資料"
               style={{
                 padding: '0.25rem 0.75rem',
-                background: '#f8f9fa',
-                color: '#495057',
-                border: '1px solid #dee2e6',
+                background: lastUpdatedInfo.isStale ? '#fff3cd' : '#f8f9fa',
+                color: lastUpdatedInfo.isStale ? '#856404' : '#495057',
+                border: lastUpdatedInfo.isStale ? '1px solid #ffc107' : '1px solid #dee2e6',
                 borderRadius: '4px',
                 cursor: 'pointer',
                 fontSize: '0.85rem',
+                fontWeight: lastUpdatedInfo.isStale ? 'bold' : 'normal',
               }}
             >
               🔄 重新整理
