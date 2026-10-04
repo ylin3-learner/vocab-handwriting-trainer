@@ -356,6 +356,57 @@ vocab-handwriting-trainer/
   (example-sentence masking), and the `everWrong` lifecycle logic in `AnswerProcessor.ts`.
   Each has its own unit test file, so any future change is caught immediately by `npm test`.
 
+- **Timezone handling follows a single source of truth: IANA names stored
+  on the student record, resolved at read time.** The daily snapshot's
+  `date` field was originally computed with
+  `new Date().toISOString().slice(0, 10)`, which yields the **UTC** date.
+  The dashboard displayed the "last practiced" timestamp with
+  `toLocaleDateString()`, which uses the **browser's local** timezone.
+  These two paths disagreed for any attempt made between UTC 16:00 and
+  24:00 — which is Taipei 00:00–08:00, precisely the window when students
+  finishing cram school or studying before bed are most likely to practice.
+
+  The symptom surfaced during the pilot: a student's snapshot was
+  attributed to `2026-10-03` while the dashboard reported their last
+  practice as `2026/10/4`. The growth chart's trend line was correct, but
+  the date labels were off by one day for late-night sessions.
+
+  The fix establishes a single chain from detection to display:
+
+    1. **Detection** — `detectTimeZone()` reads
+       `Intl.DateTimeFormat().resolvedOptions().timeZone` on every student
+       login and stores the IANA name (e.g. `Asia/Taipei`) on
+       `studentStates/{displayId}`. Writing on every login rather than
+       only the first time is deliberate: it handles the case where a
+       student switches devices or travels.
+    2. **Storage** — all timestamps remain in UTC (Firestore's native
+       behavior). Nothing about the storage layer changes.
+    3. **Derivation** — `getLocalDateString(date, timeZone)` uses
+       `Intl.DateTimeFormat` to derive the local `YYYY-MM-DD` when needed
+       (daily snapshots, engagement status, "last practiced").
+    4. **Display** — `formatLocalDate(iso, timeZone)` renders dates in the
+       student's timezone, not the viewer's.
+
+  Why `Intl.DateTimeFormat` and not a manual `+8 hours` offset: a fixed
+  offset cannot handle daylight saving time. A student in New York has
+  UTC-4 in summer and UTC-5 in winter; a hardcoded offset would produce
+  wrong dates twice a year. `Intl` delegates this to the browser, which
+  already knows the rules.
+
+  Existing snapshots are **not migrated**. The old `date` field cannot be
+  repaired by re-reading `capturedAt`, because `capturedAt` is written
+  only when a snapshot document is first created — subsequent attempts
+  update the same document without touching that field. The information
+  needed to redistribute attempts across day boundaries is simply not in
+  the data. The pilot's remaining two weeks will use the corrected
+  derivation; historical snapshots keep their original labels.
+
+  This is not a "nice to have" fix. Daily activity counts, active-day
+  streaks, and the growth chart's date axis are all derived from this
+  value. Getting it wrong silently degrades the teacher's ability to
+  reason about student behavior, which is the whole point of the
+  dashboard.
+
 - **Firestore never sees `undefined`.** Firestore's `addDoc`/`setDoc`/`writeBatch.set`
   reject any field whose value is `undefined`, but TypeScript's optional fields
   (`field?: T`) make `undefined` very easy to produce. The `removeUndefined` helper

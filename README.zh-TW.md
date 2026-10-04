@@ -317,6 +317,48 @@ vocab-handwriting-trainer/
   （例句遮罩），以及 `AnswerProcessor` 中的 `everWrong` 生命週期邏輯。每個都有自己
   的單元測試檔，未來任何改動都會立刻被 `npm test` 抓到。
 
+- **時區處理遵循單一真實來源：IANA 時區名稱存在學生紀錄上，讀取時才
+  解析。** 每日快照的 `date` 欄位原本用
+  `new Date().toISOString().slice(0, 10)` 計算，得到的是 **UTC** 日期。
+  儀表板則用 `toLocaleDateString()` 顯示「最後練習」，採用的是**瀏覽器
+  本地**時區。這兩條路徑在 UTC 16:00–24:00 之間會產生衝突——換算成台
+  北時間就是 00:00–08:00，正好是補習結束回家、睡前練習的學生最容易
+  答題的時段。
+
+  症狀在試點期間浮現：某位學生的快照被歸到 `2026-10-03`，但儀表板
+  顯示她的最後練習是 `2026/10/4`。成長曲線的趨勢線是對的，但日期標
+  籤在跨夜練習時會差一天。
+
+  修正方式建立了一條從偵測到顯示的完整鏈路：
+
+    1. **偵測**——每次學生登入時，`detectTimeZone()` 讀取
+       `Intl.DateTimeFormat().resolvedOptions().timeZone`，把 IANA 名
+       稱（例如 `Asia/Taipei`）寫進 `studentStates/{displayId}`。選擇
+       「每次登入都寫」而非「只在首次寫」是刻意的：這樣可以處理學生
+       換裝置或旅行的情境。
+    2. **儲存**——所有時間戳維持 UTC（Firestore 的原生行為）。儲存層
+       完全不變。
+    3. **推導**——需要「本地日期」時，用
+       `getLocalDateString(date, timeZone)` 透過 `Intl.DateTimeFormat`
+       算出該時區的 `YYYY-MM-DD`（用於每日快照、活躍狀態、「最後練
+       習」）。
+    4. **顯示**——`formatLocalDate(iso, timeZone)` 以學生所屬時區呈
+       現日期，而非觀看者的時區。
+
+  為什麼用 `Intl.DateTimeFormat` 而非手動 `+8 小時`：固定偏移無法處理
+  夏令時。紐約的學生夏天是 UTC-4、冬天是 UTC-5，寫死的偏移會一年錯
+  兩次。`Intl` 把這件事交給瀏覽器處理——它本來就知道規則。
+
+  既有快照**不進行遷移**。舊的 `date` 欄位無法透過重新讀取
+  `capturedAt` 來修復，因為 `capturedAt` 只在快照文件首次建立時寫
+  入——後續答題會更新同一份文件，但不碰這個欄位。重新分配每日答題數
+  所需的資訊，根本不在資料裡。試點剩下的兩週會使用修正後的推導邏輯；
+  歷史快照保留原本的標籤。
+
+  這不是「有也好、沒有也好」的修正。每日活躍數、連續練習天數、成長
+  曲線的日期軸，全都從這個值推導而來。弄錯它會默默降低老師判斷學生
+  行為的能力——而這正是儀表板存在的意義。
+
 - **Firestore 永遠不會看到 `undefined`。** Firestore 的 `addDoc` / `setDoc` /
   `writeBatch.set` 都會拒絕值為 `undefined` 的欄位，但 TypeScript 的 optional 欄位
   （`field?: T`）很容易產生 `undefined`。`removeUndefined` 輔助函式
