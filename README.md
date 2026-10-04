@@ -462,6 +462,43 @@ example-sentence masking (to prevent answer copying), a configurable time limit 
 default was too tight for beginners), and after-quota "continue practicing" (students wanted
 to keep going but the previous design forced a re-login).
 
+## 🔬 Research Positioning
+
+The current system's approach to adaptive vocabulary recommendation sits at a
+specific point in the research literature, and it is worth being explicit about
+where.
+
+A 2026 paper (Zhang, *Discover Artificial Intelligence*) proposes a GCN-based
+adaptive vocabulary recommendation framework. Its central critique is of earlier
+systems that rely on **static expert-annotated knowledge graphs** (semantic,
+morphological, prerequisite relations) — these, the paper argues, cannot reflect
+learners' actual behavior, so recommendations drift away from what students
+really need.
+
+**The system described in this README is precisely one of those earlier
+systems — deliberately.** The morphological relations (word roots) are expert
+prior knowledge; the selection weights are hand-tuned rules; the vocabulary
+graph does not adapt per student. This is not an oversight; it is a bounded
+engineering decision driven by:
+
+- **7-student pilot scale** — the paper's GCN was trained on 487 students,
+  1,856 words, and 68,342 interactions over 16 weeks. At our scale, a GCN
+  would overfit and produce noise, not signal.
+- **Firebase Spark tier** — any dynamic re-computation per query would blow
+  the daily quota.
+- **Two-week pilot window** — no time to collect the longitudinal data the
+  model needs.
+
+What the paper calls a limitation, we treat as a **starting point**. The static
+root graph is designed to be the initial structure that a future learned model
+could be seeded from, once the student population grows enough to produce
+training data.
+
+The engineering path here is: **rules now, learning later** — not because
+learning is worse, but because the data isn't there yet. This is the same
+reasoning that leads every production ML system to start with a heuristic
+baseline before training a model on the residuals.
+
 ## ⚠️ Known Limitations
 
 ### Firestore security rules — deferred to post-pilot
