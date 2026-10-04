@@ -58,7 +58,7 @@ project centers on:
 | **Teacher dashboard** | Student overview, at-risk detection, Top-K weakness analysis, response-time distribution, learning-style radar, error-type pie, memory-curve growth chart (unlocked after 7 days of practice), per-student PDF report export, student archiving |
 | Roles & auth | Anonymous auth for students, Email/Password for teachers/admins, Firestore security rules enforcing per-role access, custom claims read via `getIdTokenResult(true)` |
 | Anti-cheat signals | Edit-distance + response-time based "random guessing" detection, flagged separately from genuine spelling mistakes |
-| Performance | Top-K candidate pooling (not full-table scans), pre-aggregated class stats, batched writes (`AttemptBatcher` merging 5 writes per attempt into a single atomic commit), random-sampling word selection via a `random` field, live Firestore quota monitoring with a global banner when exhausted |
+| Performance | Top-K candidate pooling, pre-aggregated class stats, batched writes (`AttemptBatcher` merging 5 writes per attempt into a single atomic commit), random-sampling word selection via a `random` field, **three-layer dashboard cache** (in-memory → Firestore IndexedDB → server), live Firestore quota monitoring with a global banner when exhausted |
 | Cross-device state | Learning state (current level, SM-2 progress, daily snapshots) keyed by a compound `displayId` (`{class}_{seat}_{name}`) rather than Firebase UID, so a student who re-logs-in or switches devices keeps their progress |
 | Profile hygiene | On every student login, old UID profiles for the same `displayId` are automatically cleaned up via a localStorage-based tracker — zero extra Firestore reads, and no accumulation of orphan profile documents |
 | Reporting & lifecycle | Per-student PDF report export; archiving service for students who graduate out of a cohort |
@@ -237,6 +237,42 @@ vocab-handwriting-trainer/
   history on login, which blew through Firestore's free-tier read quota (7,000+ reads at
   once). `quotaMonitor.ts` now tracks read/write volume directly, alongside Top-K candidate
   pooling and pre-aggregated `ClassStatsService` documents for the teacher dashboard.
+
+- **The teacher dashboard reads through a three-layer cache, not directly from Firestore.** The dashboard used to trigger full-table scans on the
+  `attempts` collection (7,000+ reads) and re-fetch every student's detail
+  on page refresh (~840 reads across 7 students). On the Spark free tier
+  (50K reads/day), this blew the daily quota within a single afternoon of teacher use.
+
+  The fix layers three caches with different lifetimes:
+
+    1. **In-memory (module-level Map in `useStudentDetail`)** — survives
+       within a single SPA session. Switching between students costs
+       < 1 ms and 0 reads.
+    2. **Firestore IndexedDB cache (`getDocsFromCache()`)** — survives
+       page refresh and browser restart. Costs 0 reads, hits in 5–30 ms.
+    3. **Firestore server (`getDocs()`)** — only consulted when layers
+       1 and 2 both miss. Costs normal reads.
+
+  Two additional changes accompany the layering:
+
+  - `getAllStudentsStats()` and `getTopWeakWords()` no longer scan the
+    `attempts` collection; they read the pre-aggregated `classStats`
+    documents instead (4 reads instead of 7,000+).
+  - `StudentDetailPanel` shows a **staleness indicator** when the cached
+    data is more than 30 minutes old: the "🕐 Last updated" text turns
+    orange and a prompt suggests clicking the manual refresh button.
+
+  The design **deliberately does not auto-refresh**. Learning progress
+  moves on an hour-to-day scale, not a second-to-second one. Auto-refresh
+  would burn quota for no pedagogical benefit. Instead, the teacher is
+  given (a) a clear signal that data may be stale, and (b) an explicit
+  manual refresh button. This is a case where **transparency beats
+  automation** — the person who knows whether the data is fresh enough
+  for their decision is the teacher, not the cache layer.
+
+  Net effect: daily read volume dropped from ~66K (over quota) to
+  ~2–3K, while perceived latency on student switching improved from
+  ~100–500 ms to < 30 ms.
 
 - **Random word sampling via a `random` field.** `getNewWordsByLevels` originally used
   `orderBy('word')`, which meant the same alphabetically-first words were picked every
