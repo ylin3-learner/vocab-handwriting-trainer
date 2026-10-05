@@ -3,22 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { AnalyticsService } from '../../../services/analytics/AnalyticsService';
 import { StudentAnalytics } from '../../../types/analytics';
 
-// ============================================================
-// 模組級快取（所有元件共享，網頁重新整理才清空）
-// ============================================================
 const CACHE_TTL_MS = 5 * 60 * 1000;
-
-// 🔥 手動重新整理時，spinner 的最短顯示時間。
-//
-// 為什麼需要最短顯示時間：
-//   快取命中時，請求可能在 50ms 內完成。若 spinner 一閃而過，
-//   使用者會感覺「剛剛到底有沒有更新」。設定最短 600ms，讓
-//   使用者能「感知到」更新動作。
-//
-// 為什麼選 600ms：
-//   - 尼爾森 100ms 門檻：低於此使用者感覺「沒反應」
-//   - 1 秒門檻：超過此使用者開始感覺「卡頓」
-//   - 600ms 是兩者之間的安全值
 const REFRESH_MIN_SPINNER_MS = 600;
 
 interface CachedEntry {
@@ -33,11 +18,21 @@ const analyticsService = new AnalyticsService();
 export interface UseStudentDetailResult {
   data: StudentAnalytics | null;
   loading: boolean;
-  /** 手動重新整理中。用於顯示按鈕的 spinner。 */
   isRefreshing: boolean;
   error: string | null;
   refetch: () => void;
   lastFetchedAt: number | null;
+  /**
+   * 🔥 前端最後一次「從 server 成功讀取」此學生的時間。
+   *
+   * 與 lastFetchedAt 的差別：
+   *   lastFetchedAt：每次 fetch 都更新（含 cache 命中）
+   *   lastServerFetchedAt：只有 dataSource === 'server' 時更新
+   *
+   * 用途：UI 判斷資料新鮮度。若資料來自 cache 而 lastServerFetchedAt
+   *      超過 30 分鐘，則顯示「資料可能已過期」警告。
+   */
+  lastServerFetchedAt: number | null;
 }
 
 export function useStudentDetail(studentId: string | null): UseStudentDetailResult {
@@ -46,6 +41,8 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
+  // 🔥 新增：追蹤每個學生的最後 server fetch 時間
+  const [serverFetchTimes, setServerFetchTimes] = useState<Map<string, number>>(new Map());
 
   const isMountedRef = useRef(true);
 
@@ -56,18 +53,11 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
     };
   }, []);
 
-  // ============================================================
-  // 內部：觸發 fetch
-  //
-  // @param showLoading  是否顯示全域 loading（初次載入 / 切換學生時 true）
-  // @param forceServer  是否跳過 Layer 2 快取（手動重新整理時 true）
-  // ============================================================
   const fetchAndSet = useCallback(async (
     id: string,
     showLoading: boolean = true,
     forceServer: boolean = false
   ) => {
-    // 併發去重：若已有正在進行的請求且「不是強制更新」，直接沿用
     let promise = inflightRequests.get(id);
     if (!promise || forceServer) {
       promise = analyticsService.getStudentDetail(id, { forceServer }).finally(() => {
@@ -76,18 +66,26 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
       inflightRequests.set(id, promise);
     }
 
-    if (showLoading) {
-      setLoading(true);
-    }
+    if (showLoading) setLoading(true);
     setError(null);
 
     try {
       const result = await promise;
       const now = Date.now();
       cache.set(id, { data: result, timestamp: now });
+
       if (isMountedRef.current) {
         setData(result);
         setLastFetchedAt(now);
+
+        // 🔥 只有 server 來源才更新 serverFetchTimes
+        if (result.dataSource === 'server') {
+          setServerFetchTimes(prev => {
+            const next = new Map(prev);
+            next.set(id, now);
+            return next;
+          });
+        }
       }
     } catch (e) {
       console.error(`❌ [useStudentDetail] 載入學生 ${id} 失敗:`, e);
@@ -101,9 +99,6 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
     }
   }, []);
 
-  // ============================================================
-  // 主流程：studentId 改變時決定是否 fetch
-  // ============================================================
   useEffect(() => {
     if (!studentId) {
       setData(null);
@@ -130,9 +125,6 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
     void fetchAndSet(studentId, true);
   }, [studentId, fetchAndSet]);
 
-  // ============================================================
-  // refetch：手動重新整理（強制走伺服器 + 最短 spinner 時間）
-  // ============================================================
   const refetch = useCallback(async () => {
     if (!studentId) return;
 
@@ -140,9 +132,8 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
     setIsRefreshing(true);
 
     try {
-      // 🔥 並行等待「fetch 完成」與「最短顯示時間經過」
       await Promise.all([
-        fetchAndSet(studentId, false, true),  // showLoading=false, forceServer=true
+        fetchAndSet(studentId, false, true),
         new Promise(resolve => setTimeout(resolve, REFRESH_MIN_SPINNER_MS)),
       ]);
     } finally {
@@ -152,12 +143,20 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
     }
   }, [studentId, fetchAndSet]);
 
-  return { data, loading, isRefreshing, error, refetch, lastFetchedAt };
-}
+  const lastServerFetchedAt = studentId
+    ? serverFetchTimes.get(studentId) ?? null
+    : null;
 
-// ============================================================
-// 工具函式
-// ============================================================
+  return {
+    data,
+    loading,
+    isRefreshing,
+    error,
+    refetch,
+    lastFetchedAt,
+    lastServerFetchedAt,  // 🔥 新增
+  };
+}
 
 export function clearStudentCache(studentId: string): void {
   cache.delete(studentId);

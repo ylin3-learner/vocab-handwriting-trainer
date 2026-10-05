@@ -380,8 +380,11 @@ export class AnalyticsService {
         result.customSpeechFloor = customSpeechFloor;
         result.timeZone = studentTimeZone;
 
-        console.log(`✅ [AnalyticsService] "${displayId}" 完成（attempts 來源：${attemptsSource}）`);
+        // 🔥 注入資料來源
+        //    以 attempts 的來源為準（attempts 是主要資料，其他欄位重要性較低）
+        result.dataSource = attemptsSource;
 
+        console.log(`✅ [AnalyticsService] "${displayId}" 完成（attempts 來源：${attemptsSource}）`);
         return result;
     }
 }

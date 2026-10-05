@@ -70,4 +70,14 @@ export interface StudentAnalytics {
 
   // 新增：學生的時區（用於顯示本地日期）
   timeZone?: string;
+
+  // 🔥 資料來源（由 AnalyticsService 注入）
+  //
+  // 為什麼需要：
+  //   前端無法區分「資料是剛剛從 server 拿的」與「資料是 N 小時前的
+  //   IndexedDB 快取」。UI 需要這個欄位才能誠實顯示資料新鮮度。
+  //
+  // 'cache'：來自 Firestore IndexedDB 快取（可能過期）
+  // 'server'：來自 Firestore 伺服器（保證最新）
+  dataSource?: 'cache' | 'server';
 }

@@ -53,12 +53,19 @@ interface Props {
     isCurrentlyArchived: boolean,
     archivedBy: string
   ) => Promise<void>;
-  /** 資料最後抓取時間（毫秒 timestamp）。用於顯示「最後更新」提示。 */
-  lastFetchedAt?: number | null;
   /** 手動觸發重新抓取。 */
   onRefetch?: () => void;
   /** 手動重新整理中。用於顯示按鈕的 spinner。 */
   isRefreshing?: boolean;
+  /**
+   * 🔥 前端最後一次「從 server 成功讀取」此學生的時間（毫秒 timestamp）。
+   *
+   * 用途：判斷資料新鮮度。
+   *   - dataSource === 'server'：資料保證最新，無需警告
+   *   - dataSource === 'cache' 且此值 < 30 分鐘：資料可能是新的，無警告
+   *   - dataSource === 'cache' 且此值 ≥ 30 分鐘或未知：顯示過期警告
+   */
+  lastServerFetchedAt?: number | null;
 }
 
 const LEARNING_STYLE_LABELS: Record<LearningStyle, { text: string; color: string; emoji: string }> = {
@@ -103,37 +110,58 @@ function getLevelBadgeColor(level: number): string {
 }
 
 // ============================================================
-// 🔥 資料新鮮度判斷
+// 🔥 資料新鮮度判斷（重構版）
 //
-// 學習進度的變化速度是「小時～天」級，不是「秒」級。
-// 因此 30 分鐘的門檻是合理的：超過就提示老師資料可能已過期。
+// 舊版：基於 lastFetchedAt（前端呼叫時間）→ 永遠顯示「剛剛」
+// 新版：基於「資料來源」+「最後一次 server 同步時間」
 //
-// 為什麼選 30 分鐘：
-//   - 覆蓋「一節課」的時間長度（老師通常在一節課內對照多位學生）
-//   - 超過 30 分鐘的資料，可能已經有學生完成新一輪練習
+// 語意：
+//   - dataSource === 'server'：資料保證最新 → 綠色「即時」
+//   - dataSource === 'cache' 且 lastServerFetchedAt < 30 分鐘：
+//       快取還算新 → 灰色「快取版本」，無警告
+//   - dataSource === 'cache' 且 lastServerFetchedAt ≥ 30 分鐘或未知：
+//       快取可能過期 → 橘色警告，提示手動更新
 // ============================================================
 const STALE_THRESHOLD_MS = 30 * 60 * 1000;
 
-interface LastUpdatedInfo {
-  text: string;
-  isStale: boolean;
+interface FreshnessInfo {
+  text: string;         // 「即時」或「快取版本（5 分鐘前同步）」
+  isWarning: boolean;   // 是否顯示警告
+  isServer: boolean;    // 是否來自 server（用於決定顏色）
 }
 
-function getLastUpdatedInfo(ts: number | null): LastUpdatedInfo {
-  if (!ts) return { text: '尚未載入', isStale: false };
+function getFreshnessInfo(
+  dataSource: 'cache' | 'server' | undefined,
+  lastServerFetchedAt: number | null
+): FreshnessInfo {
+  // 情境 A：來自 server（保證最新）
+  if (dataSource === 'server') {
+    return { text: '即時', isWarning: false, isServer: true };
+  }
 
-  const diffMs = Date.now() - ts;
-  const isStale = diffMs >= STALE_THRESHOLD_MS;
-  const diffMin = Math.floor(diffMs / 60000);
+  // 情境 B：來自 cache（可能過期）
+  if (!lastServerFetchedAt) {
+    // 從未在此 session 從 server 讀過 → 未知新鮮度，顯示警告
+    return { text: '快取版本（同步時間未知）', isWarning: true, isServer: false };
+  }
 
-  if (diffMin < 1) return { text: '剛剛', isStale };
-  if (diffMin < 60) return { text: `${diffMin} 分鐘前`, isStale };
+  const ageMs = Date.now() - lastServerFetchedAt;
+  const isStale = ageMs >= STALE_THRESHOLD_MS;
 
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return { text: `${diffHr} 小時前`, isStale };
+  const mins = Math.floor(ageMs / 60000);
+  let relativeTime: string;
+  if (mins < 1) relativeTime = '剛剛';
+  else if (mins < 60) relativeTime = `${mins} 分鐘前`;
+  else {
+    const hrs = Math.floor(mins / 60);
+    relativeTime = `${hrs} 小時前`;
+  }
 
-  const diffDay = Math.floor(diffHr / 24);
-  return { text: `${diffDay} 天前`, isStale };
+  return {
+    text: `快取版本（${relativeTime}同步）`,
+    isWarning: isStale,
+    isServer: false,
+  };
 }
 
 export const StudentDetailPanel: React.FC<Props> = ({
@@ -142,9 +170,9 @@ export const StudentDetailPanel: React.FC<Props> = ({
   cumulativeCorrectCount,
   isArchived = false,
   onArchiveToggle,
-  lastFetchedAt = null,
   onRefetch,
   isRefreshing = false,
+  lastServerFetchedAt = null,
 }) => {
   const reportRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -155,23 +183,20 @@ export const StudentDetailPanel: React.FC<Props> = ({
   const [speechFloor, setSpeechFloor] = useState<number | undefined>(analytics.customSpeechFloor);
   const [isUpdatingSpeech, setIsUpdatingSpeech] = useState(false);
 
-  // 🔥 資料新鮮度（每 60 秒重新計算，讓 isStale 能自動從 false 變 true）
-  const [lastUpdatedInfo, setLastUpdatedInfo] = useState<LastUpdatedInfo>(
-    () => getLastUpdatedInfo(lastFetchedAt)
+  // 🔥 資料新鮮度（每 60 秒重新計算，讓警告能自動觸發）
+  const [freshness, setFreshness] = useState<FreshnessInfo>(
+    () => getFreshnessInfo(analytics.dataSource, lastServerFetchedAt)
   );
 
   useEffect(() => {
-    setLastUpdatedInfo(getLastUpdatedInfo(lastFetchedAt));
-
-    // 沒有 lastFetchedAt 就不需要定時器
-    if (!lastFetchedAt) return;
+    setFreshness(getFreshnessInfo(analytics.dataSource, lastServerFetchedAt));
 
     const timer = setInterval(() => {
-      setLastUpdatedInfo(getLastUpdatedInfo(lastFetchedAt));
+      setFreshness(getFreshnessInfo(analytics.dataSource, lastServerFetchedAt));
     }, 60_000);
 
     return () => clearInterval(timer);
-  }, [lastFetchedAt]);
+  }, [analytics.dataSource, lastServerFetchedAt]);
 
   // 當切換學生時同步
   useEffect(() => {
@@ -276,25 +301,34 @@ export const StudentDetailPanel: React.FC<Props> = ({
           marginBottom: '0.75rem',
           flexWrap: 'wrap',
         }}>
-          {/* 🔥 左側：最後更新 + 重新整理 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+          {/* 🔥 左側：資料新鮮度 + 重新整理 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', flexWrap: 'wrap' }}>
+            {/* 「資料截至」= 學生最後作答時間 */}
+            <span style={{ color: '#6c757d' }}>
+              🕐 資料截至：
+              {analytics.lastAttemptAt
+                ? formatLocalDate(analytics.lastAttemptAt, analytics.timeZone ?? DEFAULT_TIME_ZONE)
+                : '無紀錄'}
+            </span>
+
+            {/* 「資料來源」= 即時 / 快取版本 */}
             <span
               style={{
-                color: lastUpdatedInfo.isStale ? '#856404' : '#6c757d',
-                fontWeight: lastUpdatedInfo.isStale ? 'bold' : 'normal',
+                color: freshness.isWarning ? '#856404' : freshness.isServer ? '#155724' : '#6c757d',
+                fontWeight: freshness.isWarning || freshness.isServer ? 'bold' : 'normal',
+                padding: '1px 6px',
+                borderRadius: '3px',
+                background: freshness.isWarning ? '#fff3cd' : 'transparent',
               }}
             >
-              🕐 最後更新：{lastUpdatedInfo.text}
-              {lastUpdatedInfo.isStale && (
-                <span style={{
-                  marginLeft: '0.4rem',
-                  fontSize: '0.8rem',
-                  fontWeight: 'normal',
-                }}>
-                  ⚠️ 資料可能已過期，點「🔄」更新
+              ・{freshness.text}
+              {freshness.isWarning && (
+                <span style={{ marginLeft: '0.3rem', fontWeight: 'normal', fontSize: '0.8rem' }}>
+                  ⚠️ 點「🔄」取得最新
                 </span>
               )}
             </span>
+
             {onRefetch && (
               <button
                 onClick={onRefetch}
@@ -308,23 +342,23 @@ export const StudentDetailPanel: React.FC<Props> = ({
                   padding: '0.25rem 0.75rem',
                   background: isRefreshing
                     ? '#e9ecef'
-                    : lastUpdatedInfo.isStale
+                    : freshness.isWarning
                       ? '#fff3cd'
                       : '#f8f9fa',
                   color: isRefreshing
                     ? '#6c757d'
-                    : lastUpdatedInfo.isStale
+                    : freshness.isWarning
                       ? '#856404'
                       : '#495057',
                   border: isRefreshing
                     ? '1px solid #dee2e6'
-                    : lastUpdatedInfo.isStale
+                    : freshness.isWarning
                       ? '1px solid #ffc107'
                       : '1px solid #dee2e6',
                   borderRadius: '4px',
                   cursor: isRefreshing ? 'wait' : 'pointer',
                   fontSize: '0.85rem',
-                  fontWeight: lastUpdatedInfo.isStale && !isRefreshing ? 'bold' : 'normal',
+                  fontWeight: freshness.isWarning && !isRefreshing ? 'bold' : 'normal',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '0.35rem',

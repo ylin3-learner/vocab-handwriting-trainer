@@ -30,6 +30,7 @@ export const TeacherDashboard: React.FC = () => {
     isRefreshing: detailRefreshing,
     error: detailError,
     lastFetchedAt,
+    lastServerFetchedAt,
     refetch: refetchStudentDetail,
   } = useStudentDetail(selectedStudentId);
 
@@ -362,7 +363,7 @@ export const TeacherDashboard: React.FC = () => {
               cumulativeCorrectCount={selectedStudentStat?.correctCount}
               isArchived={archivedIds.has(selectedStudentId)}
               onArchiveToggle={handleArchiveToggle}
-              lastFetchedAt={lastFetchedAt}
+              lastServerFetchedAt={lastServerFetchedAt}
               onRefetch={refetchStudentDetail}
               isRefreshing={detailRefreshing}
             />
