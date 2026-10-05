@@ -238,10 +238,12 @@ vocab-handwriting-trainer/
   once). `quotaMonitor.ts` now tracks read/write volume directly, alongside Top-K candidate
   pooling and pre-aggregated `ClassStatsService` documents for the teacher dashboard.
 
-- **The teacher dashboard reads through a three-layer cache, not directly from Firestore.** The dashboard used to trigger full-table scans on the
-  `attempts` collection (7,000+ reads) and re-fetch every student's detail
-  on page refresh (~840 reads across 7 students). On the Spark free tier
-  (50K reads/day), this blew the daily quota within a single afternoon of teacher use.
+- **The teacher dashboard reads through a three-layer cache, with explicit
+  manual refresh as the escape hatch.** The dashboard used to trigger
+  full-table scans on the `attempts` collection (7,000+ reads) and re-fetch
+  every student's detail on page refresh (~840 reads across 7 students). On
+  the Spark free tier (50K reads/day), this blew the daily quota within a
+  single afternoon of teacher use.
 
   The fix layers three caches with different lifetimes:
 
@@ -251,28 +253,57 @@ vocab-handwriting-trainer/
     2. **Firestore IndexedDB cache (`getDocsFromCache()`)** — survives
        page refresh and browser restart. Costs 0 reads, hits in 5–30 ms.
     3. **Firestore server (`getDocs()`)** — only consulted when layers
-       1 and 2 both miss. Costs normal reads.
+       1 and 2 both miss, or when the teacher explicitly requests fresh
+       data.
 
-  Two additional changes accompany the layering:
+  Two supporting changes came with the layering:
 
   - `getAllStudentsStats()` and `getTopWeakWords()` no longer scan the
     `attempts` collection; they read the pre-aggregated `classStats`
     documents instead (4 reads instead of 7,000+).
-  - `StudentDetailPanel` shows a **staleness indicator** when the cached
-    data is more than 30 minutes old: the "🕐 Last updated" text turns
-    orange and a prompt suggests clicking the manual refresh button.
+  - `getWordsByIds()` now checks the IndexedDB cache first, so the
+    per-student weak-word lookup (5 reads) costs 0 when the cache is warm.
+
+  **The critical piece is the manual refresh button.** During the first
+  iteration, `refetch()` only cleared the in-memory cache — but
+  `getStudentDetail` still hit `getDocsFromCache` (Layer 2) first, which
+  always returned the same stale data. The button appeared to do nothing.
+  The fix adds a `forceServer` option to `getStudentDetail()` that skips
+  Layer 2 entirely and goes straight to the server, plus a 600 ms minimum
+  spinner so the user can perceive that something happened (Nielsen's
+  100 ms response threshold — a sub-100 ms spinner looks like nothing
+  occurred).
+
+  **Data freshness is now reported honestly.** The old "🕐 Last updated"
+  label showed the time of the last frontend call to `fetch`, which was
+  reset on every interaction — it always read "just now" even when the
+  data was a day old, and the stale-data warning never fired. The new
+  display splits the concept into three fields:
+
+    - **"🕐 Data as of [date]"** — derived from `analytics.lastAttemptAt`,
+      the student's last actual answer. This is what the teacher cares
+      about.
+    - **"Live"** vs. **"Cached (synced N min ago)"** — derived from
+      `analytics.dataSource` (`'server'` or `'cache'`) and
+      `lastServerFetchedAt` (tracked separately from `lastFetchedAt`).
+    - **Stale warning** fires only when `dataSource === 'cache'` AND
+      the last successful server sync is more than 30 minutes old — not
+      on a timer that resets every interaction.
 
   The design **deliberately does not auto-refresh**. Learning progress
   moves on an hour-to-day scale, not a second-to-second one. Auto-refresh
   would burn quota for no pedagogical benefit. Instead, the teacher is
-  given (a) a clear signal that data may be stale, and (b) an explicit
-  manual refresh button. This is a case where **transparency beats
+  given (a) an honest signal of how old the data is, (b) an explicit
+  manual refresh button, and (c) a per-student spinner so the cost of
+  that refresh is visible. This is a case where **transparency beats
   automation** — the person who knows whether the data is fresh enough
   for their decision is the teacher, not the cache layer.
 
   Net effect: daily read volume dropped from ~66K (over quota) to
-  ~2–3K, while perceived latency on student switching improved from
-  ~100–500 ms to < 30 ms.
+  ~2–3K on typical days. On the day the teacher used manual refresh
+  heavily, the total climbed to ~20K — still well under the 50K ceiling,
+  and entirely under the teacher's conscious control. Switching between
+  students cost < 30 ms in perceived latency.
 
 - **Random word sampling via a `random` field.** `getNewWordsByLevels` originally used
   `orderBy('word')`, which meant the same alphabetically-first words were picked every
