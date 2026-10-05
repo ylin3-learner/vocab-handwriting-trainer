@@ -2,6 +2,7 @@
 import {
   collection,
   getDocs,
+  getDocsFromCache,  // 🔥 新增
   query,
   where,
   orderBy,
@@ -15,6 +16,9 @@ import { WordRepository } from './WordRepository';
 
 /** 每批讀取的單字數（用於隨機抽樣的分頁） */
 const RANDOM_BATCH_SIZE = 100;
+
+/** Firestore `in` 運算子每次最多可傳的 ID 數 */
+const IN_OPERATOR_BATCH_SIZE = 30;
 
 export class FirestoreWordRepository implements WordRepository {
   private readonly collectionPath = ['vocabulary', 'current', 'words'] as const;
@@ -35,7 +39,33 @@ export class FirestoreWordRepository implements WordRepository {
     }
   }
 
-  // 依 ID 清單批次取得單字（用於複習候選）
+  /**
+   * 依 ID 清單批次取得單字（用於弱點單字、複習候選）。
+   *
+   * ============================================================
+   * 🔥 三層快取策略（2026-10）
+   * ============================================================
+   *
+   * 舊版：每次都走 getDocs（伺服器），每批 5 個單字 = 5 reads。
+   *       老師切換 7 位學生，累積 35 reads/session。
+   *
+   * 新版：
+   *   Layer 1（記憶體 Map）：不使用（單字為長期不變資料，
+   *                          由 Firestore SDK 自身處理）。
+   *   Layer 2（IndexedDB 快取）：先試 getDocsFromCache。
+   *                              命中 → 0 reads。
+   *   Layer 3（伺服器）：快取 miss 才走 getDocs。
+   *
+   * 為什麼這樣做是安全的：
+   *   單字庫的內容由老師上傳 .xlsx 才變動，日常練習期間是靜態的。
+   *   即使快取版本落後幾小時，也不會影響學生作答。
+   *   若老師更新單字庫，可透過「重新整理」或登出重登觸發更新。
+   *
+   * 為什麼 try/catch 是必要的：
+   *   getDocsFromCache 對「從未執行過的查詢」會拋出錯誤。
+   *   第一次查某批 ID 時，快取必然為空——這是正常情況，
+   *   不是錯誤，所以用 try/catch 靜默處理。
+   */
   async getWordsByIds(ids: string[]): Promise<Word[]> {
     if (ids.length === 0) {
       console.log('📚 [getWordsByIds] ids 為空，回傳 []');
@@ -45,20 +75,43 @@ export class FirestoreWordRepository implements WordRepository {
     try {
       console.log(`📚 [getWordsByIds] 開始批次載入 ${ids.length} 個單字...`);
       const words: Word[] = [];
-      const batchCount = Math.ceil(ids.length / 30);
+      const batchCount = Math.ceil(ids.length / IN_OPERATOR_BATCH_SIZE);
 
-      for (let i = 0; i < ids.length; i += 30) {
-        const chunk = ids.slice(i, i + 30);
-        const batchIndex = Math.floor(i / 30) + 1;
-        console.log(`   - 批次 ${batchIndex}/${batchCount}：${chunk.length} 個 ID`);
+      for (let i = 0; i < ids.length; i += IN_OPERATOR_BATCH_SIZE) {
+        const chunk = ids.slice(i, i + IN_OPERATOR_BATCH_SIZE);
+        const batchIndex = Math.floor(i / IN_OPERATOR_BATCH_SIZE) + 1;
 
         const q = query(
           collection(db, ...this.collectionPath),
           where(documentId(), 'in', chunk)
         );
-        const snapshot = await getDocs(q);
+
+        // ============================================================
+        // Layer 2：嘗試從 IndexedDB 快取讀取
+        // ============================================================
+        let snapshot = null;
+        let source: 'cache' | 'server' = 'cache';
+
+        try {
+          const cachedSnap = await getDocsFromCache(q);
+          if (!cachedSnap.empty) {
+            snapshot = cachedSnap;
+            console.log(`   - 批次 ${batchIndex}/${batchCount}：從 IndexedDB 快取讀到 ${cachedSnap.size} 個（0 配額）`);
+          }
+        } catch {
+          // 快取 miss（首次查詢）→ 正常，往下走
+        }
+
+        // ============================================================
+        // Layer 3：快取未命中 → 走伺服器
+        // ============================================================
+        if (!snapshot) {
+          source = 'server';
+          snapshot = await getDocs(q);
+          console.log(`   - 批次 ${batchIndex}/${batchCount}：從伺服器讀到 ${snapshot.size} 個`);
+        }
+
         snapshot.forEach((d) => words.push(this.docToWord(d)));
-        console.log(`     ✅ 批次 ${batchIndex} 完成，累計 ${words.length} 個`);
       }
 
       console.log(`✅ [getWordsByIds] 全部完成，共載入 ${words.length} 個單字`);
