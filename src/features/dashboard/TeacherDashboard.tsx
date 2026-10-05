@@ -27,6 +27,7 @@ export const TeacherDashboard: React.FC = () => {
   const {
     data: detail,
     loading: detailLoading,
+    isRefreshing: detailRefreshing,
     error: detailError,
     lastFetchedAt,
     refetch: refetchStudentDetail,
@@ -363,6 +364,7 @@ export const TeacherDashboard: React.FC = () => {
               onArchiveToggle={handleArchiveToggle}
               lastFetchedAt={lastFetchedAt}
               onRefetch={refetchStudentDetail}
+              isRefreshing={detailRefreshing}
             />
           )}
         </div>

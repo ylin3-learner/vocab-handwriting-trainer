@@ -12,6 +12,22 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { StudentStateService } from '../../../services/progression/StudentStateService';
 import { formatLocalDate, getLocalDateString, DEFAULT_TIME_ZONE } from '../../../domain/date/timezone';
 
+// ============================================================
+// 🔥 Spinner 動畫
+//
+// React 沒有內建 keyframes 的機制，所以用 <style> 標籤注入。
+// 為什麼不用 CSS-in-JS 庫：這個專案沒有引入 styled-components
+// 或 emotion，用純 CSS 最輕量。
+// ============================================================
+const SPINNER_KEYFRAMES = `
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+`;
+
+// 在 StudentDetailPanel 的 return 之前，注入到 DOM：
+// <style>{SPINNER_KEYFRAMES}</style>
+
 interface Props {
   analytics: StudentAnalytics;
 
@@ -41,6 +57,8 @@ interface Props {
   lastFetchedAt?: number | null;
   /** 手動觸發重新抓取。 */
   onRefetch?: () => void;
+  /** 手動重新整理中。用於顯示按鈕的 spinner。 */
+  isRefreshing?: boolean;
 }
 
 const LEARNING_STYLE_LABELS: Record<LearningStyle, { text: string; color: string; emoji: string }> = {
@@ -126,6 +144,7 @@ export const StudentDetailPanel: React.FC<Props> = ({
   onArchiveToggle,
   lastFetchedAt = null,
   onRefetch,
+  isRefreshing = false,
 }) => {
   const reportRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -245,299 +264,341 @@ export const StudentDetailPanel: React.FC<Props> = ({
   }
 
   return (
-    <div>
-      {/* ===== 按鈕列：最後更新 + 重新整理 + 歸檔 + 匯出 PDF ===== */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: '0.5rem',
-        marginBottom: '0.75rem',
-        flexWrap: 'wrap',
-      }}>
-        {/* 🔥 左側：最後更新 + 重新整理 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-          <span
-            style={{
-              color: lastUpdatedInfo.isStale ? '#856404' : '#6c757d',
-              fontWeight: lastUpdatedInfo.isStale ? 'bold' : 'normal',
-            }}
-          >
-            🕐 最後更新：{lastUpdatedInfo.text}
-            {lastUpdatedInfo.isStale && (
-              <span style={{
-                marginLeft: '0.4rem',
-                fontSize: '0.8rem',
-                fontWeight: 'normal',
-              }}>
-                ⚠️ 資料可能已過期，點「🔄」更新
-              </span>
-            )}
-          </span>
-          {onRefetch && (
-            <button
-              onClick={onRefetch}
-              title="重新從雲端讀取此學生的最新資料"
+    <>
+      <style>{SPINNER_KEYFRAMES}</style>
+      <div>
+        {/* ===== 按鈕列：最後更新 + 重新整理 + 歸檔 + 匯出 PDF ===== */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '0.5rem',
+          marginBottom: '0.75rem',
+          flexWrap: 'wrap',
+        }}>
+          {/* 🔥 左側：最後更新 + 重新整理 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+            <span
               style={{
-                padding: '0.25rem 0.75rem',
-                background: lastUpdatedInfo.isStale ? '#fff3cd' : '#f8f9fa',
-                color: lastUpdatedInfo.isStale ? '#856404' : '#495057',
-                border: lastUpdatedInfo.isStale ? '1px solid #ffc107' : '1px solid #dee2e6',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '0.85rem',
+                color: lastUpdatedInfo.isStale ? '#856404' : '#6c757d',
                 fontWeight: lastUpdatedInfo.isStale ? 'bold' : 'normal',
               }}
             >
-              🔄 重新整理
-            </button>
-          )}
-        </div>
+              🕐 最後更新：{lastUpdatedInfo.text}
+              {lastUpdatedInfo.isStale && (
+                <span style={{
+                  marginLeft: '0.4rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 'normal',
+                }}>
+                  ⚠️ 資料可能已過期，點「🔄」更新
+                </span>
+              )}
+            </span>
+            {onRefetch && (
+              <button
+                onClick={onRefetch}
+                disabled={isRefreshing}
+                title={
+                  isRefreshing
+                    ? '正在從雲端讀取最新資料...'
+                    : '重新從雲端讀取此學生的最新資料'
+                }
+                style={{
+                  padding: '0.25rem 0.75rem',
+                  background: isRefreshing
+                    ? '#e9ecef'
+                    : lastUpdatedInfo.isStale
+                      ? '#fff3cd'
+                      : '#f8f9fa',
+                  color: isRefreshing
+                    ? '#6c757d'
+                    : lastUpdatedInfo.isStale
+                      ? '#856404'
+                      : '#495057',
+                  border: isRefreshing
+                    ? '1px solid #dee2e6'
+                    : lastUpdatedInfo.isStale
+                      ? '1px solid #ffc107'
+                      : '1px solid #dee2e6',
+                  borderRadius: '4px',
+                  cursor: isRefreshing ? 'wait' : 'pointer',
+                  fontSize: '0.85rem',
+                  fontWeight: lastUpdatedInfo.isStale && !isRefreshing ? 'bold' : 'normal',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  minWidth: '110px',
+                  justifyContent: 'center',
+                }}
+              >
+                {isRefreshing ? (
+                  <>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: '12px',
+                        height: '12px',
+                        border: '2px solid #adb5bd',
+                        borderTopColor: '#495057',
+                        borderRadius: '50%',
+                        animation: 'spin 0.8s linear infinite',
+                      }}
+                    />
+                    更新中...
+                  </>
+                ) : (
+                  <>🔄 重新整理</>
+                )}
+              </button>
+            )}
+          </div>
 
-        {/* 🔥 右側：歸檔 + PDF */}
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          {onArchiveToggle && (
+          {/* 🔥 右側：歸檔 + PDF */}
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {onArchiveToggle && (
+              <button
+                onClick={handleArchiveClick}
+                disabled={isArchiving}
+                style={{
+                  padding: '0.5rem 1.25rem',
+                  background: isArchiving ? '#adb5bd' : isArchived ? '#17a2b8' : '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: isArchiving ? 'default' : 'pointer',
+                  fontSize: '0.9rem',
+                  fontWeight: 'bold',
+                }}
+              >
+                {isArchiving ? '⏳ 處理中...' : isArchived ? '📤 取消歸檔' : '📦 歸檔此學生'}
+              </button>
+            )}
+
             <button
-              onClick={handleArchiveClick}
-              disabled={isArchiving}
+              onClick={handleExportPdf}
+              disabled={isExporting}
               style={{
                 padding: '0.5rem 1.25rem',
-                background: isArchiving ? '#adb5bd' : isArchived ? '#17a2b8' : '#6c757d',
+                background: isExporting ? '#6c757d' : '#28a745',
                 color: 'white',
                 border: 'none',
                 borderRadius: '6px',
-                cursor: isArchiving ? 'default' : 'pointer',
+                cursor: isExporting ? 'default' : 'pointer',
                 fontSize: '0.9rem',
                 fontWeight: 'bold',
               }}
             >
-              {isArchiving ? '⏳ 處理中...' : isArchived ? '📤 取消歸檔' : '📦 歸檔此學生'}
+              {isExporting ? '⏳ 產生 PDF 中...' : '📥 匯出 PDF 報告'}
             </button>
-          )}
-
-          <button
-            onClick={handleExportPdf}
-            disabled={isExporting}
-            style={{
-              padding: '0.5rem 1.25rem',
-              background: isExporting ? '#6c757d' : '#28a745',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: isExporting ? 'default' : 'pointer',
-              fontSize: '0.9rem',
-              fontWeight: 'bold',
-            }}
-          >
-            {isExporting ? '⏳ 產生 PDF 中...' : '📥 匯出 PDF 報告'}
-          </button>
+          </div>
         </div>
-      </div>
 
-      {/* 🔥 個人語速下限設定 */}
-      <div style={{
-        background: '#e7f3ff',
-        border: '1px solid #b8daff',
-        borderRadius: '6px',
-        padding: '0.75rem 1rem',
-        marginBottom: '0.75rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.75rem',
-        flexWrap: 'wrap',
-        fontSize: '0.9rem',
-      }}>
-        <span style={{ fontWeight: 'bold' }}>🐢 個人語速下限：</span>
-        <select
-          value={speechFloor ?? ''}
-          onChange={(e) => handleSpeechFloorChange(e.target.value ? Number(e.target.value) : null)}
-          disabled={isUpdatingSpeech}
-          style={{ padding: '0.3rem 0.5rem', borderRadius: '4px', border: '1px solid #b8daff' }}
-        >
-          <option value="">用全班預設</option>
-          <option value="0.85">0.85x</option>
-          <option value="0.7">0.7x</option>
-          <option value="0.6">0.6x</option>
-          <option value="0.5">0.5x</option>
-        </select>
-        <small style={{ color: '#6c757d' }}>
-          （學生點「🐢 重聽一次」時使用；適用於特殊需求學生）
-        </small>
-      </div>
-
-      {isArchived && (
+        {/* 🔥 個人語速下限設定 */}
         <div style={{
-          background: '#fff3cd',
-          border: '1px solid #ffeeba',
+          background: '#e7f3ff',
+          border: '1px solid #b8daff',
           borderRadius: '6px',
-          padding: '0.5rem 1rem',
+          padding: '0.75rem 1rem',
           marginBottom: '0.75rem',
-          fontSize: '0.85rem',
-          color: '#856404',
-        }}>
-          📦 此學生已被歸檔，目前從學生列表中隱藏。
-        </div>
-      )}
-
-      {/* ===== 截圖區域 ===== */}
-      <div
-        ref={reportRef}
-        style={{
-          background: 'white',
-          padding: '1.5rem',
-          borderRadius: '8px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        }}
-      >
-        <div style={{
-          textAlign: 'center',
-          borderBottom: '3px solid #007bff',
-          paddingBottom: '0.75rem',
-          marginBottom: '1rem',
-        }}>
-          <h1 style={{ margin: 0, fontSize: '1.5rem', color: '#212529' }}>
-            📊 學生個人化學習診斷報告
-          </h1>
-          <p style={{ margin: '0.5rem 0 0 0', color: '#6c757d', fontSize: '0.85rem' }}>
-            產出時間：{new Date().toLocaleString('zh-TW')}
-          </p>
-        </div>
-
-        <div style={{
-          background: '#f8f9fa',
-          padding: '1rem',
-          borderRadius: '6px',
-          marginBottom: '1rem',
           display: 'flex',
-          justifyContent: 'space-between',
           alignItems: 'center',
+          gap: '0.75rem',
           flexWrap: 'wrap',
-          gap: '0.5rem',
+          fontSize: '0.9rem',
         }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '1.25rem' }}>
-              {analytics.name}
-              <span style={{ fontSize: '0.9rem', color: '#6c757d', marginLeft: '0.5rem' }}>
-                ({analytics.className})
-              </span>
-              <span style={{
-                fontSize: '0.8rem',
-                fontWeight: 'bold',
-                marginLeft: '0.5rem',
-                padding: '2px 10px',
-                borderRadius: '12px',
-                background: levelColor,
-                color: 'white',
-              }}>
-                L{analytics.currentLevel}
-              </span>
-            </h2>
+          <span style={{ fontWeight: 'bold' }}>🐢 個人語速下限：</span>
+          <select
+            value={speechFloor ?? ''}
+            onChange={(e) => handleSpeechFloorChange(e.target.value ? Number(e.target.value) : null)}
+            disabled={isUpdatingSpeech}
+            style={{ padding: '0.3rem 0.5rem', borderRadius: '4px', border: '1px solid #b8daff' }}
+          >
+            <option value="">用全班預設</option>
+            <option value="0.85">0.85x</option>
+            <option value="0.7">0.7x</option>
+            <option value="0.6">0.6x</option>
+            <option value="0.5">0.5x</option>
+          </select>
+          <small style={{ color: '#6c757d' }}>
+            （學生點「🐢 重聽一次」時使用；適用於特殊需求學生）
+          </small>
+        </div>
 
-            {/* ============================================================
-                🔥 累積統計（若有提供，優先用；否則顯示窗口值）
-                ============================================================ */}
-            <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#6c757d' }}>
-              共 {displayTotalAttempts} 題，答對 {displayCorrectCount} 題，
-              平均 {(analytics.avgResponseTimeMs / 1000).toFixed(1)} 秒
-              {hasCumulative ? (
-                <span style={{
-                  marginLeft: '0.4rem',
-                  fontSize: '0.72rem',
-                  color: '#adb5bd',
-                  fontStyle: 'italic',
-                }}>
-                  （累積）
-                </span>
-              ) : (
-                <span style={{
-                  marginLeft: '0.4rem',
-                  fontSize: '0.72rem',
-                  color: '#adb5bd',
-                  fontStyle: 'italic',
-                }}>
-                  （最近 100 筆）
-                </span>
-              )}
-            </p>
-
-            <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '0.8rem', color: '#6c757d' }}>
-                📅 近 7 天活躍 {analytics.activeDaysLast7} 天
-                {analytics.lastAttemptAt && (
-                  <> ・ 最後練習：{formatLocalDate(analytics.lastAttemptAt, analytics.timeZone ?? DEFAULT_TIME_ZONE)}</>
-                )}
-              </span>
-              <span style={{
-                fontSize: '0.75rem', fontWeight: 'bold', padding: '2px 8px',
-                borderRadius: '12px', background: engagement.bgColor, color: engagement.color,
-              }}>
-                {engagement.label}
-              </span>
-            </div>
-          </div>
+        {isArchived && (
           <div style={{
-            background: styleInfo.color, color: 'white', padding: '0.5rem 1rem',
-            borderRadius: '20px', fontWeight: 'bold', fontSize: '0.9rem',
+            background: '#fff3cd',
+            border: '1px solid #ffeeba',
+            borderRadius: '6px',
+            padding: '0.5rem 1rem',
+            marginBottom: '0.75rem',
+            fontSize: '0.85rem',
+            color: '#856404',
           }}>
-            {styleInfo.emoji} {styleInfo.text}
+            📦 此學生已被歸檔，目前從學生列表中隱藏。
           </div>
-        </div>
+        )}
 
-        <div style={{ marginBottom: '1rem' }}>
-          <StudentGrowthChart snapshots={analytics.dailySnapshots} />
-        </div>
-
-        <div style={{ marginBottom: '0.5rem', padding: '0.5rem 0.75rem', background: '#f1f3f5', borderRadius: '4px', fontSize: '0.8rem', color: '#6c757d' }}>
-          ℹ️ 以下圖表基於<strong>最近 100 題</strong>（用於診斷近期學習狀態）；
-          上方累積題數為歷史總和。兩者語意不同。
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-          <LearningStyleRadar metrics={radarMetrics} />
-          <ErrorBreakdownPie breakdown={analytics.errorBreakdown} />
-          <ResponseTimeBar distribution={analytics.responseTimeDistribution} />
-          <WeakWordsTable words={analytics.weakestWords} />
-        </div>
-
-        <div style={{
-          marginTop: '1.5rem',
-          paddingTop: '1rem',
-          borderTop: '1px dashed #adb5bd',
-          fontFamily: '"Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif',
-        }}>
-          <div style={{ marginBottom: '1rem' }}>
-            <div style={{ fontSize: '0.9rem', color: '#495057', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-              ✏️ 老師建議：
-            </div>
-            {[1, 2, 3].map(i => (
-              <div
-                key={i}
-                style={{
-                  borderBottom: '1px solid #adb5bd',
-                  height: '1.8rem',
-                  marginBottom: '0.5rem',
-                  lineHeight: '1.8rem',
-                  color: '#ffffff',
-                  fontSize: '0.1rem',
-                }}
-              >
-                &nbsp;
-              </div>
-            ))}
+        {/* ===== 截圖區域 ===== */}
+        <div
+          ref={reportRef}
+          style={{
+            background: 'white',
+            padding: '1.5rem',
+            borderRadius: '8px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          }}
+        >
+          <div style={{
+            textAlign: 'center',
+            borderBottom: '3px solid #007bff',
+            paddingBottom: '0.75rem',
+            marginBottom: '1rem',
+          }}>
+            <h1 style={{ margin: 0, fontSize: '1.5rem', color: '#212529' }}>
+              📊 學生個人化學習診斷報告
+            </h1>
+            <p style={{ margin: '0.5rem 0 0 0', color: '#6c757d', fontSize: '0.85rem' }}>
+              產出時間：{new Date().toLocaleString('zh-TW')}
+            </p>
           </div>
 
           <div style={{
+            background: '#f8f9fa',
+            padding: '1rem',
+            borderRadius: '6px',
+            marginBottom: '1rem',
             display: 'flex',
             justifyContent: 'space-between',
-            fontSize: '0.85rem',
-            color: '#495057',
-            marginTop: '1rem',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
           }}>
-            <span>導師簽名：_____________________</span>
-            <span>家長簽名：_____________________</span>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.25rem' }}>
+                {analytics.name}
+                <span style={{ fontSize: '0.9rem', color: '#6c757d', marginLeft: '0.5rem' }}>
+                  ({analytics.className})
+                </span>
+                <span style={{
+                  fontSize: '0.8rem',
+                  fontWeight: 'bold',
+                  marginLeft: '0.5rem',
+                  padding: '2px 10px',
+                  borderRadius: '12px',
+                  background: levelColor,
+                  color: 'white',
+                }}>
+                  L{analytics.currentLevel}
+                </span>
+              </h2>
+
+              {/* ============================================================
+                🔥 累積統計（若有提供，優先用；否則顯示窗口值）
+                ============================================================ */}
+              <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#6c757d' }}>
+                共 {displayTotalAttempts} 題，答對 {displayCorrectCount} 題，
+                平均 {(analytics.avgResponseTimeMs / 1000).toFixed(1)} 秒
+                {hasCumulative ? (
+                  <span style={{
+                    marginLeft: '0.4rem',
+                    fontSize: '0.72rem',
+                    color: '#adb5bd',
+                    fontStyle: 'italic',
+                  }}>
+                    （累積）
+                  </span>
+                ) : (
+                  <span style={{
+                    marginLeft: '0.4rem',
+                    fontSize: '0.72rem',
+                    color: '#adb5bd',
+                    fontStyle: 'italic',
+                  }}>
+                    （最近 100 筆）
+                  </span>
+                )}
+              </p>
+
+              <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.8rem', color: '#6c757d' }}>
+                  📅 近 7 天活躍 {analytics.activeDaysLast7} 天
+                  {analytics.lastAttemptAt && (
+                    <> ・ 最後練習：{formatLocalDate(analytics.lastAttemptAt, analytics.timeZone ?? DEFAULT_TIME_ZONE)}</>
+                  )}
+                </span>
+                <span style={{
+                  fontSize: '0.75rem', fontWeight: 'bold', padding: '2px 8px',
+                  borderRadius: '12px', background: engagement.bgColor, color: engagement.color,
+                }}>
+                  {engagement.label}
+                </span>
+              </div>
+            </div>
+            <div style={{
+              background: styleInfo.color, color: 'white', padding: '0.5rem 1rem',
+              borderRadius: '20px', fontWeight: 'bold', fontSize: '0.9rem',
+            }}>
+              {styleInfo.emoji} {styleInfo.text}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: '1rem' }}>
+            <StudentGrowthChart snapshots={analytics.dailySnapshots} />
+          </div>
+
+          <div style={{ marginBottom: '0.5rem', padding: '0.5rem 0.75rem', background: '#f1f3f5', borderRadius: '4px', fontSize: '0.8rem', color: '#6c757d' }}>
+            ℹ️ 以下圖表基於<strong>最近 100 題</strong>（用於診斷近期學習狀態）；
+            上方累積題數為歷史總和。兩者語意不同。
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <LearningStyleRadar metrics={radarMetrics} />
+            <ErrorBreakdownPie breakdown={analytics.errorBreakdown} />
+            <ResponseTimeBar distribution={analytics.responseTimeDistribution} />
+            <WeakWordsTable words={analytics.weakestWords} />
+          </div>
+
+          <div style={{
+            marginTop: '1.5rem',
+            paddingTop: '1rem',
+            borderTop: '1px dashed #adb5bd',
+            fontFamily: '"Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif',
+          }}>
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.9rem', color: '#495057', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                ✏️ 老師建議：
+              </div>
+              {[1, 2, 3].map(i => (
+                <div
+                  key={i}
+                  style={{
+                    borderBottom: '1px solid #adb5bd',
+                    height: '1.8rem',
+                    marginBottom: '0.5rem',
+                    lineHeight: '1.8rem',
+                    color: '#ffffff',
+                    fontSize: '0.1rem',
+                  }}
+                >
+                  &nbsp;
+                </div>
+              ))}
+            </div>
+
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              fontSize: '0.85rem',
+              color: '#495057',
+              marginTop: '1rem',
+            }}>
+              <span>導師簽名：_____________________</span>
+              <span>家長簽名：_____________________</span>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };

@@ -5,14 +5,21 @@ import { StudentAnalytics } from '../../../types/analytics';
 
 // ============================================================
 // 模組級快取（所有元件共享，網頁重新整理才清空）
-//
-// 🔥 加入時間戳，5 分鐘 TTL，避免看到過期資料。
-//   工業界推薦的「Stale-While-Revalidate」策略：
-//   - 快取新鮮（< 5 min）：直接用，不 fetch
-//   - 快取過期（≥ 5 min）：先顯示舊資料，背景更新
-//   - 無快取：顯示 loading，fetch
 // ============================================================
 const CACHE_TTL_MS = 5 * 60 * 1000;
+
+// 🔥 手動重新整理時，spinner 的最短顯示時間。
+//
+// 為什麼需要最短顯示時間：
+//   快取命中時，請求可能在 50ms 內完成。若 spinner 一閃而過，
+//   使用者會感覺「剛剛到底有沒有更新」。設定最短 600ms，讓
+//   使用者能「感知到」更新動作。
+//
+// 為什麼選 600ms：
+//   - 尼爾森 100ms 門檻：低於此使用者感覺「沒反應」
+//   - 1 秒門檻：超過此使用者開始感覺「卡頓」
+//   - 600ms 是兩者之間的安全值
+const REFRESH_MIN_SPINNER_MS = 600;
 
 interface CachedEntry {
   data: StudentAnalytics;
@@ -20,33 +27,26 @@ interface CachedEntry {
 }
 
 const cache = new Map<string, CachedEntry>();
-
-// 追蹤「正在進行中」的請求，避免併發重複讀取
 const inflightRequests = new Map<string, Promise<StudentAnalytics>>();
-
-// 共用一個 AnalyticsService 實例（它是無狀態的）
 const analyticsService = new AnalyticsService();
-
-// ============================================================
-// Hook 本體
-// ============================================================
 
 export interface UseStudentDetailResult {
   data: StudentAnalytics | null;
   loading: boolean;
+  /** 手動重新整理中。用於顯示按鈕的 spinner。 */
+  isRefreshing: boolean;
   error: string | null;
   refetch: () => void;
-  /** 資料最後抓取的時間（毫秒 timestamp）。null 表示尚未抓取過。 */
   lastFetchedAt: number | null;
 }
 
 export function useStudentDetail(studentId: string | null): UseStudentDetailResult {
   const [data, setData] = useState<StudentAnalytics | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
 
-  // 追蹤元件是否已卸載，避免在卸載後 setState
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -57,16 +57,20 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
   }, []);
 
   // ============================================================
-  // 內部：觸發 fetch（含併發去重）
+  // 內部：觸發 fetch
   //
-  // @param showLoading true 時顯示 loading 狀態。
-  //                    背景更新時傳 false（不打擾使用者）。
+  // @param showLoading  是否顯示全域 loading（初次載入 / 切換學生時 true）
+  // @param forceServer  是否跳過 Layer 2 快取（手動重新整理時 true）
   // ============================================================
-  const fetchAndSet = useCallback(async (id: string, showLoading: boolean = true) => {
-    // 1. 併發去重：若已有正在進行的請求，直接沿用
+  const fetchAndSet = useCallback(async (
+    id: string,
+    showLoading: boolean = true,
+    forceServer: boolean = false
+  ) => {
+    // 併發去重：若已有正在進行的請求且「不是強制更新」，直接沿用
     let promise = inflightRequests.get(id);
-    if (!promise) {
-      promise = analyticsService.getStudentDetail(id).finally(() => {
+    if (!promise || forceServer) {
+      promise = analyticsService.getStudentDetail(id, { forceServer }).finally(() => {
         inflightRequests.delete(id);
       });
       inflightRequests.set(id, promise);
@@ -99,16 +103,8 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
 
   // ============================================================
   // 主流程：studentId 改變時決定是否 fetch
-  //
-  // 三段邏輯：
-  //   1. 無 studentId → 清空
-  //   2. 有快取 → 立即顯示（不管新舊）
-  //      - 新鮮（< 5 min）→ 不 fetch
-  //      - 過期（≥ 5 min）→ 背景 fetch（不顯示 loading）
-  //   3. 無快取 → fetch（顯示 loading）
   // ============================================================
   useEffect(() => {
-    // 情境 A：沒有選中學生 → 清空狀態
     if (!studentId) {
       setData(null);
       setError(null);
@@ -117,7 +113,6 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
       return;
     }
 
-    // 情境 B：快取存在 → 立即顯示（Stale-While-Revalidate）
     const cached = cache.get(studentId);
     if (cached) {
       setData(cached.data);
@@ -125,41 +120,49 @@ export function useStudentDetail(studentId: string | null): UseStudentDetailResu
       setError(null);
       setLoading(false);
 
-      // 判斷是否過期
       const isStale = Date.now() - cached.timestamp >= CACHE_TTL_MS;
       if (isStale) {
-        // 背景更新（不顯示 loading）
         void fetchAndSet(studentId, false);
       }
       return;
     }
 
-    // 情境 C：無快取 → fetch（顯示 loading）
     void fetchAndSet(studentId, true);
   }, [studentId, fetchAndSet]);
 
   // ============================================================
-  // refetch：清除快取並強制重新讀取
+  // refetch：手動重新整理（強制走伺服器 + 最短 spinner 時間）
   // ============================================================
-  const refetch = useCallback(() => {
+  const refetch = useCallback(async () => {
     if (!studentId) return;
+
     cache.delete(studentId);
-    void fetchAndSet(studentId, true);
+    setIsRefreshing(true);
+
+    try {
+      // 🔥 並行等待「fetch 完成」與「最短顯示時間經過」
+      await Promise.all([
+        fetchAndSet(studentId, false, true),  // showLoading=false, forceServer=true
+        new Promise(resolve => setTimeout(resolve, REFRESH_MIN_SPINNER_MS)),
+      ]);
+    } finally {
+      if (isMountedRef.current) {
+        setIsRefreshing(false);
+      }
+    }
   }, [studentId, fetchAndSet]);
 
-  return { data, loading, error, refetch, lastFetchedAt };
+  return { data, loading, isRefreshing, error, refetch, lastFetchedAt };
 }
 
 // ============================================================
-// 工具函式（給測試或管理員用）
+// 工具函式
 // ============================================================
 
-/** 清除單一學生的快取 */
 export function clearStudentCache(studentId: string): void {
   cache.delete(studentId);
 }
 
-/** 清除所有快取（例如老師登出時） */
 export function clearAllStudentCache(): void {
   cache.clear();
   inflightRequests.clear();

@@ -1,6 +1,8 @@
 // src/services/analytics/AnalyticsService.ts
-import { collection, getDocs, query, where, doc, getDoc, orderBy, limit,
-         getDocsFromCache, getDocFromCache } from 'firebase/firestore';
+import {
+    collection, getDocs, query, where, doc, getDoc, orderBy, limit,
+    getDocsFromCache, getDocFromCache
+} from 'firebase/firestore';
 import { db } from '../../firebase';
 import { AttemptRecord } from '../storage/ProgressStore';
 import { ClassStatsService, ClassStats } from './ClassStatsService';
@@ -187,11 +189,20 @@ export class AnalyticsService {
      *   - 「重新整理」按鈕會強制走 Layer 3
      * ============================================================
      */
-    async getStudentDetail(displayId: string): Promise<StudentAnalytics> {
+    async getStudentDetail(
+        displayId: string,
+        options?: { forceServer?: boolean }
+    ): Promise<StudentAnalytics> {
+        const forceServer = options?.forceServer === true;
+
+        if (forceServer) {
+            console.log(`🔄 [AnalyticsService] "${displayId}" 強制更新，跳過 Layer 2 快取`);
+        }
+
         const attemptsRef = collection(db, 'attempts');
 
         // ============================================================
-        // 步驟 1：讀 attempts（快取優先）
+        // 步驟 1：讀 attempts
         // ============================================================
         const q1 = query(
             attemptsRef,
@@ -203,26 +214,27 @@ export class AnalyticsService {
         let attempts: AttemptRecord[] = [];
         let attemptsSource: 'cache' | 'server' = 'cache';
 
-        // Layer 2: 嘗試從 IndexedDB 快取讀取
-        try {
-            const cachedSnap = await getDocsFromCache(q1);
-            if (!cachedSnap.empty) {
-                attempts = cachedSnap.docs.map(d => d.data() as AttemptRecord);
-                console.log(`📦 [AnalyticsService] "${displayId}" 從 IndexedDB 快取讀到 ${attempts.length} 筆 attempts（0 配額）`);
+        // 🔥 Layer 2：只在「非強制更新」時嘗試
+        if (!forceServer) {
+            try {
+                const cachedSnap = await getDocsFromCache(q1);
+                if (!cachedSnap.empty) {
+                    attempts = cachedSnap.docs.map(d => d.data() as AttemptRecord);
+                    console.log(`📦 [AnalyticsService] "${displayId}" 從 IndexedDB 快取讀到 ${attempts.length} 筆 attempts（0 配額）`);
+                }
+            } catch (e) {
+                // 快取不存在或查詢未執行過 → 正常，繼續往下走
             }
-        } catch (e) {
-            // 快取不存在或查詢未執行過 → 正常，繼續往下走
         }
 
-        // Layer 3: 快取未命中 → 走伺服器
+        // Layer 3：快取未命中或強制更新 → 走伺服器
         if (attempts.length === 0) {
             attemptsSource = 'server';
-            console.log(`🌐 [AnalyticsService] "${displayId}" 快取未命中，從伺服器讀取 attempts...`);
+            console.log(`🌐 [AnalyticsService] "${displayId}" 從伺服器讀取 attempts...`);
 
             const serverSnap = await getDocs(q1);
             attempts = serverSnap.docs.map(d => d.data() as AttemptRecord);
 
-            // Fallback：若 displayId 查不到，改用 UID 查
             if (attempts.length === 0) {
                 const q2 = query(
                     attemptsRef,
@@ -238,7 +250,7 @@ export class AnalyticsService {
         }
 
         // ============================================================
-        // 步驟 2：讀 studentStates（快取優先）
+        // 步驟 2：讀 studentStates
         // ============================================================
         let profile = {
             studentId: displayId,
@@ -247,19 +259,21 @@ export class AnalyticsService {
             currentLevel: 1,
         };
         let customSpeechFloor: number | undefined;
-        let studentTimeZone: string | undefined;  // 新增
+        let studentTimeZone: string | undefined;
 
         const stateRef = doc(db, 'studentStates', displayId);
         let stateData: any = null;
 
-        // Layer 2
-        try {
-            const cachedDoc = await getDocFromCache(stateRef);
-            if (cachedDoc.exists()) {
-                stateData = cachedDoc.data();
-                console.log(`📦 [AnalyticsService] "${displayId}" 從快取讀到 studentStates`);
-            }
-        } catch { /* 快取 miss */ }
+        // 🔥 Layer 2
+        if (!forceServer) {
+            try {
+                const cachedDoc = await getDocFromCache(stateRef);
+                if (cachedDoc.exists()) {
+                    stateData = cachedDoc.data();
+                    console.log(`📦 [AnalyticsService] "${displayId}" 從快取讀到 studentStates`);
+                }
+            } catch { /* 快取 miss */ }
+        }
 
         // Layer 3
         if (!stateData) {
@@ -278,19 +292,19 @@ export class AnalyticsService {
         if (stateData) {
             profile.currentLevel = stateData.currentLevel ?? 1;
             customSpeechFloor = stateData.customSpeechFloor;
-            studentTimeZone = stateData.timeZone;  // 新增
+            studentTimeZone = stateData.timeZone;
             console.log(`✅ [AnalyticsService] 當前等級 L${profile.currentLevel}`);
         }
 
         // ============================================================
-        // 步驟 3：從 displayId 解析姓名/班級（0 筆讀取）
+        // 步驟 3：從 displayId 解析姓名/班級
         // ============================================================
         const parsed = this.parseDisplayId(displayId);
         profile.className = parsed.className;
         profile.name = parsed.name;
 
         // ============================================================
-        // 步驟 4：預分析，取得弱點單字 ID
+        // 步驟 4：預分析
         // ============================================================
         const preAnalysis = analyzeStudent(attempts, profile, new Map(), {
             weakWordsWindowDays: 7,
@@ -298,7 +312,11 @@ export class AnalyticsService {
         const weakWordIds = preAnalysis.weakestWords.map(w => w.wordId);
 
         // ============================================================
-        // 步驟 5：取得弱點單字物件（最多 5 個）
+        // 步驟 5：取得弱點單字物件
+        //
+        // 🔥 forceServer 時，單字也要從伺服器讀（避免快取版本）
+        //    但這需要改 FirestoreWordRepository，暫不處理。
+        //    弱點單字是「穩定的內容」，不會因強制更新而變動。
         // ============================================================
         let wordMap = new Map<string, Word>();
         if (weakWordIds.length > 0) {
@@ -313,7 +331,7 @@ export class AnalyticsService {
         }
 
         // ============================================================
-        // 步驟 6：讀取每日快照（快取優先）
+        // 步驟 6：讀取每日快照
         // ============================================================
         const snapshotsRef = collection(db, 'studentStates', displayId, 'dailySnapshots');
         const snapshotsQuery = query(
@@ -324,16 +342,18 @@ export class AnalyticsService {
 
         let dailySnapshots: DailySnapshot[] = [];
 
-        // Layer 2
-        try {
-            const cachedSnap = await getDocsFromCache(snapshotsQuery);
-            if (!cachedSnap.empty) {
-                dailySnapshots = cachedSnap.docs
-                    .map(d => d.data() as DailySnapshot)
-                    .sort((a, b) => a.date.localeCompare(b.date));
-                console.log(`📦 [AnalyticsService] "${displayId}" 從快取讀到 ${dailySnapshots.length} 筆快照`);
-            }
-        } catch { /* cache miss */ }
+        // 🔥 Layer 2
+        if (!forceServer) {
+            try {
+                const cachedSnap = await getDocsFromCache(snapshotsQuery);
+                if (!cachedSnap.empty) {
+                    dailySnapshots = cachedSnap.docs
+                        .map(d => d.data() as DailySnapshot)
+                        .sort((a, b) => a.date.localeCompare(b.date));
+                    console.log(`📦 [AnalyticsService] "${displayId}" 從快取讀到 ${dailySnapshots.length} 筆快照`);
+                }
+            } catch { /* cache miss */ }
+        }
 
         // Layer 3
         if (dailySnapshots.length === 0) {
@@ -358,7 +378,7 @@ export class AnalyticsService {
         });
         result.dailySnapshots = dailySnapshots;
         result.customSpeechFloor = customSpeechFloor;
-        result.timeZone = studentTimeZone;  // 新增
+        result.timeZone = studentTimeZone;
 
         console.log(`✅ [AnalyticsService] "${displayId}" 完成（attempts 來源：${attemptsSource}）`);
 
