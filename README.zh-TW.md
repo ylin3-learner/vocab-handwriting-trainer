@@ -60,6 +60,7 @@
 負責所有對外的 I/O（Firestore、匯出、配額監控），`features/` 再把兩者組裝成畫⾯。
 以下是專案**目前實際的檔案結構**：
 
+``` mermaid
 graph TD
     %% 樣式定義
     classDef features fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
@@ -112,7 +113,7 @@ graph TD
     class S1,S2,S3 services;
     class L1,L2,L3 storage;
     class E1,E2,E3 external;
-
+```
 
 ```
 vocab-handwriting-trainer/

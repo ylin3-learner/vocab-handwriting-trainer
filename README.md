@@ -69,6 +69,7 @@ The codebase is organized by **Single Responsibility Principle (SRP)**: `domain/
 logic, `services/` owns every I/O boundary (Firestore, exports, monitoring), and
 `features/` wires them together into screens. This is the actual current project tree:
 
+``` mermaid
 graph TD
     %% 樣式定義
     classDef features fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
@@ -121,7 +122,7 @@ graph TD
     class S1,S2,S3 services;
     class L1,L2,L3 storage;
     class E1,E2,E3 external;
-
+```
 
 ```
 vocab-handwriting-trainer/
