@@ -664,6 +664,103 @@ learning is worse, but because the data isn't there yet. This is the same
 reasoning that leads every production ML system to start with a heuristic
 baseline before training a model on the residuals.
 
+## 📊 Data Distribution Analysis
+
+As of October 2026, the system has accumulated **9,580 attempts**
+across 7 students. A query of the distribution across levels reveals a
+highly skewed pattern:
+
+| Level | Estimated attempts | Share |
+|---|---|---|
+| L1 | 4,915 | 51.3% |
+| L2 | 2,826 | 29.5% |
+| L3 | 230 | 2.4% |
+| L4 | 450 | 4.7% |
+| L5 | 1,044 | 10.9% |
+| L6 | 115 | 1.2% |
+
+**This is not random.** It is the expected consequence of an adaptive
+system. Looking at where students currently sit:
+
+| Student | Current level | Total attempts |
+|---|---|---|
+| 801_25_楊芳甯 | L1 | 1,679 |
+| 802_18_方妍靜 | L1 | 1,533 |
+| 805_11_黃彥鈞 | L1 | 1,649 |
+| 805_2_李忠訓 | L1 | 747 |
+| 802_16_劉展成 | L4 | 1,262 |
+| 802_25_林家萱 | L4 | 1,270 |
+| 804_18_李芷柔 | L6 | 1,440 |
+
+Four students are stuck at L1 (they are the weakest cohort in this
+particular group); two are at L4; one is at L6. **No student is
+currently at L2, L3, or L5.** These three tiers are "transit" levels —
+students pass through them but rarely stay, so attempts accumulate
+only briefly before the student is promoted or demoted.
+
+The L5 spike (10.9%) is a separate phenomenon: it comes from the
+probe mechanism in `buildDefaultNewWords`, which reserves ~10% of each
+new-word pool for questions one level above the student's current tier.
+So L5 attempts are not a continuous learning trajectory — they are
+individually sampled probes from students sitting at L4.
+
+### Implication for knowledge tracing
+
+This distribution has a direct consequence for any attempt to move from
+rule-based DDA to probabilistic skill models such as **Bayesian
+Knowledge Tracing (BKT)**. Standard BKT requires on the order of
+25–250 samples per skill to estimate its four parameters
+(`P(L0)`, `P(T)`, `P(S)`, `P(G)`) with any stability. At the level of
+individual tiers, that gives:
+
+| Level | Feasibility for per-level BKT |
+|---|---|
+| L1 | ✅ Well above threshold |
+| L2 | ✅ Well above threshold |
+| L3 | ⚠️ Borderline (230 samples) |
+| L4 | ⚠️ Borderline (450 samples) |
+| L5 | 🟡 Sample count is adequate, but the samples are *probes*, not a continuous learning trajectory |
+| L6 | ❌ Insufficient (115 samples) |
+
+**Only L1 and L2 can be modeled reliably with naive per-level BKT.**
+Two future directions follow from this:
+
+1. **Hierarchical Bayesian BKT** — let sparse tiers (L3, L4, L6) share
+   statistical strength with dense ones through a common prior on the
+   learning-rate parameter. This is the standard technique for
+   balancing unequal sample sizes across groups in Bayesian modeling.
+2. **Root-level BKT** — treat the word root (`spect`, `port`, `form`)
+   rather than the difficulty tier as the skill unit. Roots naturally
+   span multiple tiers, so a single root's data aggregates across
+   L1-L6 and avoids the "one tier, one skill" imbalance entirely. This
+   is consistent with the root-leverage direction already sketched
+   under "Future Work".
+
+Neither direction is implemented. The pilot data is documented here so
+that (a) the distribution is explicit for anyone revisiting the
+modeling question later, and (b) the case for hierarchical/root-level
+BKT over naive per-level BKT is grounded in the actual data rather than
+in intuition.
+
+### Why this analysis is here
+
+The path to this section ran through the five handwriting-quality
+signals the system already collects on every attempt:
+`recognizedText`, `editDistance`, `similarity`, `responseTimeMs`, and
+`snapshotImageUrl`. These fields are currently used only for
+*error-type classification* (the pie chart the teacher sees) — they
+never enter the level-evaluation path. The intuition was that "wrong"
+should not be binary: a `similarity = 0.9` miss is not the same as a
+`similarity = 0.1` miss. That intuition points directly at BKT, which
+updates a probabilistic belief about the student's knowledge state
+using a *likelihood* rather than a binary label.
+
+Trying to apply BKT to the current data immediately surfaced the
+distribution problem above. So the "analysis" section is not a
+detour — it is the first result of attempting to build a probabilistic
+model on top of the rule-based system, and it is what tells us *which*
+modeling approach is actually viable at this scale.
+
 ## ⚠️ Known Limitations
 
 ### Firestore security rules — deferred to post-pilot
