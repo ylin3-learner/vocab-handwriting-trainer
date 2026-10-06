@@ -74,7 +74,21 @@ export interface PerformanceMetrics {
   correctRate: number;
   avgResponseTimeMs: number;
   timeoutRate: number;
-  attemptsInCurrentLevel: number;
+
+  // 🔥 拆解 attemptsInCurrentLevel
+  attemptsInCurrentLevel: number;   // 保留（相容）
+  attemptsAtLevel: number;          // 等級 == currentLevel
+  attemptsBelowLevel: number;       // 等級 < currentLevel
+  attemptsAboveLevel: number;       // 等級 > currentLevel（probe）
+
+  // 🔥 Probe 表現
+  probeCorrectRate: number;         // probe 題目的正確率
+
+  // 🔥 時間趨勢
+  earlyCorrectRate: number;         // 前半段正確率
+  lateCorrectRate: number;          // 後半段正確率
+  trend: number;                    // lateCorrectRate - earlyCorrectRate
+
   consecutiveCorrect: number;
   consecutiveWrong: number;
 }

@@ -623,7 +623,8 @@ export class QuizOrchestrator implements QuizSessionApi {
     console.log(`✍️ [submitAnswer]「${word.word}」→ ${processed.grading.isCorrect ? '✅ 正確' : '❌ 錯誤'}（quality=${processed.grading.quality}）`);
 
     let progressionDecision: ProgressionDecision | null = null;
-    if (this.sessionAttempts > 0 && this.sessionAttempts % 10 === 0) {
+    // 🔥 從 `% 10` 改為 `% 30`，與 MIN_ATTEMPTS_BETWEEN_EVALUATIONS 對齊
+    if (this.sessionAttempts > 0 && this.sessionAttempts % 30 === 0) {
       try {
         progressionDecision = await this.levelProgressionService.evaluate(displayId);
         if (progressionDecision && progressionDecision.action !== 'hold') {

@@ -7,30 +7,12 @@ import { FirestoreWordRepository } from '../wordRepository/FirestoreWordReposito
 import { calculateMetrics } from '../../domain/progression/metricsCalculator';
 import { PerformanceMetrics } from '../../types/progression';
 
-/**
- * 職責：從 Firestore 撈取學生的作答紀錄，聚合成策略需要的指標
- *
- * Key 用 studentDisplayId：
- *   attempts 文件同時存有 studentId（uid）和 studentDisplayId（複合識別碼），
- *   查詢時用 studentDisplayId 才能跨 UID 追蹤同一位學生。
- *
- * 設計原則：
- * - 不決定「要不要升級」（這是策略的職責）
- * - 不碰 UI
- * - 只做「資料獲取 + 委派純函式計算」
- */
 export class PerformanceTracker {
   private wordRepository = new FirestoreWordRepository();
 
-  /** 滑動視窗大小（最近 N 題） */
+  /** 滑動窗口大小（最近 N 題） */
   private static readonly WINDOW_SIZE = 30;
 
-  /**
-   * 取得學生近期的表現指標
-   *
-   * @param displayId 學生的複合識別碼（例如 "709_1_林佑綸"）
-   * @param currentLevel 當前等級（用於計算 attemptsInCurrentLevel）
-   */
   async getRecentMetrics(
     displayId: string,
     currentLevel: number
@@ -41,7 +23,7 @@ export class PerformanceTracker {
     const attemptsRef = collection(db, 'attempts');
     const q = query(
       attemptsRef,
-      where('studentDisplayId', '==', displayId), // 🔥 修正：欄位名為 studentDisplayId
+      where('studentDisplayId', '==', displayId),
       orderBy('timestamp', 'desc'),
       limit(PerformanceTracker.WINDOW_SIZE)
     );
@@ -65,7 +47,6 @@ export class PerformanceTracker {
     } catch (e) {
       console.warn('⚠️ [PerformanceTracker] 無法取得單字等級，使用保守估計:', e);
     }
-    // 加一層保護：
     const wordLevelMap = new Map<string, number>();
     for (const w of words) {
       const lv = Number(w.level ?? '1');
@@ -73,29 +54,45 @@ export class PerformanceTracker {
     }
 
     // ============================================================
-    // 步驟 3：計算 attemptsInCurrentLevel 
+    // 🔥 步驟 3：拆解 attemptsInCurrentLevel
     // ============================================================
-    // 舊：只算「等於 currentLevel」
-    // 新：算「小於等於 currentLevel」（probe 的更高難度不懲罰學生）
-    /*
-    理由：對 L1 學生來說，probe 的 L2 單字是「超綱挑戰」，不應該算進「當前難度的表現」。
-    反之，如果學生從 L2 被降級到 L1，那些 L2 的作答也不該算進 L1 的分母。
-    */
-    const attemptsInCurrentLevel = attempts.filter((a) => {
+    let attemptsAtLevel = 0;
+    let attemptsBelowLevel = 0;
+    let attemptsAboveLevel = 0;
+    let probeCorrectCount = 0;
+
+    for (const a of attempts) {
       const lv = wordLevelMap.get(a.wordId);
-      if (lv === undefined) return true;  // 查不到的保守算入
-      return lv <= currentLevel;
-    }).length;
+      if (lv === undefined) {
+        // 查不到等級 → 保守算入 atLevel
+        attemptsAtLevel++;
+        continue;
+      }
+      if (lv === currentLevel) {
+        attemptsAtLevel++;
+      } else if (lv < currentLevel) {
+        attemptsBelowLevel++;
+      } else {
+        attemptsAboveLevel++;
+        if (a.isCorrect) probeCorrectCount++;
+      }
+    }
+
+    const attemptsInCurrentLevel = attemptsAtLevel + attemptsBelowLevel;
+    const probeCorrectRate =
+      attemptsAboveLevel > 0 ? probeCorrectCount / attemptsAboveLevel : 0;
 
     // ============================================================
     // 步驟 4：委派純函式計算指標
     // ============================================================
-    return calculateMetrics(attempts, attemptsInCurrentLevel);
+    return calculateMetrics(attempts, attemptsInCurrentLevel, {
+      attemptsAtLevel,
+      attemptsBelowLevel,
+      attemptsAboveLevel,
+      probeCorrectRate,
+    });
   }
 
-  // ============================================================
-  // 邊界情境：完全沒有作答紀錄
-  // ============================================================
   private emptyMetrics(): PerformanceMetrics {
     return {
       recentAttempts: 0,
@@ -103,6 +100,13 @@ export class PerformanceTracker {
       avgResponseTimeMs: 0,
       timeoutRate: 0,
       attemptsInCurrentLevel: 0,
+      attemptsAtLevel: 0,
+      attemptsBelowLevel: 0,
+      attemptsAboveLevel: 0,
+      probeCorrectRate: 0,
+      earlyCorrectRate: 0,
+      lateCorrectRate: 0,
+      trend: 0,
       consecutiveCorrect: 0,
       consecutiveWrong: 0,
     };
