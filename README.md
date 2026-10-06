@@ -69,6 +69,60 @@ The codebase is organized by **Single Responsibility Principle (SRP)**: `domain/
 logic, `services/` owns every I/O boundary (Firestore, exports, monitoring), and
 `features/` wires them together into screens. This is the actual current project tree:
 
+graph TD
+    %% 樣式定義
+    classDef features fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef domain fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    classDef services fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+    classDef storage fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px;
+    classDef external fill:#fce4ec,stroke:#d81b60,stroke-width:2px;
+
+    subgraph Features["前端介面層 (Features)"]
+        UI1["測驗流程 (Quiz)"]
+        UI2["教師儀表板 (Dashboard)"]
+        UI3["管理後台 (Admin)"]
+    end
+
+    subgraph Domain["領域層 (Domain - 純函式)"]
+        D1["SM-2 排程"]
+        D2["評分與遮罩"]
+        D3["適應性分級 (DDA)"]
+        D4["選題與配額"]
+    end
+
+    subgraph Services["服務層 (Services - I/O 邊界)"]
+        S1["儲存服務 (ProgressStore)"]
+        S2["分析服務 (Analytics)"]
+        S3["作業服務 (Assignment)"]
+    end
+
+    subgraph Storage["本地儲存 (Local Storage)"]
+        L1["In-Memory"]
+        L2["LocalStorage"]
+        L3["IndexedDB (Firestore Cache)"]
+    end
+
+    subgraph External["外部依賴 (External)"]
+        E1["Firebase (Firestore/Auth)"]
+        E2["Web Speech API (TTS)"]
+        E3["Google IME (手寫)"]
+    end
+
+    %% 依賴關係
+    Features --> Domain
+    Features --> Services
+    Services --> Domain
+    Services --> Storage
+    Services --> External
+
+    %% 樣式應用
+    class UI1,UI2,UI3 features;
+    class D1,D2,D3,D4 domain;
+    class S1,S2,S3 services;
+    class L1,L2,L3 storage;
+    class E1,E2,E3 external;
+```
+
 ```
 vocab-handwriting-trainer/
 ├── tsconfig.json
