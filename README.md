@@ -203,7 +203,7 @@ vocab-handwriting-trainer/
 
 - **Learning state is keyed by `displayId`, not Firebase UID.** Anonymous auth generates a
   fresh UID every login, so keying progress by UID would lose everything on re-login or
-  device switch. The compound key `{class}_{seat}_{name}` (e.g. `709_1_林佑倫`) is stable
+  device switch. The compound key `{class}_{seat}_{name}` (e.g. `709_1_S1`) is stable
   across sessions, so `studentStates/{displayId}` holds levels, SM-2 progress, and daily
   snapshots in one document tree.
 
@@ -680,17 +680,18 @@ highly skewed pattern:
 | L6 | 115 | 1.2% |
 
 **This is not random.** It is the expected consequence of an adaptive
-system. Looking at where students currently sit:
+system. Looking at where students currently sit (identified only by
+class and seat number, without names):
 
-| Student | Current level | Total attempts |
+| Student ID | Current level | Total attempts |
 |---|---|---|
-| 801_25_楊芳甯 | L1 | 1,679 |
-| 802_18_方妍靜 | L1 | 1,533 |
-| 805_11_黃彥鈞 | L1 | 1,649 |
-| 805_2_李忠訓 | L1 | 747 |
-| 802_16_劉展成 | L4 | 1,262 |
-| 802_25_林家萱 | L4 | 1,270 |
-| 804_18_李芷柔 | L6 | 1,440 |
+| 801_25 | L1 | 1,679 |
+| 802_18 | L1 | 1,533 |
+| 805_11 | L1 | 1,649 |
+| 805_2  | L1 | 747 |
+| 802_16 | L4 | 1,262 |
+| 802_25 | L4 | 1,270 |
+| 804_18 | L6 | 1,440 |
 
 Four students are stuck at L1 (they are the weakest cohort in this
 particular group); two are at L4; one is at L6. **No student is
