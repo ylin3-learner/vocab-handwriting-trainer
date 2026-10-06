@@ -655,6 +655,43 @@ nothing in the existing quiz flow, while word-bank upload requires rewiring the 
   pipeline validates, converts, builds, and deploys automatically
 - **Linting:** ESLint with `@typescript-eslint/recommended`
 
+## 🚀 Deployment & Self-Hosting (Bring Your Own Infrastructure)
+
+This project follows a **"Bring Your Own Infrastructure" (BYOI)** open-source model. The author does not provide a centrally hosted service, ensuring long-term sustainability and data sovereignty. Schools or teachers who wish to use this system can simply clone the repository and configure their own Firebase project.
+
+### 📦 Deployment Steps
+
+1. **Clone this repository**
+   ```bash
+   git clone https://github.com/your-username/vocab-handwriting-trainer.git
+   cd vocab-handwriting-trainer
+   npm install
+   ```
+
+2. Create a Firebase project
+
+  - Go to Firebase Console and create a new project (the free Spark tier is sufficient).
+
+  - Enable Firestore Database and Authentication (Anonymous + Email/Password).
+
+  - Deploy the `firestore.rules` security rules.
+
+3. Configure secret files (see templates below)
+  This project relies on two Firebase secret files. For security reasons, these files are not committed to GitHub. Please create your own files based on the templates below:
+
+  - `serviceAccountKey.json` (Frontend Web SDK configuration)
+  Refer to `serviceAccountKey.template.json` and replace the values with your actual Firebase project settings from "Project Settings → Your apps → SDK setup and configuration".
+
+  - `service-account.json` (Admin SDK private key, used by maintenance scripts)
+  Refer to `service-account.template.json` and replace the content with the JSON file downloaded from "Project Settings → Service accounts → Generate new private key".
+
+4. Deploy to GitHub Pages (or any static hosting service)
+    ``` bash
+    npm run build
+    ```
+  
+  Deploy the dist/ directory to GitHub Pages, Vercel, or Netlify.
+
 ## 🧭 Product Validation Approach
 
 Because this system supports a real, dated competition with a small, known group of

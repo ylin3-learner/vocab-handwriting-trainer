@@ -572,6 +572,44 @@ Stage 6-A 之所以刻意排在 6-B 之前，是因為儀表板**只讀**、完�
   轉檔、建置、部署
 - **Lint：** ESLint，使用 `@typescript-eslint/recommended` 規則集
 
+## 🚀 部署與自架（Bring Your Own Infrastructure）
+
+本專案採用 **「自帶基礎設施（BYOI）」** 的開源模式。作者不提供中央託管的服務，以確保專案的長期可持續性與資料主權。學校或老師若想使用本系統，只需 clone 專案並設定自己的 Firebase 專案即可快速上線。
+
+### 📦 部署步驟
+
+1. **Clone 本專案**
+   ```bash
+   git clone https://github.com/你的帳號/vocab-handwriting-trainer.git
+   cd vocab-handwriting-trainer
+   npm install
+   ```
+
+   建立 Firebase 專案
+
+2. 前往 Firebase Console 建立新專案（免費 Spark 方案即可）。
+
+  - 啟用 Firestore Database 與 Authentication（匿名登入 + 電子郵件/密碼登入）。
+  - 部署 `firestore.rules` 安全規則。
+
+3. 設定密鑰檔案（見下方模板）
+  本專案依賴兩個 Firebase 密鑰檔案。基於安全理由，這兩個檔案不會被上傳到 GitHub。請依照下方模板建立自己的檔案：
+
+  - `serviceAccountKey.json`（前端 Web 應用程式設定）
+  請參考 `serviceAccountKey.template.json`，將內容替換為你 Firebase 專案「專案設定 → 您的應用程式 → SDK 設定與配置」中的實際數值。
+
+  - `service-account.json`（Admin SDK 私鑰，供維護腳本使用）
+  請參考 `service-account.template.json`，將內容替換為你從 Firebase 專案「專案設定 → 服務帳戶 → 產生新的私密金鑰」下載的 JSON 檔案內容。
+
+4. 部署到 GitHub Pages（或任何靜態託管服務）
+    ``` bash
+    npm run build
+    ```
+
+💰 關於 Firebase 成本
+
+本系統在 7 人試點規模下，每日讀取量約為 2–3K，遠低於 Spark 免費方案的 50K 上限。若學生規模擴大至數百人，學校可自行將 Firebase 升級為 Blaze 付費方案（以學校規模而言，每月成本通常極低），所有雲端成本由使用單位自行承擔。
+
 ## 🧭 產品驗證思路
 
 由於這個系統要服務一場有明確日期、對象人數固定（約 7 位學生）的真實比賽，路線圖刻意
