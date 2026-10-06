@@ -633,7 +633,7 @@ The current system's approach to adaptive vocabulary recommendation sits at a
 specific point in the research literature, and it is worth being explicit about
 where.
 
-A 2026 paper (Zhang, *Discover Artificial Intelligence*) proposes a GCN-based
+A 2026 paper ([Zhang, *Discover Artificial Intelligence*](https://link.springer.com/article/10.1007/s44163-026-01588-3)) proposes a GCN-based
 adaptive vocabulary recommendation framework. Its central critique is of earlier
 systems that rely on **static expert-annotated knowledge graphs** (semantic,
 morphological, prerequisite relations) — these, the paper argues, cannot reflect

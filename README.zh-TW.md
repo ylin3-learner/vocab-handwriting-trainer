@@ -544,7 +544,7 @@ Stage 7 的首次現場測試已經完成。測試後直接催生了幾項功能
 目前系統在自適應單字推薦上的做法，位於研究文獻中一個明確的位置，值得寫
 清楚。
 
-2026 年一篇論文（Zhang, *Discover Artificial Intelligence*）提出基於 GCN
+2026 年一篇論文（[Zhang, *Discover Artificial Intelligence*](https://link.springer.com/article/10.1007/s44163-026-01588-3)）提出基於 GCN
 的自適應單字推薦框架。它的核心批判是：早期系統依賴**靜態的專家標註知識圖
 譜**（語意、形態、先修關係），而這種圖譜無法反映學習者的真實行為，導致推
 薦內容與學生實際需求脫節。
