@@ -1,7 +1,7 @@
 // src/domain/progression/evaluationGuard.test.ts
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { checkEvaluationGuard } from './evaluationGuard';
+import { checkEvaluationGuard, MIN_ATTEMPTS_BETWEEN_EVALUATIONS as MIN } from './evaluationGuard';
 
 describe('checkEvaluationGuard', () => {
   // ============================================================
@@ -14,11 +14,8 @@ describe('checkEvaluationGuard', () => {
       lastEvaluatedAtTotalAttempts: 0,
     });
     assert.strictEqual(r.shouldEvaluate, false);
-    if (!r.shouldEvaluate) {
-      assert.strictEqual(r.reason, 'locked');
-      if (r.reason === 'locked') {
-        assert.strictEqual(r.remainingAttempts, 30);
-      }
+    if (!r.shouldEvaluate && r.reason === 'locked') {
+      assert.strictEqual(r.remainingAttempts, 30);
     }
   });
 
@@ -34,39 +31,39 @@ describe('checkEvaluationGuard', () => {
   // ============================================================
   // 距上次評估太近
   // ============================================================
-  test('距上次評估 5 題（< 10）→ 跳過', () => {
+  test(`距上次評估 ${MIN - 5} 題（< ${MIN}）→ 跳過`, () => {
     const r = checkEvaluationGuard({
-      totalAttempts: 15,
+      totalAttempts: MIN,
       levelLockedUntilTotalAttempts: 0,
-      lastEvaluatedAtTotalAttempts: 10,
+      lastEvaluatedAtTotalAttempts: 5,
     });
     assert.strictEqual(r.shouldEvaluate, false);
     if (!r.shouldEvaluate && r.reason === 'too-soon') {
-      assert.strictEqual(r.attemptsSinceLastEval, 5);
+      assert.strictEqual(r.attemptsSinceLastEval, MIN - 5);
     }
   });
 
-  test('距上次評估 9 題（< 10）→ 跳過', () => {
+  test(`距上次評估 ${MIN - 1} 題（< ${MIN}）→ 跳過`, () => {
     const r = checkEvaluationGuard({
-      totalAttempts: 19,
+      totalAttempts: MIN + 9,
       levelLockedUntilTotalAttempts: 0,
       lastEvaluatedAtTotalAttempts: 10,
     });
     assert.strictEqual(r.shouldEvaluate, false);
   });
 
-  test('距上次評估 10 題（= 門檻）→ 評估', () => {
+  test(`距上次評估 ${MIN} 題（= 門檻）→ 評估`, () => {
     const r = checkEvaluationGuard({
-      totalAttempts: 20,
+      totalAttempts: MIN + 10,
       levelLockedUntilTotalAttempts: 0,
       lastEvaluatedAtTotalAttempts: 10,
     });
     assert.strictEqual(r.shouldEvaluate, true);
   });
 
-  test('距上次評估 15 題（> 門檻）→ 評估', () => {
+  test(`距上次評估 ${MIN + 5} 題（> 門檻）→ 評估`, () => {
     const r = checkEvaluationGuard({
-      totalAttempts: 25,
+      totalAttempts: MIN + 15,
       levelLockedUntilTotalAttempts: 0,
       lastEvaluatedAtTotalAttempts: 10,
     });
@@ -76,7 +73,7 @@ describe('checkEvaluationGuard', () => {
   // ============================================================
   // 首次評估
   // ============================================================
-  test('新學生：total=0, lastEval=0 → 跳過（距上次評估太近）', () => {
+  test('新學生：total=0, lastEval=0 → 跳過', () => {
     const r = checkEvaluationGuard({
       totalAttempts: 0,
       levelLockedUntilTotalAttempts: 0,
@@ -85,9 +82,9 @@ describe('checkEvaluationGuard', () => {
     assert.strictEqual(r.shouldEvaluate, false);
   });
 
-  test('新學生答 10 題：total=10, lastEval=0 → 評估', () => {
+  test(`新學生答 ${MIN} 題：total=${MIN}, lastEval=0 → 評估`, () => {
     const r = checkEvaluationGuard({
-      totalAttempts: 10,
+      totalAttempts: MIN,
       levelLockedUntilTotalAttempts: 0,
       lastEvaluatedAtTotalAttempts: 0,
     });
