@@ -71,57 +71,54 @@ logic, `services/` owns every I/O boundary (Firestore, exports, monitoring), and
 
 ``` mermaid
 graph TD
-    %% 樣式定義
-    classDef features fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
-    classDef domain fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
-    classDef services fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
-    classDef storage fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px;
-    classDef external fill:#fce4ec,stroke:#d81b60,stroke-width:2px;
+    %% 定義高對比度樣式（深色背景 + 白色文字），確保在淺色/深色主題下皆清晰可讀
+    classDef ui fill:#1e40af,stroke:#3b82f6,stroke-width:2px,color:#ffffff;
+    classDef domain fill:#065f46,stroke:#10b981,stroke-width:2px,color:#ffffff;
+    classDef service fill:#9a3412,stroke:#f97316,stroke-width:2px,color:#ffffff;
+    classDef infra fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#ffffff;
 
-    subgraph Features["前端介面層 (Features)"]
-        UI1["測驗流程 (Quiz)"]
-        UI2["教師儀表板 (Dashboard)"]
-        UI3["管理後台 (Admin)"]
+    subgraph Features [前端表示層 Features]
+        UI_Quiz[Quiz 測驗流程編排]:::ui
+        UI_Dash[教師儀表板]:::ui
+        UI_Admin[管理後台]:::ui
     end
 
-    subgraph Domain["領域層 (Domain - 純函式)"]
-        D1["SM-2 排程"]
-        D2["評分與遮罩"]
-        D3["適應性分級 (DDA)"]
-        D4["選題與配額"]
+    subgraph Domain [領域邏輯層 Domain - 純函式]
+        D_SM2[SM-2 間隔重複]:::domain
+        D_Grade[客觀判分與例句遮罩]:::domain
+        D_DDA[適應性分級 DDA]:::domain
+        D_Select[選題與配額政策]:::domain
     end
 
-    subgraph Services["服務層 (Services - I/O 邊界)"]
-        S1["儲存服務 (ProgressStore)"]
-        S2["分析服務 (Analytics)"]
-        S3["作業服務 (Assignment)"]
+    subgraph Services [服務邊界層 Services - I/O 邊界]
+        S_Store[進度儲存 ProgressStore]:::service
+        S_Analytics[分析服務 Analytics]:::service
+        S_Assign[作業服務 Assignment]:::service
     end
 
-    subgraph Storage["本地儲存 (Local Storage)"]
-        L1["In-Memory"]
-        L2["LocalStorage"]
-        L3["IndexedDB (Firestore Cache)"]
+    subgraph Infrastructure [基礎設施與外部依賴]
+        I_Firebase[(Firebase Firestore)]:::infra
+        I_TTS[Web Speech API TTS]:::infra
+        I_IME[Google IME 手寫]:::infra
     end
 
-    subgraph External["外部依賴 (External)"]
-        E1["Firebase (Firestore/Auth)"]
-        E2["Web Speech API (TTS)"]
-        E3["Google IME (手寫)"]
-    end
+    %% 依賴關係：由上而下單向依賴
+    UI_Quiz --> D_SM2
+    UI_Quiz --> D_Grade
+    UI_Quiz --> D_DDA
+    UI_Quiz --> D_Select
 
-    %% 依賴關係
-    Features --> Domain
-    Features --> Services
-    Services --> Domain
-    Services --> Storage
-    Services --> External
+    UI_Dash --> S_Analytics
+    UI_Admin --> S_Assign
 
-    %% 樣式應用
-    class UI1,UI2,UI3 features;
-    class D1,D2,D3,D4 domain;
-    class S1,S2,S3 services;
-    class L1,L2,L3 storage;
-    class E1,E2,E3 external;
+    D_SM2 --> S_Store
+    D_Select --> S_Store
+    S_Analytics --> S_Store
+    S_Assign --> S_Store
+
+    S_Store --> I_Firebase
+    UI_Quiz --> I_TTS
+    UI_Quiz --> I_IME
 ```
 
 ```
