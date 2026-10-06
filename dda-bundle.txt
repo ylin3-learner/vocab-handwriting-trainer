@@ -1,0 +1,1455 @@
+
+
+===== src/domain/progression/RuleBasedStrategy.ts =====
+
+// src/domain/progression/RuleBasedStrategy.ts
+import {
+  LevelProgressionStrategy,
+} from './LevelProgressionStrategy';
+import {
+  ProgressionInput,
+  ProgressionDecision,
+} from '../../types/progression';
+
+/**
+ * è¦å?å¼ç?ç´šèª¿?´ç???
+ *
+ * è¨­è??Ÿå?ï¼?
+ * - ç´”å‡½å¼ï??¸å?è¼¸å…¥å¿…å??¸å?è¼¸å‡º
+ * - ?€?‰é–¾?¼é?ä¸­åœ¨ THRESHOLDS ?©ä»¶ï¼Œæ–¹ä¾¿èª¿??
+ * - ?¥ã€Œå?ç´šæ?ä»¶ã€è??Œé?ç´šæ?ä»¶ã€å??‚ä?æ»¿è¶³ ??hold
+ */
+
+// å¾?private ?¹æ? publicï¼ˆæ? export ä¸€?‹å¸¸?¸ï?
+export const RULE_BASED_THRESHOLDS = {
+  PROMOTE_MIN_CORRECT_RATE: 0.85,
+  PROMOTE_MAX_AVG_TIME_MS: 7000,
+  PROMOTE_MIN_ATTEMPTS_IN_LEVEL: 20,
+  PROMOTE_MIN_RECENT_ATTEMPTS: 15,
+  DEMOTE_MAX_CORRECT_RATE: 0.5,
+  DEMOTE_MIN_ATTEMPTS_IN_LEVEL: 15,
+  DEMOTE_MIN_RECENT_ATTEMPTS: 15,
+  LOCK_ATTEMPTS_AFTER_CHANGE: 30,
+  PROMOTE_MIN_CONSECUTIVE_CORRECT: 5,
+  DEMOTE_MIN_CONSECUTIVE_WRONG: 5,
+} as const;
+
+export class RuleBasedStrategy implements LevelProgressionStrategy {
+  readonly name = 'RuleBased-v1';
+
+  /**
+   * ?€?‰é–¾?¼é?ä¸­ç®¡?†ã€‚æœªä¾†è‹¥è¦èª¿?ƒï??ªæ”¹?™è£¡??
+   * ?™ä??¸å€¼æ˜¯?¹æ? 8 ç§’é??®é??¶ã€å?ä¸­ç?èªçŸ¥è² è·?¨ä¼°?„å??†å€¼ã€?
+   */
+  private static readonly THRESHOLDS = RULE_BASED_THRESHOLDS;
+
+  evaluate(input: ProgressionInput): ProgressionDecision {
+    const { metrics, currentLevel, minLevel, maxLevel, totalAttempts } = input;
+    const T = RuleBasedStrategy.THRESHOLDS;
+
+    // ============================================================
+    // ?²è­· 1ï¼šæ¨£?¬ä?è¶???ä¿æ?
+    // ============================================================
+    if (metrics.recentAttempts < Math.min(T.PROMOTE_MIN_RECENT_ATTEMPTS, T.DEMOTE_MIN_RECENT_ATTEMPTS)) {
+      return this.hold(currentLevel, `æ¨?œ¬ä¸è¶³ï¼?{metrics.recentAttempts} é¡Œï?`);
+    }
+
+    // ============================================================
+    // ?²è­· 2ï¼šå·²?¨æ?é«??€ä½ç?ç´???ä¸å?ä½?
+    //
+    // ?”¥ ä¿®æ­£ï¼šæ??Œå·²?¨æ?ä½ç?ç´šã€ç??¤æ–·?¨ç??ºä?ï¼?
+    //    ä¸å??ªåœ¨?Œæ­£ç¢ºç? < 50%?æ??æ???
+    //    ?¾åœ¨?¡è??¯ã€Œæ­£ç¢ºç?å¤ªä??æ??Œé€??ç­”éŒ¯?å??´ç??ç?ï¼?
+    //    ?ªè? currentLevel <= minLevel å°±ä?å¾?hold??
+    // ============================================================
+    if (currentLevel >= maxLevel) {
+      return this.hold(currentLevel, `å·²é??€é«˜ç?ç´?L${maxLevel}`);
+    }
+    if (currentLevel <= minLevel) {
+      // å·²åœ¨?€ä½ç?ç´šï??¡æ??é?ï¼Œä??„æ˜¯?¯ä»¥?—è©¦?‡ç?
+      // ï¼ˆå?ç´šé?è¼¯åœ¨ä¸‹é¢ï¼Œè‹¥ç¬¦å??‡ç?æ¢ä»¶??promoteï¼?
+    }
+
+    // ============================================================
+    // ?¤æ–· 1ï¼šå?ç´šæ?ä»?
+    // ============================================================
+    const canPromoteByRate =
+      metrics.correctRate >= T.PROMOTE_MIN_CORRECT_RATE &&
+      metrics.avgResponseTimeMs < T.PROMOTE_MAX_AVG_TIME_MS &&
+      metrics.attemptsInCurrentLevel >= T.PROMOTE_MIN_ATTEMPTS_IN_LEVEL;
+
+    const canPromoteByStreak =
+      metrics.consecutiveCorrect >= T.PROMOTE_MIN_CONSECUTIVE_CORRECT &&
+      metrics.attemptsInCurrentLevel >= T.PROMOTE_MIN_ATTEMPTS_IN_LEVEL;
+
+    if (canPromoteByRate || canPromoteByStreak) {
+      const reason = canPromoteByRate
+        ? `æ­?¢º??${(metrics.correctRate * 100).toFixed(0)}%?å¹³??${(metrics.avgResponseTimeMs / 1000).toFixed(1)}sï¼Œè¡¨?¾å„ª?°`
+        : `???ç­”å? ${metrics.consecutiveCorrect} é¡Œï?è¡¨ç¾?ªç•°`;
+      return this.promote(currentLevel + 1, reason, totalAttempts);
+    }
+
+    // ============================================================
+    // ?¤æ–· 2ï¼šé?ç´šæ?ä»?
+    // ============================================================
+    const canDemoteByRate =
+      metrics.correctRate < T.DEMOTE_MAX_CORRECT_RATE &&
+      metrics.attemptsInCurrentLevel >= T.DEMOTE_MIN_ATTEMPTS_IN_LEVEL;
+
+    const canDemoteByStreak =
+      metrics.consecutiveWrong >= T.DEMOTE_MIN_CONSECUTIVE_WRONG &&
+      metrics.attemptsInCurrentLevel >= T.DEMOTE_MIN_ATTEMPTS_IN_LEVEL;
+
+    if (canDemoteByRate || canDemoteByStreak) {
+      // ?”¥ ä¿®æ­£ï¼šé?ç´šå?æª¢æŸ¥ä¸‹ç?
+      if (currentLevel <= minLevel) {
+        return this.hold(
+          currentLevel,
+          `å·²é??€ä½ç?ç´?L${minLevel}ï¼Œç„¡æ³•å??`
+        );
+      }
+
+      const reason = canDemoteByRate
+        ? `æ­?¢º??${(metrics.correctRate * 100).toFixed(0)}%ï¼Œé?è¦å?å¼·åŸºç¤`
+        : `???ç­”éŒ¯ ${metrics.consecutiveWrong} é¡Œï??€è¦å?å¼·åŸºç¤`;
+      return this.demote(currentLevel - 1, reason, totalAttempts);
+    }
+
+    // ============================================================
+    // ?è¨­ï¼šä???
+    // ============================================================
+    return this.hold(
+      currentLevel,
+      `è¡¨ç¾ç©©å?ï¼ˆæ­£ç¢ºç? ${(metrics.correctRate * 100).toFixed(0)}%ï¼‰`
+    );
+  }
+
+  // ============================================================
+  // ?§éƒ¨è¼”åŠ©?¹æ?ï¼ˆç??½å?ï¼?
+  // ============================================================
+
+  private promote(newLevel: number, reason: string, totalAttempts: number): ProgressionDecision {
+    return {
+      action: 'promote',
+      newLevel,
+      reason: `?‡ç?ï¼?{reason}`,
+      lockUntilAttempts: totalAttempts + RuleBasedStrategy.THRESHOLDS.LOCK_ATTEMPTS_AFTER_CHANGE,
+    };
+  }
+
+  private demote(newLevel: number, reason: string, totalAttempts: number): ProgressionDecision {
+    return {
+      action: 'demote',
+      newLevel,
+      reason: `?ç?ï¼?{reason}`,
+      lockUntilAttempts: totalAttempts + RuleBasedStrategy.THRESHOLDS.LOCK_ATTEMPTS_AFTER_CHANGE,
+    };
+  }
+
+  private hold(level: number, reason: string): ProgressionDecision {
+    return {
+      action: 'hold',
+      newLevel: level,
+      reason,
+      lockUntilAttempts: 0, // ä¿æ?ä¸é?å®?
+    };
+  }
+}
+
+===== src/domain/progression/evaluationGuard.ts =====
+
+// src/domain/progression/evaluationGuard.ts
+
+/**
+ * ç­‰ç?è©•ä¼°?„å?è¡›é?è¼¯ï?ç´”å‡½å¼ï???
+ *
+ * å¾?LevelProgressionService.evaluate ?½å‡ºï¼Œè??¸å??Œæ˜¯?¦è©²è©•ä¼°??
+ * ?„åˆ¤?·æ??ºå¯?¨ç?æ¸¬è©¦?„ç??½å???
+ */
+
+/** ?©æ¬¡è©•ä¼°ä¹‹é??€å°‘é?è¦ç?é¡Œæ•¸ */
+export const MIN_ATTEMPTS_BETWEEN_EVALUATIONS = 10;
+
+export interface EvaluationGuardInput {
+  totalAttempts: number;
+  levelLockedUntilTotalAttempts: number;
+  lastEvaluatedAtTotalAttempts: number;
+}
+
+export type EvaluationGuardResult =
+  | { shouldEvaluate: true }
+  | { shouldEvaluate: false; reason: 'locked'; remainingAttempts: number }
+  | { shouldEvaluate: false; reason: 'too-soon'; attemptsSinceLastEval: number };
+
+/**
+ * ç´”å‡½å¼ï??¤æ–·?¯å¦?‰è©²?²è?ç­‰ç?è©•ä¼°??
+ *
+ * è¦å?ï¼ˆä?åºæª¢?¥ï?ï¼?
+ *   1. ??totalAttempts < levelLockedUntil ???–å?ä¸­ï?è·³é?
+ *   2. ??(totalAttempts - lastEvaluatedAt) < 10 ??è·ä?æ¬¡è?ä¼°å¤ªè¿‘ï?è·³é?
+ *   3. ?¦å? ???‰è©²è©•ä¼°
+ */
+export function checkEvaluationGuard(
+  input: EvaluationGuardInput
+): EvaluationGuardResult {
+  const { totalAttempts, levelLockedUntilTotalAttempts, lastEvaluatedAtTotalAttempts } = input;
+
+  if (totalAttempts < levelLockedUntilTotalAttempts) {
+    return {
+      shouldEvaluate: false,
+      reason: 'locked',
+      remainingAttempts: levelLockedUntilTotalAttempts - totalAttempts,
+    };
+  }
+
+  const attemptsSinceLastEval = totalAttempts - lastEvaluatedAtTotalAttempts;
+  if (attemptsSinceLastEval < MIN_ATTEMPTS_BETWEEN_EVALUATIONS) {
+    return {
+      shouldEvaluate: false,
+      reason: 'too-soon',
+      attemptsSinceLastEval,
+    };
+  }
+
+  return { shouldEvaluate: true };
+}
+
+===== src/services/progression/PerformanceTracker.ts =====
+
+// src/services/progression/PerformanceTracker.ts
+import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { AttemptRecord } from '../storage/ProgressStore';
+import { Word } from '../../types/word';
+import { FirestoreWordRepository } from '../wordRepository/FirestoreWordRepository';
+import { calculateMetrics } from '../../domain/progression/metricsCalculator';
+import { PerformanceMetrics } from '../../types/progression';
+
+/**
+ * ?·è²¬ï¼šå? Firestore ?ˆå?å­¸ç??„ä?ç­”ç??„ï??šå??ç??¥é?è¦ç??‡æ?
+ *
+ * Key ??studentDisplayIdï¼?
+ *   attempts ?‡ä»¶?Œæ?å­˜æ? studentIdï¼ˆuidï¼‰å? studentDisplayIdï¼ˆè??ˆè??¥ç¢¼ï¼‰ï?
+ *   ?¥è©¢?‚ç”¨ studentDisplayId ?èƒ½è·?UID è¿½è¹¤?Œä?ä½å­¸?Ÿã€?
+ *
+ * è¨­è??Ÿå?ï¼?
+ * - ä¸æ±ºå®šã€Œè?ä¸è??‡ç??ï??™æ˜¯ç­–ç•¥?„è·è²¬ï?
+ * - ä¸ç¢° UI
+ * - ?ªå??Œè??™ç²??+ å§”æ´¾ç´”å‡½å¼è?ç®—ã€?
+ */
+export class PerformanceTracker {
+  private wordRepository = new FirestoreWordRepository();
+
+  /** æ»‘å?è¦–ç?å¤§å?ï¼ˆæ?è¿?N é¡Œï? */
+  private static readonly WINDOW_SIZE = 30;
+
+  /**
+   * ?–å?å­¸ç?è¿‘æ??„è¡¨?¾æ?æ¨?
+   *
+   * @param displayId å­¸ç??„è??ˆè??¥ç¢¼ï¼ˆä?å¦?"709_1_?—ä?ç¶?ï¼?
+   * @param currentLevel ?¶å?ç­‰ç?ï¼ˆç”¨?¼è?ç®?attemptsInCurrentLevelï¼?
+   */
+  async getRecentMetrics(
+    displayId: string,
+    currentLevel: number
+  ): Promise<PerformanceMetrics> {
+    // ============================================================
+    // æ­¥é? 1ï¼šå?å¾—æ?è¿?N ç­?attempts
+    // ============================================================
+    const attemptsRef = collection(db, 'attempts');
+    const q = query(
+      attemptsRef,
+      where('studentDisplayId', '==', displayId), // ?”¥ ä¿®æ­£ï¼šæ?ä½å???studentDisplayId
+      orderBy('timestamp', 'desc'),
+      limit(PerformanceTracker.WINDOW_SIZE)
+    );
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      return this.emptyMetrics();
+    }
+
+    const attempts: AttemptRecord[] = snap.docs.map(
+      (d) => d.data() as AttemptRecord
+    );
+
+    // ============================================================
+    // æ­¥é? 2ï¼šå?å¾—é€™ä? attempts å°æ??„å–®å­—ç?ç´?
+    // ============================================================
+    const wordIds = Array.from(new Set(attempts.map((a) => a.wordId)));
+    let words: Word[] = [];
+    try {
+      words = await this.wordRepository.getWordsByIds(wordIds);
+    } catch (e) {
+      console.warn('? ï? [PerformanceTracker] ?¡æ??–å??®å?ç­‰ç?ï¼Œä½¿?¨ä?å®ˆä¼°è¨?', e);
+    }
+    // ? ä?å±¤ä?è­·ï?
+    const wordLevelMap = new Map<string, number>();
+    for (const w of words) {
+      const lv = Number(w.level ?? '1');
+      if (!isNaN(lv)) wordLevelMap.set(w.id, lv);
+    }
+
+    // ============================================================
+    // æ­¥é? 3ï¼šè?ç®?attemptsInCurrentLevel 
+    // ============================================================
+    // ?Šï??ªç??Œç???currentLevel??
+    // ?°ï?ç®—ã€Œå??¼ç???currentLevel?ï?probe ?„æ›´é«˜é›£åº¦ä??²ç½°å­¸ç?ï¼?
+    /*
+    ?†ç”±ï¼šå? L1 å­¸ç?ä¾†èªªï¼Œprobe ??L2 ?®å??¯ã€Œè?ç¶±æ??°ã€ï?ä¸æ?è©²ç??²ã€Œç•¶?é›£åº¦ç?è¡¨ç¾?ã€?
+    ?ä?ï¼Œå??œå­¸?Ÿå? L2 è¢«é?ç´šåˆ° L1ï¼Œé‚£äº?L2 ?„ä?ç­”ä?ä¸è©²ç®—é€?L1 ?„å?æ¯ã€?
+    */
+    const attemptsInCurrentLevel = attempts.filter((a) => {
+      const lv = wordLevelMap.get(a.wordId);
+      if (lv === undefined) return true;  // ?¥ä??°ç?ä¿å?ç®—å…¥
+      return lv <= currentLevel;
+    }).length;
+
+    // ============================================================
+    // æ­¥é? 4ï¼šå?æ´¾ç??½å?è¨ˆç??‡æ?
+    // ============================================================
+    return calculateMetrics(attempts, attemptsInCurrentLevel);
+  }
+
+  // ============================================================
+  // ?Šç??…å?ï¼šå??¨æ??‰ä?ç­”ç???
+  // ============================================================
+  private emptyMetrics(): PerformanceMetrics {
+    return {
+      recentAttempts: 0,
+      correctRate: 0,
+      avgResponseTimeMs: 0,
+      timeoutRate: 0,
+      attemptsInCurrentLevel: 0,
+      consecutiveCorrect: 0,
+      consecutiveWrong: 0,
+    };
+  }
+}
+
+===== src/domain/progression/metricsCalculator.ts =====
+
+// src/domain/progression/metricsCalculator.ts
+import { AttemptRecord } from '../../services/storage/ProgressStore';
+import { PerformanceMetrics } from '../../types/progression';
+
+/** ?æ??‚é?è¶…é?æ­¤å€¼è???timeoutï¼ˆè?é¡Œç›®?åˆ¶ä¸€?´ï? */
+const TIMEOUT_THRESHOLD_MS = 8000;
+
+/**
+ * ç´”å‡½å¼ï?å¾ä?ç­”ç??„è?ç®—è¡¨?¾æ?æ¨?
+ *
+ * @param recentAttempts ?€è¿?N ç­†ä?ç­”ï?å·²ç”± Service å±¤æ?å¥½å?ï¼?
+ * @param currentLevelAttempts ?¶å? level ç´¯è??„ä?ç­”ï??¨æ–¼?¤æ–·?¯å¦å¤ æ¨£?¬ï?
+ */
+export function calculateMetrics(
+  recentAttempts: AttemptRecord[],
+  currentLevelAttempts: number
+): PerformanceMetrics {
+  // ===== ?Šç??…å?ï¼šç„¡è³‡æ? =====
+  if (recentAttempts.length === 0) {
+    return {
+      recentAttempts: 0,
+      correctRate: 0,
+      avgResponseTimeMs: 0,
+      timeoutRate: 0,
+      attemptsInCurrentLevel: currentLevelAttempts,
+      consecutiveCorrect: 0,
+      consecutiveWrong: 0,
+    };
+  }
+
+  // ===== ?†é?ï¼štimeout vs. ?‰æ?ä½œç? =====
+  const timeouts = recentAttempts.filter(
+    (a) => (a.responseTimeMs || 0) > TIMEOUT_THRESHOLD_MS
+  );
+  const validAttempts = recentAttempts.filter(
+    (a) => (a.responseTimeMs || 0) <= TIMEOUT_THRESHOLD_MS
+  );
+
+  const timeoutRate = timeouts.length / recentAttempts.length;
+
+  // ===== æ­?¢º?‡ï??†æ??’é™¤ timeout =====
+  const correctRate =
+    validAttempts.length > 0
+      ? validAttempts.filter((a) => a.isCorrect).length / validAttempts.length
+      : 0;
+
+  // ===== å¹³å??æ??‚é?ï¼šæ???timeout =====
+  const avgResponseTimeMs =
+    validAttempts.length > 0
+      ? validAttempts.reduce((sum, a) => sum + (a.responseTimeMs || 0), 0) /
+        validAttempts.length
+      : 0;
+
+  // ===== ???ç­”å?/ç­”éŒ¯ï¼šå??€?°ä?ç­†å??ç? =====
+  // æ³¨æ?ï¼šé€™è£¡??recentAttempts ?‰ç‚º?Œç”±?°åˆ°?Šã€æ?åº?
+  const sorted = [...recentAttempts].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  let consecutiveCorrect = 0;
+  let consecutiveWrong = 0;
+  for (const attempt of sorted) {
+    const isTimeout = (attempt.responseTimeMs || 0) > TIMEOUT_THRESHOLD_MS;
+    if (isTimeout) break; // Timeout ä¸­æ–·???è¨ˆç?
+    if (attempt.isCorrect) {
+      if (consecutiveWrong > 0) break;
+      consecutiveCorrect++;
+    } else {
+      if (consecutiveCorrect > 0) break;
+      consecutiveWrong++;
+    }
+  }
+
+  return {
+    recentAttempts: recentAttempts.length,
+    correctRate,
+    avgResponseTimeMs,
+    timeoutRate,
+    attemptsInCurrentLevel: currentLevelAttempts,
+    consecutiveCorrect,
+    consecutiveWrong,
+  };
+}
+
+===== src/features/quiz/QuizOrchestrator.ts =====
+
+// src/features/quiz/QuizOrchestrator.ts
+import { Word, ReviewState, createInitialReviewState } from '../../types/word';
+import { WordRepository } from '../../services/wordRepository/WordRepository';
+import { ProgressStore, AttemptRecord } from '../../services/storage/ProgressStore';
+import { GradingResult } from '../../domain/grading/grader';
+import { SM2Result } from '../../domain/scheduler/sm2';
+import { calculateOverdueDays } from '../../domain/date/overdue';
+import { pickNextWordId, WordEntry } from '../../domain/selection/questionSelector';
+import {
+  AssignmentService,
+  ActiveAssignment,
+  DEFAULT_SPEECH_RATE,
+  DEFAULT_SPEECH_FLOOR_RATE,
+} from '../../services/assignment/AssignmentService';
+import { ClassStatsService } from '../../services/analytics/ClassStatsService';
+import { StudentStateService } from '../../services/progression/StudentStateService';
+import { LevelProgressionService } from '../../services/progression/LevelProgressionService';
+import { ProgressionDecision } from '../../types/progression';
+import { AttemptBatcher } from '../../services/storage/AttemptBatcher';
+import { LocalStorageProgressStore } from '../../services/storage/LocalStorageProgressStore';
+import { DailySnapshot } from '../../types/dailySnapshot';
+import { QuizSessionApi, SessionDisplayInfo } from './QuizSessionApi';
+import { AnswerProcessor } from './AnswerProcessor';
+import { DailyStatsTracker } from '../../services/storage/DailyStatsTracker';
+
+import {
+  SessionQuotaPolicy,
+  QuotaExceededBehavior,
+} from '../../domain/quiz/SessionQuotaPolicy';
+
+import { QuizTimingPolicy } from '../../domain/quiz/QuizTimingPolicy';
+
+import { buildDisplayId } from '../../domain/string/displayId';
+
+import { getLocalDateString } from '../../domain/date/timezone';
+
+export interface QuizQuestion {
+  word: Word;
+  timeLimitMs: number;
+  isProbe?: boolean;
+}
+
+export interface AnswerSubmission {
+  recognizedText: string;
+  elapsedMs: number;
+  timedOut: boolean;
+  snapshotImageUrl?: string;
+}
+
+export interface SubmitAnswerResult {
+  grading: GradingResult;
+  scheduling: SM2Result;
+  nextState: ReviewState;
+  progressionDecision?: ProgressionDecision | null;
+}
+
+export interface QuizOrchestratorDeps {
+  wordRepository: WordRepository;
+  progressStore: ProgressStore;
+  timeLimitMs: number;
+  defaultDailyMaxQuota: number;
+  defaultDailyNewQuota: number;
+  studentName?: string;
+  studentSeatNumber?: string;
+  now?: () => Date;
+}
+
+export class QuizOrchestrator implements QuizSessionApi {
+  private studentId: string;
+  private className: string;
+  private deps: QuizOrchestratorDeps;
+  private words: Word[] = [];
+  private wordMap = new Map<string, Word>();
+  private dailyAnsweredCount = 0;
+  private dailyMaxQuota = 0;
+  private dailyNewQuotaRemaining = 0;
+  private stateCache: Map<string, ReviewState> | null = null;
+  private assignmentService: AssignmentService;
+  private activeAssignment: ActiveAssignment | null = null;
+  private classStatsService: ClassStatsService;
+  private askedToday = new Set<string>();
+
+  private studentStateService: StudentStateService;
+  private levelProgressionService: LevelProgressionService;
+  private currentLevel: number = 1;
+  private sessionAttempts: number = 0;
+
+  private customSpeechFloor: number | undefined;
+
+  private attemptBatcher: AttemptBatcher;
+  private localStore: LocalStorageProgressStore;
+  private answerProcessor: AnswerProcessor;
+
+  private dailyCorrectCount = 0;
+  private dailyTotalResponseTime = 0;
+
+  // ?°å?ï¼šè·¨ session ç´¯è?ä»Šæ—¥çµ±è?
+  private dailyStatsTracker = new DailyStatsTracker();
+
+  private quotaPolicy: SessionQuotaPolicy;
+
+  private timingPolicy = new QuizTimingPolicy();
+  private resolvedTimeLimitMs: number = QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS;
+
+  private studentTimeZone: string = 'Asia/Taipei';
+
+  constructor(studentId: string, className: string, deps: QuizOrchestratorDeps) {
+    this.studentId = studentId;
+    this.className = className;
+    this.deps = deps;
+    this.classStatsService = new ClassStatsService();
+    this.assignmentService = new AssignmentService();
+    this.studentStateService = new StudentStateService();
+    this.levelProgressionService = new LevelProgressionService();
+    this.attemptBatcher = new AttemptBatcher();
+    this.localStore = new LocalStorageProgressStore();
+    this.answerProcessor = new AnswerProcessor();
+
+    this.quotaPolicy = new SessionQuotaPolicy({
+      dailyMaxQuota: deps.defaultDailyMaxQuota,
+      exceededBehavior: 'stop',
+    });
+
+    this.resolvedTimeLimitMs = deps.timeLimitMs;
+  }
+
+  getCurrentLevel(): number {
+    return this.currentLevel;
+  }
+
+  private getDisplayId(): string {
+    return buildDisplayId(
+      this.className,
+      this.deps.studentSeatNumber,
+      this.deps.studentName,
+      this.studentId
+    );
+  }
+
+  getDisplayInfo(): SessionDisplayInfo {
+    const assignmentName =
+      this.activeAssignment?.assignment.name ?? 'æ¯æ—¥ç·´ç?ï¼ˆé?è¨­é?é¡ï?';
+    const isContinueMode = this.quotaPolicy.isInContinueMode(this.dailyAnsweredCount);
+
+    if (isContinueMode) {
+      return {
+        mode: 'normal',
+        title: `${assignmentName} Â· èª²å?? å¼·`,
+        subtitle: 'å·²é?å»ºè­°é¡Œæ•¸ï¼Œå¯ç¹¼ç?ç·´ç?',
+        progressCurrent: this.dailyAnsweredCount,
+        progressTotal: this.dailyMaxQuota,
+        progressLabel: 'å·²ç?',
+        showProgress: true,
+      };
+    }
+
+    return {
+      mode: 'normal',
+      title: assignmentName,
+      subtitle: '',
+      progressCurrent: this.dailyAnsweredCount,
+      progressTotal: this.dailyMaxQuota,
+      progressLabel: '?²åº¦',
+      showProgress: this.dailyMaxQuota > 0,
+    };
+  }
+
+  // ============================================================
+  // èªéŸ³è¨­å?
+  // ============================================================
+
+  getSpeechRate(): number {
+    return this.activeAssignment?.assignment.speechRate ?? DEFAULT_SPEECH_RATE;
+  }
+
+  getSpeechFloorRate(): number | null {
+    if (this.customSpeechFloor !== undefined) {
+      return this.customSpeechFloor;
+    }
+    return this.activeAssignment?.assignment.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE;
+  }
+
+  getTimeLimitMs(): number {
+    return this.resolvedTimeLimitMs;
+  }
+
+  // ============================================================
+  // ?¸é? 3ï¼šå­¸?Ÿä¸»?•ç¹¼çºŒç·´ç¿?
+  // ============================================================
+
+  canOfferContinue(): boolean {
+    return this.quotaPolicy.canOfferContinue(this.dailyAnsweredCount);
+  }
+
+  continueSession(): void {
+    this.quotaPolicy.optInToContinue();
+    console.log('?? [QuizOrchestrator] å­¸ç??¸æ?ç¹¼ç?ç·´ç?ï¼Œsession ?²å…¥ continue æ¨¡å?');
+  }
+
+  // ============================================================
+  // init
+  // ============================================================
+
+  async init(): Promise<void> {
+    console.log('?â??â??â??â??â??â??â??â??â??â??â??â??â??â??â??â??â??â??â???);
+    console.log(`?? [QuizOrchestrator.init] ?‹å??å??–`);
+    console.log(`   å­¸ç?ï¼?{this.studentId}ï¼Œç­ç´šï?${this.className || 'ï¼ˆæœªå¡«ï?'}`);
+    console.log(`   displayIdï¼?{this.getDisplayId()}`);
+    console.log('?â??â??â??â??â??â??â??â??â??â??â??â??â??â??â??â??â??â??â???);
+
+    const displayId = this.getDisplayId();
+
+    try {
+      await this.studentStateService.initializeIfNeeded(displayId, 1);
+      const learningState = await this.studentStateService.getState(displayId);
+      this.currentLevel = learningState.currentLevel;
+      this.customSpeechFloor = learningState.customSpeechFloor;
+      this.studentTimeZone = learningState.timeZone ?? 'Asia/Taipei'; // ?°å?
+      console.log(`   ???¶å?ç­‰ç?ï¼šL${this.currentLevel}`);
+      if (this.customSpeechFloor !== undefined) {
+        console.log(`   ?? ?‹äººèªé€Ÿä??ï?${this.customSpeechFloor}`);
+      }
+    } catch (e) {
+      console.warn('? ï? è®€?–å­¸ç¿’ç??‹å¤±?—ï?ä½¿ç”¨?è¨­ L1:', e);
+      this.currentLevel = 1;
+    }
+
+    // æ­¥é? 0.5ï¼šå? localStorage è¼‰å…¥ä»Šæ—¥ç´¯è?çµ±è?
+    const today = getLocalDateString(this.getNow(), this.studentTimeZone);
+    const todayStats = this.dailyStatsTracker.load(displayId, today);
+    this.dailyAnsweredCount = todayStats.answeredCount;
+    this.dailyCorrectCount = todayStats.correctCount;
+    this.dailyTotalResponseTime = todayStats.totalResponseTimeMs;
+    console.log(
+      `   ?? ä»Šæ—¥ç´¯è?ï¼?{todayStats.answeredCount} é¡Œï?ç­”å? ${todayStats.correctCount}ï¼‰`
+    );
+
+    try {
+      this.activeAssignment = await this.assignmentService.getActiveAssignment(
+        this.className,
+        this.getDisplayId()
+      );
+    } catch (e) {
+      console.warn('? ï? è®€?–ä?æ¥­è¨­å®šå¤±?—ï?ä½¿ç”¨?è¨­?é?:', e);
+      this.activeAssignment = null;
+    }
+
+    if (this.activeAssignment) {
+      this.dailyMaxQuota = this.activeAssignment.assignment.dailyQuota;
+      this.dailyNewQuotaRemaining = this.activeAssignment.newWordCount;
+      console.log(
+        `   ??è®€?–ä?æ¥­ã€?{this.activeAssignment.assignment.name}?ï??é? ${this.dailyMaxQuota} é¡Œ`
+      );
+    } else {
+      this.dailyMaxQuota = this.deps.defaultDailyMaxQuota;
+      this.dailyNewQuotaRemaining = this.deps.defaultDailyNewQuota;
+      console.warn(`   ? ï? ?¡ç??ˆä?æ¥­ï?ä½¿ç”¨?è¨­?é?ï¼?{this.dailyMaxQuota} é¡Œ`);
+    }
+
+    const exceededBehavior: QuotaExceededBehavior =
+      this.activeAssignment?.assignment.quotaExceededBehavior ?? 'stop';
+    this.quotaPolicy = new SessionQuotaPolicy({
+      dailyMaxQuota: this.dailyMaxQuota,
+      exceededBehavior,
+    });
+    console.log(
+      `   ?? ?é??¿ç?ï¼?{exceededBehavior === 'continue' ? '?è¨±èª²å?? å¼·' : '?”é?é¡å³?œæ­¢'}`
+    );
+
+    this.resolvedTimeLimitMs = this.timingPolicy.resolve({
+      assignmentMs: this.activeAssignment?.assignment.timeLimitMs,
+    });
+    console.log(`   ?±ï? ä½œç??‚é?ï¼?{this.resolvedTimeLimitMs}msï¼?{this.resolvedTimeLimitMs / 1000} ç§’ï?`);
+
+    this.stateCache = await this.deps.progressStore.getAllStates(displayId);
+    console.log(`   ??å·²è???${this.stateCache.size} ?‹å–®å­—ç??²åº¦?€?‹`);
+
+    await this.buildWordPool();
+
+    console.log(`??[QuizOrchestrator.init] å®Œæ?ï¼å–®å­—æ?ï¼?{this.words.length} ?‹ï?ç­‰ç?ï¼šL${this.currentLevel}`);
+  }
+
+  private async buildWordPool(): Promise<void> {
+    const K2 = this.dailyNewQuotaRemaining;
+    const K1 = Math.max(0, this.dailyMaxQuota - K2);
+
+    const REVIEW_POOL_MULTIPLIER = 3;
+    const NEW_POOL_MULTIPLIER = 3;
+    const MIN_REVIEW_POOL = 50;
+    const MIN_NEW_POOL = 30;
+
+    const reviewPoolSize = Math.max(K1 * REVIEW_POOL_MULTIPLIER, MIN_REVIEW_POOL);
+    const newPoolSize = Math.max(K2 * NEW_POOL_MULTIPLIER, MIN_NEW_POOL);
+
+    const allStates = Array.from(this.stateCache!.entries());
+
+    const dueStates = allStates
+      .filter(([_, state]) =>
+        state.everWrong === true &&
+        state.lastReviewed &&
+        state.nextReviewDate
+      )
+      .sort((a, b) => {
+        const dateA = new Date(a[1].nextReviewDate!).getTime();
+        const dateB = new Date(b[1].nextReviewDate!).getTime();
+        return dateA - dateB;
+      });
+
+    const dueWordIds = dueStates.slice(0, reviewPoolSize).map(([id]) => id);
+
+    let supplementIds: string[] = [];
+    if (dueWordIds.length < reviewPoolSize) {
+      const supplementPool = allStates
+        .filter(([id, s]) =>
+          s.everWrong === true &&
+          s.lastReviewed &&
+          !dueWordIds.includes(id)
+        )
+        .sort((a, b) => (b[1].lastReviewed ?? '').localeCompare(a[1].lastReviewed ?? ''));
+
+      supplementIds = supplementPool
+        .slice(0, reviewPoolSize - dueWordIds.length)
+        .map(([id]) => id);
+    }
+
+    const finalReviewIds = [...dueWordIds, ...supplementIds];
+    let reviewWords: Word[] = [];
+    if (finalReviewIds.length > 0) {
+      reviewWords = await this.deps.wordRepository.getWordsByIds(finalReviewIds);
+    }
+
+    const excludeIds = new Set(this.stateCache!.keys());
+    const targetLevel = this.activeAssignment?.assignment.targetLevel;
+
+    let newWords: Word[];
+    if (targetLevel && targetLevel !== this.currentLevel) {
+      newWords = await this.buildWeightedNewWords(excludeIds, targetLevel, newPoolSize);
+    } else {
+      newWords = await this.buildDefaultNewWords(excludeIds, newPoolSize);
+    }
+
+    this.words = [...reviewWords, ...newWords];
+    for (const w of this.words) {
+      this.wordMap.set(w.id, w);
+    }
+  }
+
+  private async buildWeightedNewWords(
+    excludeIds: Set<string>,
+    targetLevel: number,
+    totalSize: number
+  ): Promise<Word[]> {
+    const currentLevel = this.currentLevel;
+    const diff = Math.abs(targetLevel - currentLevel);
+
+    let targetRatio: number;
+    let currentRatio: number;
+    let probeLevel: number;
+
+    if (diff >= 3) {
+      targetRatio = 0.3;
+      currentRatio = 0.6;
+      probeLevel = Math.round((targetLevel + currentLevel) / 2);
+      console.warn(
+        `? ï? [? æ??ºé?] |target=L${targetLevel} - current=L${currentLevel}| >= 3ï¼Œå??¨è­·æ¬„`
+      );
+    } else {
+      targetRatio = 0.6;
+      currentRatio = 0.3;
+      probeLevel = targetLevel < 6 ? targetLevel + 1 : targetLevel;
+    }
+
+    const targetCount = Math.floor(totalSize * targetRatio);
+    const currentCount = Math.floor(totalSize * currentRatio);
+    const probeCount = totalSize - targetCount - currentCount;
+
+    const usedIds = new Set(excludeIds);
+
+    const targetWords = await this.deps.wordRepository.getNewWordsByLevels(usedIds, [targetLevel], targetCount);
+    targetWords.forEach(w => usedIds.add(w.id));
+
+    const currentWords = await this.deps.wordRepository.getNewWordsByLevels(usedIds, [currentLevel], currentCount);
+    currentWords.forEach(w => usedIds.add(w.id));
+
+    const probeWords = await this.deps.wordRepository.getNewWordsByLevels(usedIds, [probeLevel], probeCount);
+
+    console.log(
+      `?? [? æ??ºé?] target=L${targetLevel}, current=L${currentLevel}, probe=L${probeLevel}`
+    );
+
+    return [...targetWords, ...currentWords, ...probeWords];
+  }
+
+  private async buildDefaultNewWords(
+    excludeIds: Set<string>,
+    totalSize: number
+  ): Promise<Word[]> {
+    const probeRatio = 0.1;
+    const probeCount = Math.floor(totalSize * probeRatio);
+    const mainCount = totalSize - probeCount;
+
+    const mainWords = await this.deps.wordRepository.getNewWordsByLevels(
+      excludeIds,
+      [this.currentLevel],
+      mainCount
+    );
+
+    const probeLevel = this.currentLevel < 6 ? this.currentLevel + 1 : this.currentLevel;
+    const probeExclude = new Set([...excludeIds, ...mainWords.map((w) => w.id)]);
+    const probeWords = await this.deps.wordRepository.getNewWordsByLevels(
+      probeExclude,
+      [probeLevel],
+      probeCount
+    );
+
+    let fallbackWords: Word[] = [];
+    if (mainWords.length + probeWords.length < totalSize && this.currentLevel > 1) {
+      const fallbackExclude = new Set([
+        ...excludeIds,
+        ...mainWords.map((w) => w.id),
+        ...probeWords.map((w) => w.id),
+      ]);
+      const need = totalSize - mainWords.length - probeWords.length;
+      fallbackWords = await this.deps.wordRepository.getNewWordsByLevels(
+        fallbackExclude,
+        [this.currentLevel - 1],
+        need
+      );
+    }
+
+    return [...mainWords, ...probeWords, ...fallbackWords];
+  }
+
+  getActiveAssignment(): ActiveAssignment | null {
+    return this.activeAssignment;
+  }
+
+  getDailyProgress(): { answered: number; max: number } {
+    return {
+      answered: this.dailyAnsweredCount,
+      max: this.dailyMaxQuota,
+    };
+  }
+
+  private getNow(): Date {
+    return this.deps.now ? this.deps.now() : new Date();
+  }
+
+  // ============================================================
+  // ?”¥ nextQuestionï¼šé?æ§‹å??ªå??”èª¿
+  //
+  // ?·è²¬?†å·¥ï¼?
+  //   - SessionQuotaPolicyï¼šã€Œèƒ½ä¸èƒ½?ºä?ä¸€é¡Œã€ç??¯ä??Ÿå¯¦ä¾†æ?
+  //   - pickNextWordIdï¼šã€Œé¸èª°ã€ç?ç´”é¸??
+  //   - ?¬æ–¹æ³•ï??”èª¿?…ï?ä¾å??¼å«?©è€?
+  //
+  // ?æ??æ??Œå…©å±¤é?é¡æª¢?¥ã€ï?policy + selectorï¼‰ï?
+  // å°è‡´èª²å?? å¼·æ¨¡å??€è¦å‚³ Number.MAX_SAFE_INTEGER ??hack??
+  // ?æ?å¾Œåª?©ä?å±¤ï?ä¸é?è¦ä»»ä½?hack??
+  // ============================================================
+  async nextQuestion(): Promise<QuizQuestion | null> {
+    // ?¯ä??Ÿå¯¦ä¾†æ?ï¼šé?é¡æ˜¯?¦å?è¨?
+    if (!this.quotaPolicy.shouldContinue(this.dailyAnsweredCount)) {
+      return null;
+    }
+
+    const availableWords = this.words.filter((w) => !this.askedToday.has(w.id));
+    const usingPool = availableWords.length > 0 ? availableWords : this.words;
+
+    const entries: WordEntry[] = [];
+    for (const word of usingPool) {
+      const state = this.stateCache?.get(word.id) ?? createInitialReviewState();
+      const overdueDays = calculateOverdueDays(state.nextReviewDate, this.getNow());
+      entries.push({ wordId: word.id, state, overdueDays });
+    }
+
+    // ?”¥ ?³å…¥ç²¾ç°¡å¾Œç? quotaï¼ˆåª?‰æ–°å­—å?å¥½ï?
+    const selectedId = pickNextWordId(
+      entries,
+      { dailyNewQuotaRemaining: this.dailyNewQuotaRemaining },
+      this.activeAssignment?.explorationRate ?? 0.1
+    );
+
+    if (!selectedId) {
+      // èª²å?? å¼·æ¨¡å?ä¸‹ç„¡?™é¸ï¼Œæ˜¯?Œæ?å­ç”¨å®Œã€è€Œé??Œé?é¡ç”¨?¡ã€?
+      // ï¼ˆå??ºä??¢ç? shouldContinue å·²é€šé?ï¼?
+      const isContinueMode = this.quotaPolicy.isInContinueMode(this.dailyAnsweredCount);
+      if (isContinueMode) {
+        console.warn(
+          `? ï? [nextQuestion] èª²å?? å¼·æ¨¡å?ä¸‹ç„¡?™é¸?®å?ï¼ˆpool=${entries.length}ï¼‰ï?çµæ? session`
+        );
+      }
+      return null;
+    }
+
+    const word = this.wordMap.get(selectedId);
+    if (!word) return null;
+
+    this.askedToday.add(selectedId);
+
+    const wordLevel = Number(word.level ?? '0');
+    const isProbe = wordLevel > this.currentLevel;
+
+    return {
+      word,
+      timeLimitMs: this.resolvedTimeLimitMs,
+      isProbe,
+    };
+  }
+
+  async submitAnswer(
+    wordId: string,
+    submission: AnswerSubmission
+  ): Promise<SubmitAnswerResult> {
+    const word = this.wordMap.get(wordId);
+    if (!word) {
+      throw new Error(`Word ${wordId} not found`);
+    }
+
+    const displayId = this.getDisplayId();
+    const studentDisplayId = displayId !== this.studentId ? displayId : undefined;
+
+    const currentState = await this.deps.progressStore.getState(displayId, wordId);
+    const now = this.getNow();
+
+    const processed = this.answerProcessor.process({
+      word,
+      submission,
+      currentState,
+      timeLimitMs: this.resolvedTimeLimitMs,
+      studentId: this.studentId,
+      studentDisplayId,
+      now,
+    });
+
+    // ?”¥ ?é? tracker ç´¯è?ä»Šæ—¥çµ±è?ï¼ˆè·¨ session ?ä??–ï?
+    const today = getLocalDateString(now, this.studentTimeZone);
+    const todayStats = this.dailyStatsTracker.increment(
+      displayId,
+      today,
+      processed.grading.isCorrect,
+      submission.elapsedMs
+    );
+    this.dailyAnsweredCount = todayStats.answeredCount;
+    this.dailyCorrectCount = todayStats.correctCount;
+    this.dailyTotalResponseTime = todayStats.totalResponseTimeMs;
+
+    this.sessionAttempts += 1;
+
+    if (processed.grading.isCorrect) {
+      if (currentState.reviewCount === 0 && !currentState.lastReviewed) {
+        this.dailyNewQuotaRemaining = Math.max(0, this.dailyNewQuotaRemaining - 1);
+      }
+    }
+
+    // ?”¥ æ¯æ¬¡ç­”é??½æ›´?°æ??¥å¿«?§ï??æ?ä»Šæ—¥ç´¯è?ï¼Œè€Œé??ªè??„ç¬¬ä¸€é¡Œï?
+    const dailySnapshot: DailySnapshot = {
+      date: today,
+      totalAttempts: todayStats.answeredCount,
+      correctCount: todayStats.correctCount,
+      correctRate: todayStats.answeredCount > 0
+        ? Math.round((todayStats.correctCount / todayStats.answeredCount) * 100)
+        : 0,
+      avgResponseTimeMs: todayStats.answeredCount > 0
+        ? Math.round(todayStats.totalResponseTimeMs / todayStats.answeredCount)
+        : 0,
+      level: this.currentLevel,
+      capturedAt: now.toISOString(),
+    };
+
+    try {
+      await this.localStore.saveState(displayId, wordId, processed.nextState);
+      await this.localStore.recordAttempt(processed.attempt);
+      this.stateCache?.set(wordId, processed.nextState);
+    } catch (e) {
+      console.warn('? ï? ?¬åœ°å¯«å…¥å¤±æ?:', e);
+    }
+
+    try {
+      await this.attemptBatcher.commit({
+        studentId: this.studentId,
+        studentDisplayId,
+        className: this.className,
+        wordId,
+        nextState: processed.nextState,
+        attempt: processed.attempt,
+        isCorrect: processed.grading.isCorrect,
+        studentName: this.deps.studentName,
+        studentSeatNumber: this.deps.studentSeatNumber,
+        dailySnapshot,
+      });
+    } catch (batchError) {
+      console.warn('? ï? ?¹æ¬¡å¯«å…¥å¤±æ?ï¼Œå??€?°å€‹åˆ¥å¯«å…¥:', batchError);
+
+      this.deps.progressStore
+        .saveState(displayId, wordId, processed.nextState)
+        .then(() => this.stateCache?.set(wordId, processed.nextState))
+        .catch((error) => {
+          console.warn('? ï? ?²å??²åº¦å¤±æ?:', error);
+          this.stateCache?.set(wordId, processed.nextState);
+        });
+
+      this.deps.progressStore
+        .recordAttempt(processed.attempt)
+        .catch((error) => console.warn('? ï? è¨˜é?ä½œç?å¤±æ?:', error));
+
+      this.classStatsService
+        .recordAttempt({
+          className: this.className,
+          studentId: this.studentId,
+          studentName: this.deps.studentName,
+          studentSeatNumber: this.deps.studentSeatNumber,
+          wordId,
+          isCorrect: processed.grading.isCorrect,
+        })
+        .catch((error) => console.warn('? ï? ?­ç?çµ±è??´æ–°å¤±æ?:', error));
+
+      this.studentStateService
+        .incrementTotalAttempts(displayId)
+        .catch((error) => console.warn('? ï? ç´¯å?ç¸½é??¸å¤±??', error));
+    }
+
+    console.log(`?ï? [submitAnswer]??{word.word}?â? ${processed.grading.isCorrect ? '??æ­?¢º' : '???¯èª¤'}ï¼ˆquality=${processed.grading.quality}ï¼‰`);
+
+    let progressionDecision: ProgressionDecision | null = null;
+    if (this.sessionAttempts > 0 && this.sessionAttempts % 10 === 0) {
+      try {
+        progressionDecision = await this.levelProgressionService.evaluate(displayId);
+        if (progressionDecision && progressionDecision.action !== 'hold') {
+          console.log(`?? [submitAnswer] ç­‰ç?èª¿æ•´ï¼?{progressionDecision.action} ??L${progressionDecision.newLevel}`);
+          this.currentLevel = progressionDecision.newLevel;
+        }
+      } catch (e) {
+        console.warn('? ï? ç­‰ç?è©•ä¼°å¤±æ?ï¼ˆä?å½±éŸ¿æ¸¬é?ï¼?', e);
+      }
+    }
+
+    return {
+      grading: processed.grading,
+      scheduling: processed.scheduling,
+      nextState: processed.nextState,
+      progressionDecision,
+    };
+  }
+}
+
+===== src/services/progression/LevelProgressionService.ts =====
+
+// src/services/progression/LevelProgressionService.ts
+import { PerformanceTracker } from './PerformanceTracker';
+import { StudentStateService } from './StudentStateService';
+import { RuleBasedStrategy } from '../../domain/progression/RuleBasedStrategy';
+import { LevelProgressionStrategy } from '../../domain/progression/LevelProgressionStrategy';
+import { checkEvaluationGuard } from '../../domain/progression/evaluationGuard';
+import { ProgressionDecision, LevelHistoryEntry } from '../../types/progression';
+
+export class LevelProgressionService {
+  private static readonly MIN_LEVEL = 1;
+  private static readonly MAX_LEVEL = 6;
+
+  constructor(
+    private tracker: PerformanceTracker = new PerformanceTracker(),
+    private stateService: StudentStateService = new StudentStateService(),
+    private strategy: LevelProgressionStrategy = new RuleBasedStrategy()
+  ) {}
+
+  /**
+   * è©•ä¼°å­¸ç??¯å¦?€è¦èª¿?´ç?ç´?
+   *
+   * å®ˆè??è¼¯ï¼ˆé?å®šæª¢?¥ã€è?ä¸Šæ¬¡è©•ä¼°?‚é?ï¼‰ç”±ç´”å‡½å¼?checkEvaluationGuard ?•ç???
+   */
+  async evaluate(displayId: string): Promise<ProgressionDecision | null> {
+    // ============================================================
+    // æ­¥é? 1ï¼šè??–ç•¶?ç???
+    // ============================================================
+    const state = await this.stateService.getState(displayId);
+    const totalAttempts = state.totalAttempts;
+
+    // ============================================================
+    // æ­¥é? 2ï¼šå?è¡›æª¢?¥ï??–å???+ è·ä?æ¬¡è?ä¼°æ??“ï?
+    // ============================================================
+    const guard = checkEvaluationGuard({
+      totalAttempts,
+      levelLockedUntilTotalAttempts: state.levelLockedUntilTotalAttempts,
+      lastEvaluatedAtTotalAttempts: state.lastEvaluatedAtTotalAttempts,
+    });
+
+    if (!guard.shouldEvaluate) {
+      if (guard.reason === 'locked') {
+        console.log(`?? [LevelProgression] ?–å?ä¸­ï???${guard.remainingAttempts} é¡Œ`);
+      } else {
+        console.log(`?­ï? [LevelProgression] è·ä?æ¬¡è?ä¼°å? ${guard.attemptsSinceLastEval} é¡Œï?è·³é?`);
+      }
+      return null;
+    }
+
+    // ============================================================
+    // æ­¥é? 3ï¼šå?å¾—è¡¨?¾æ?æ¨?
+    // ============================================================
+    const metrics = await this.tracker.getRecentMetrics(
+      displayId,
+      state.currentLevel
+    );
+
+    // ============================================================
+    // æ­¥é? 4ï¼šå??¨ç???
+    // ============================================================
+    const decision = this.strategy.evaluate({
+      metrics,
+      currentLevel: state.currentLevel,
+      minLevel: LevelProgressionService.MIN_LEVEL,
+      maxLevel: LevelProgressionService.MAX_LEVEL,
+      totalAttempts,
+    });
+
+    console.log(
+      `?¯ [LevelProgression] ${this.strategy.name} æ±ºç?ï¼?{decision.action}ï¼?{decision.reason}ï¼‰`
+    );
+
+    // ============================================================
+    // æ­¥é? 5ï¼šå¯«??Firestore
+    // ============================================================
+    if (decision.action === 'hold') {
+      await this.stateService.markEvaluated(displayId, totalAttempts);
+      return decision;
+    }
+
+    const triggeredBy =
+      decision.action === 'promote' ? 'promotion' : 'demotion';
+
+    const historyEntry: LevelHistoryEntry = {
+      level: decision.newLevel,
+      changedAt: new Date().toISOString(),
+      reason: decision.reason,
+      triggeredBy,
+    };
+
+    await this.stateService.updateLevel(
+      displayId,
+      decision.newLevel,
+      historyEntry,
+      decision.lockUntilAttempts,
+      totalAttempts
+    );
+
+    return decision;
+  }
+
+  async setLevelManually(displayId: string, level: number, reason: string): Promise<void> {
+    if (level < LevelProgressionService.MIN_LEVEL || level > LevelProgressionService.MAX_LEVEL) {
+      throw new Error(`ç­‰ç?å¿…é?ä»‹æ–¼ ${LevelProgressionService.MIN_LEVEL}~${LevelProgressionService.MAX_LEVEL}`);
+    }
+
+    const state = await this.stateService.getState(displayId);
+
+    const historyEntry: LevelHistoryEntry = {
+      level,
+      changedAt: new Date().toISOString(),
+      reason,
+      triggeredBy: 'manual',
+    };
+
+    await this.stateService.updateLevel(
+      displayId,
+      level,
+      historyEntry,
+      state.totalAttempts + 30,
+      state.totalAttempts
+    );
+  }
+}
+
+===== src/types/progression.ts =====
+
+// src/types/progression.ts
+// ?ªé©?‰å­¸ç¿’ç?è³‡æ?å¥‘ç?
+
+export const RECOMMENDED_MIN_QUOTA = 30;
+
+/**
+ * å­¸ç??„å­¸ç¿’ç??‹ï?å­˜åœ¨ studentStates/{displayId}ï¼?
+ */
+export interface StudentLearningState {
+  /** ?¶å?ç­‰ç? 1~6 */
+  currentLevel: number;
+  /** å­¸ç??¨ç³»çµ±ä¸­?„ç´¯è¨ˆç¸½é¡Œæ•¸ */
+  totalAttempts: number;
+  /** ?–å??³ã€Œç¸½é¡Œæ•¸?”åˆ°æ­¤å€¼ã€æ??½å?æ¬¡è?ä¼°ï??²æ??•ï? */
+  levelLockedUntilTotalAttempts: number;
+  /** ä¸Šæ¬¡è©•ä¼°?‚ç?ç¸½é??¸ï??¿å??è?è©•ä¼°ï¼?*/
+  lastEvaluatedAtTotalAttempts: number;
+  /** ç­‰ç?è®Šæ›´æ­·å² */
+  levelHistory: LevelHistoryEntry[];
+
+  // ?”¥ Stage 2 ?°å?ï¼šç?åº¦é?å®?
+  /** ?¯å¦å·²å??ç?åº¦é?å®šã€‚æ–°å­¸ç??è¨­ false??*/
+  placementDone: boolean;
+  /** ?‘å??ç?ç´€?„ã€‚æœª?‘å??‚ç‚º undefined??*/
+  placementHistory?: PlacementHistoryEntry;
+
+  // ?”¥ èªéŸ³è¨­å?ï¼šå€‹äºº?–è??Ÿä???
+  /**
+   * ?‹äººèªé€Ÿä??ï?0.5 ~ 1.0ï¼‰ã€?
+   *
+   * ?¨æ–¼?Œğ???è½ä¸€æ¬¡ï??¢é€Ÿï??æ??•ã€‚è‹¥?ªè¨­å®šï??‡æ¡??
+   * ä½œæ¥­??speechFloorRateï¼Œè‹¥ä½œæ¥­ä¹Ÿæœªè¨­å?ï¼Œå???0.85??
+   *
+   * ?å¸«?¯åœ¨?Œå­¸?Ÿè©³?…ã€é¢?¿ç‚º?‹åˆ¥å­¸ç?è¨­å?ï¼ˆä?å¦‚ç‰¹æ®Šç??€è¦æ›´?¢ï???
+   */
+  customSpeechFloor?: number;
+
+  // ?°å?ï¼šå­¸?Ÿç??‚å?ï¼ˆIANA ?ç¨±ï¼Œä?å¦?'Asia/Taipei'ï¼?
+  //
+  // ?ºä?éº¼é?è¦ï?
+  //   dailySnapshots ?„ã€Œæ??¥ã€é??Œæ?è©²ç”±ä½¿ç”¨?…ç??¬åœ°?‚é?æ±ºå?ï¼?
+  //   ?Œé? UTC?‚å­¸?Ÿåœ¨?°å??Œæ™¨ 00:30 ç­”é?ï¼Œæ?è©²ç??Œä?å¤©ã€è€Œé??Œæ˜¨å¤©ã€ã€?
+  //
+  // ?ºä?éº¼å???studentStates/{displayId} ?Œé? students/{uid}ï¼?
+  //   displayId ?¯è·¨ session ç©©å??„è??¥ç¢¼ï¼Œæ?è£ç½®?–é??°ç™»?¥ä??ƒéºå¤±ã€?
+  //   ï¼ˆå¯¦?›ä?ä¸€ä½å­¸?Ÿé€šå¸¸?ªç”¨ä¸€?°è?ç½®ï??‚å?ä¸æ?è®Šå?ï¼Œä??™æ¨£?„è¨­è¨?
+  //     ?¨æ¨å»?ˆ°å¤šæ ¡?å??‹æ?ä»ç„¶æ­?¢º?‚ï?
+  timeZone?: string;
+}
+
+export interface LevelHistoryEntry {
+  level: number;
+  changedAt: string;
+  reason: string;
+  triggeredBy: 'initial' | 'promotion' | 'demotion' | 'manual' | 'placement';
+}
+
+export interface PlacementStep {
+  level: number;
+  correct: number;
+  total: number;
+  action: 'promote' | 'demote' | 'stop';
+}
+
+export interface PlacementHistoryEntry {
+  startedAt: string;
+  finishedAt: string;
+  finalLevel: number;
+  steps: PlacementStep[];
+}
+
+export interface PerformanceMetrics {
+  recentAttempts: number;
+  correctRate: number;
+  avgResponseTimeMs: number;
+  timeoutRate: number;
+  attemptsInCurrentLevel: number;
+  consecutiveCorrect: number;
+  consecutiveWrong: number;
+}
+
+export interface ProgressionInput {
+  metrics: PerformanceMetrics;
+  currentLevel: number;
+  minLevel: number;
+  maxLevel: number;
+  totalAttempts: number;
+}
+
+export interface ProgressionDecision {
+  action: 'promote' | 'demote' | 'hold';
+  newLevel: number;
+  reason: string;
+  lockUntilAttempts: number;
+}
+
+export function createInitialLearningState(
+  startLevel: number = 1,
+  placementDone: boolean = false
+): StudentLearningState {
+  return {
+    currentLevel: startLevel,
+    totalAttempts: 0,
+    levelLockedUntilTotalAttempts: 0,
+    lastEvaluatedAtTotalAttempts: 0,
+    levelHistory: [
+      {
+        level: startLevel,
+        changedAt: new Date().toISOString(),
+        reason: placementDone ? '?‘å?çµæ?' : '?å?ç­‰ç?',
+        triggeredBy: placementDone ? 'placement' : 'initial',
+      },
+    ],
+    placementDone,
+  };
+}
+
+===== src/services/progression/StudentStateService.ts =====
+
+// src/services/progression/StudentStateService.ts
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, increment, deleteField } from 'firebase/firestore';
+import { db } from '../../firebase';
+import {
+  StudentLearningState,
+  LevelHistoryEntry,
+  PlacementHistoryEntry,
+  createInitialLearningState,
+} from '../../types/progression';
+
+/**
+ * ?·è²¬ï¼šç®¡??studentStates/{displayId} ?„è?å¯?
+ *
+ * ?”¥ Key ??displayIdï¼ˆä?å¦?"709_1_?—ä?ç¶?ï¼‰ï?ä¸æ˜¯ uid??
+ *   è·?UID è¿½è¹¤å­¸ç?ï¼Œæ?è£ç½®?–é??°ç™»?¥ä??ºå¤±??
+ */
+export class StudentStateService {
+  private getDocRef(displayId: string) {
+    return doc(db, 'studentStates', displayId);
+  }
+
+  async getState(displayId: string): Promise<StudentLearningState> {
+    const ref = this.getDocRef(displayId);
+    const snap = await getDoc(ref);
+
+    if (!snap.exists()) {
+      return createInitialLearningState(1);
+    }
+
+    const state = snap.data() as Partial<StudentLearningState> | undefined;
+
+    if (!state) {
+      return createInitialLearningState(1);
+    }
+
+    return {
+      currentLevel: state.currentLevel ?? 1,
+      totalAttempts: state.totalAttempts ?? 0,
+      levelLockedUntilTotalAttempts: state.levelLockedUntilTotalAttempts ?? 0,
+      lastEvaluatedAtTotalAttempts: state.lastEvaluatedAtTotalAttempts ?? 0,
+      levelHistory: state.levelHistory ?? [],
+      placementDone: state.placementDone === true,
+      placementHistory: state.placementHistory,
+      customSpeechFloor: state.customSpeechFloor,
+      timeZone: state.timeZone,  // ?°å?
+    };
+  }
+
+  async initializeIfNeeded(displayId: string, startLevel: number = 1): Promise<void> {
+    const ref = this.getDocRef(displayId);
+    const snap = await getDoc(ref);
+
+    if (snap.exists()) return;
+
+    await setDoc(ref, createInitialLearningState(startLevel, false));
+    console.log(`?Œ± [StudentStateService] å·²å?å§‹å? ${displayId} ??learningState`);
+  }
+
+  async getPlacementStatus(displayId: string): Promise<{
+    needsPlacement: boolean;
+    currentLevel: number;
+  }> {
+    const state = await this.getState(displayId);
+    return {
+      needsPlacement: state.placementDone !== true,
+      currentLevel: state.currentLevel,
+    };
+  }
+
+  async markPlacementDone(
+    displayId: string,
+    finalLevel: number,
+    history: PlacementHistoryEntry
+  ): Promise<void> {
+    const ref = this.getDocRef(displayId);
+    await setDoc(
+      ref,
+      {
+        currentLevel: finalLevel,
+        placementDone: true,
+        placementHistory: history,
+      },
+      { merge: true }
+    );
+    console.log(`?? [StudentStateService] ${displayId} ?‘å?å®Œæ?ï¼Œç?ç´?L${finalLevel}`);
+  }
+
+  async updateLevel(
+    displayId: string,
+    newLevel: number,
+    historyEntry: LevelHistoryEntry,
+    lockUntil: number,
+    totalAttempts: number
+  ): Promise<void> {
+    const ref = this.getDocRef(displayId);
+    await updateDoc(ref, {
+      currentLevel: newLevel,
+      levelLockedUntilTotalAttempts: lockUntil,
+      lastEvaluatedAtTotalAttempts: totalAttempts,
+      levelHistory: arrayUnion(historyEntry),
+    });
+    console.log(`?? [StudentStateService] ${displayId} ç­‰ç? ??L${newLevel}ï¼?{historyEntry.reason}ï¼‰`);
+  }
+
+  async markEvaluated(displayId: string, totalAttempts: number): Promise<void> {
+    const ref = this.getDocRef(displayId);
+    await updateDoc(ref, {
+      lastEvaluatedAtTotalAttempts: totalAttempts,
+    });
+  }
+
+  async incrementTotalAttempts(displayId: string): Promise<void> {
+    const ref = this.getDocRef(displayId);
+    await updateDoc(ref, {
+      totalAttempts: increment(1),
+    });
+  }
+
+  /**
+   * ?”¥ ?´æ–°?‹äººèªé€Ÿä???
+   *
+   * @param value 0.5 ~ 1.0 ?„æ•¸å­—ï???null è¡¨ç¤ºæ¸…é™¤?‹äººè¨­å?ï¼ˆå??°ä?æ¥?ç³»çµ±?è¨­ï¼?
+   */
+  async updateCustomSpeechFloor(displayId: string, value: number | null): Promise<void> {
+    const ref = this.getDocRef(displayId);
+    if (value === null) {
+      await updateDoc(ref, { customSpeechFloor: deleteField() });
+      console.log(`?? [StudentStateService] ${displayId} å·²æ??¤å€‹äººèªé€Ÿä??`);
+    } else {
+      await updateDoc(ref, { customSpeechFloor: value });
+      console.log(`?? [StudentStateService] ${displayId} ?‹äººèªé€Ÿä?????${value}`);
+    }
+  }
+
+  /**
+ * ?´æ–°å­¸ç??„æ??€??
+ *
+ * ??StudentLogin ?¨æ?æ¬¡ç™»?¥æ??¼å«?‚è‹¥?¼æ?è®Šï?ä»ç„¶å¯«å…¥ï¼ˆæ??¬ä?ï¼?
+ * ä¸”èƒ½?•ç??Œå­¸?Ÿæ?è£ç½®?ç??…å?ï¼‰ã€?
+ */
+  async updateTimeZone(displayId: string, timeZone: string): Promise<void> {
+    const ref = this.getDocRef(displayId);
+    await setDoc(ref, { timeZone }, { merge: true });
+  }
+}

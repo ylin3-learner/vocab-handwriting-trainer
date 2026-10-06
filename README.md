@@ -52,7 +52,7 @@ project centers on:
 | **Example-sentence masking** | The target word is masked (underscores of matching length) while answering, revealed after submission. Uses **Porter Stemmer** normalization so `recite` / `recited` / `reciting` are all masked, but does not over-stem (`art` and `artist` stay distinct) |
 | **Configurable per-question time limit** | Each assignment can set the answer window (3–30 s; presets 5/8/10/15/20 s). Resolved via `QuizTimingPolicy` with three-layer priority: student override > assignment > system default (8 s) |
 | **After-quota practice** | When a student finishes their daily quota, the done screen offers "📚 Continue practicing" if the teacher enabled it. This is a two-layer opt-in: teacher chooses `stop` vs `continue`, then the student actively chooses whether to extend |
-| **Adaptive difficulty** | `PlacementOrchestrator` places new students at roughly the right tier using a binary-search-style ladder (start L3, 3 questions per tier); `LevelProgressionService` + `RuleBasedStrategy` continuously promote/demote based on rolling performance over a 30-attempt window (promotion gate: ≥ 85% correct, < 7 s average, ≥ 20 attempts at or below the current level) |
+| **Adaptive difficulty** | `PlacementOrchestrator` places new students at roughly the right tier using a binary-search-style ladder (start L3, 3 questions per tier); `LevelProgressionService` + `RuleBasedStrategy` continuously promote/demote based on rolling performance over a 30-attempt window, with the evaluation frequency aligned to the window size (every 30 attempts). Promotion gate: ≥ 85% correct, < 7 s average, ≥ 20 attempts at or below the current level. Demotion requires ≥ 50% wrong **and** ≥ 5 s average (filters out fast guessing). A trend guard blocks demotion when the student is improving (> 20% late-vs-early delta), and probe questions at higher levels can trigger promotion independently. Post-change lock: 50 attempts |
 | **Assignment system** | Teacher-configurable daily quota, new-vs-review ratio, exploration focus, **target difficulty tier** (weighted question selection mixes target + current + probe), per-assignment speech-rate floor, per-assignment time limit, and per-assignment quota-exceeded behavior. Priority order: individual > class > school-wide |
 | **Word bank management** | Teachers upload a `.xlsx` file → schema validation → preview → batched publish with 1-second delays between 400-row chunks, avoiding quota blowouts |
 | **Teacher dashboard** | Student overview, at-risk detection, Top-K weakness analysis, response-time distribution, learning-style radar, error-type pie, memory-curve growth chart (unlocked after 7 days of practice), per-student PDF report export, student archiving |
@@ -363,6 +363,53 @@ vocab-handwriting-trainer/
   and `PlacementOrchestrator.ts` handle *which difficulty level* a student is placed into,
   separately from SM-2's *which specific word is due today*. The two systems compose rather
   than overlap.
+
+- **Evaluation frequency must align with the statistical window, or the
+  window is silently corrupted.** The first version of the DDA system
+  evaluated a student's level every 10 attempts, but the performance
+  window was 30 attempts. This meant each evaluation used only 10 fresh
+  data points and 20 stale ones — the stale majority dominated the
+  decision. A student who legitimately improved would see their new
+  performance diluted by old failures; a student who hit a temporary
+  rough patch would see their old successes mask the decline. The visible
+  symptom was a student oscillating between L3 and L4 over a single
+  practice session, sometimes changing level twice within 30 questions.
+
+  The fix was to **treat the window size as the evaluation interval**:
+  `MIN_ATTEMPTS_BETWEEN_EVALUATIONS` went from 10 to 30, matching
+  `WINDOW_SIZE`. Every evaluation now corresponds to a **fully-refreshed
+  window** — no stale data dominates, and the decision reflects the
+  student's performance over the exact same set of attempts the metrics
+  are computed from.
+
+  Three additional signal-level fixes went in alongside this:
+
+    1. **Response time on demotion.** The old rules demoted on low
+       correctness alone, which punished "fast guessers" identically to
+       "slow strugglers." The fix adds `DEMOTE_MIN_AVG_TIME_MS = 5000`:
+       demotion requires both low correctness **and** slow responses,
+       filtering out the case where a student is clicking randomly.
+
+    2. **Trend guard.** `metricsCalculator` now computes
+       `earlyCorrectRate`, `lateCorrectRate`, and `trend` (late minus
+       early) within the window. A student who is **actively improving**
+       (`trend > 0.2`) is protected from demotion even if their overall
+       window average is low, because their trajectory matters more than
+       their current snapshot.
+
+    3. **Probe-based promotion.** The window is split into
+       `attemptsAtLevel`, `attemptsBelowLevel`, and `attemptsAboveLevel`
+       (probe questions at higher difficulty). If a student shows strong
+       performance on probe questions (≥ 3 attempts, ≥ 70% correct), they
+       can be promoted even without hitting the 20-attempt threshold on
+       the current level. This addresses the case where a student is
+       clearly ready for the next tier but the current level's sample
+       size is still building up.
+
+  Finally, `LOCK_ATTEMPTS_AFTER_CHANGE` was extended from 30 to 50 to
+  give the student more adaptation time before the next evaluation can
+  fire. Combined with the frequency alignment, this prevents the "just
+  promoted, immediately demoted" oscillation pattern entirely.
 
 - **Level-progression thresholds must leave headroom below the sliding window.**
   `PerformanceTracker` uses a 30-attempt sliding window, and buildDefaultNewWords
