@@ -71,38 +71,38 @@ logic, `services/` owns every I/O boundary (Firestore, exports, monitoring), and
 
 ``` mermaid
 graph TD
-    %% 定義高對比度樣式（深色背景 + 白色文字），確保在淺色/深色主題下皆清晰可讀
+    %% High-contrast styling (dark background + white text) for readability in both light/dark GitHub themes
     classDef ui fill:#1e40af,stroke:#3b82f6,stroke-width:2px,color:#ffffff;
     classDef domain fill:#065f46,stroke:#10b981,stroke-width:2px,color:#ffffff;
     classDef service fill:#9a3412,stroke:#f97316,stroke-width:2px,color:#ffffff;
     classDef infra fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#ffffff;
 
-    subgraph Features [前端表示層 Features]
-        UI_Quiz[Quiz 測驗流程編排]:::ui
-        UI_Dash[教師儀表板]:::ui
-        UI_Admin[管理後台]:::ui
+    subgraph Features [Presentation Layer Features]
+        UI_Quiz[Quiz Flow Orchestration]:::ui
+        UI_Dash[Teacher Dashboard]:::ui
+        UI_Admin[Admin Panel]:::ui
     end
 
-    subgraph Domain [領域邏輯層 Domain - 純函式]
-        D_SM2[SM-2 間隔重複]:::domain
-        D_Grade[客觀判分與例句遮罩]:::domain
-        D_DDA[適應性分級 DDA]:::domain
-        D_Select[選題與配額政策]:::domain
+    subgraph Domain [Domain Layer Domain - Pure Functions]
+        D_SM2[SM-2 Spaced Repetition]:::domain
+        D_Grade[Objective Grading & Masking]:::domain
+        D_DDA[Adaptive Leveling DDA]:::domain
+        D_Select[Selection & Quota Policy]:::domain
     end
 
-    subgraph Services [服務邊界層 Services - I/O 邊界]
-        S_Store[進度儲存 ProgressStore]:::service
-        S_Analytics[分析服務 Analytics]:::service
-        S_Assign[作業服務 Assignment]:::service
+    subgraph Services [Service Boundary Services - I/O]
+        S_Store[Progress Store]:::service
+        S_Analytics[Analytics Service]:::service
+        S_Assign[Assignment Service]:::service
     end
 
-    subgraph Infrastructure [基礎設施與外部依賴]
+    subgraph Infrastructure [Infrastructure & External Dependencies]
         I_Firebase[(Firebase Firestore)]:::infra
         I_TTS[Web Speech API TTS]:::infra
-        I_IME[Google IME 手寫]:::infra
+        I_IME[Google IME Handwriting]:::infra
     end
 
-    %% 依賴關係：由上而下單向依賴
+    %% Unidirectional dependency flow
     UI_Quiz --> D_SM2
     UI_Quiz --> D_Grade
     UI_Quiz --> D_DDA
