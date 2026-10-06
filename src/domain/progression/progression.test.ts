@@ -15,6 +15,13 @@ function makeMetrics(overrides: Partial<PerformanceMetrics> = {}): PerformanceMe
     avgResponseTimeMs: 4000,
     timeoutRate: 0.1,
     attemptsInCurrentLevel: 50,
+    attemptsAtLevel: 30,          // 🔥 新增
+    attemptsBelowLevel: 20,       // 🔥 新增
+    attemptsAboveLevel: 0,        // 🔥 新增
+    probeCorrectRate: 0,          // 🔥 新增
+    earlyCorrectRate: 0.7,        // 🔥 新增
+    lateCorrectRate: 0.7,         // 🔥 新增
+    trend: 0,                     // 🔥 新增
     consecutiveCorrect: 0,
     consecutiveWrong: 0,
     ...overrides,
@@ -59,9 +66,12 @@ describe('RuleBasedStrategy', () => {
     assert.ok(result.lockUntilAttempts > 100);
   });
 
-  test('低正確率 → demote', () => {
+  test('低正確率 + 慢反應 → demote', () => {
     const input = makeInput({
-      metrics: makeMetrics({ correctRate: 0.4 }),
+      metrics: makeMetrics({
+        correctRate: 0.4,
+        avgResponseTimeMs: 6000,  // 🔥 需 ≥ DEMOTE_MIN_AVG_TIME_MS (5000)
+      }),
     });
     const result = strategy.evaluate(input);
     assert.strictEqual(result.action, 'demote');
@@ -234,4 +244,37 @@ describe('RuleBasedStrategy', () => {
     assert.deepStrictEqual(r1, r2);
     assert.deepStrictEqual(r2, r3);
   });
+
+  // ============================================================
+  // 🔥 新增的行為測試（v2）
+  // ============================================================
+  test('降級需平均時間 ≥ 5 秒（快速猜錯不降級）', () => {
+    const input = makeInput({
+      metrics: makeMetrics({ correctRate: 0.4, avgResponseTimeMs: 3000 }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'hold');
+  });
+
+  test('趨勢保護：進步中不降級', () => {
+    const input = makeInput({
+      metrics: makeMetrics({ correctRate: 0.4, avgResponseTimeMs: 6000, trend: 0.3 }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'hold');
+  });
+
+  test('Probe 表現好可升級', () => {
+    const input = makeInput({
+      metrics: makeMetrics({
+        correctRate: 0.7,
+        attemptsAboveLevel: 5,
+        probeCorrectRate: 0.8,
+        attemptsAtLevel: 15,
+      }),
+    });
+    const result = strategy.evaluate(input);
+    assert.strictEqual(result.action, 'promote');
+  });
 });
+
