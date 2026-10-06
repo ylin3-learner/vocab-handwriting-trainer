@@ -121,7 +121,7 @@ graph TD
     class S1,S2,S3 services;
     class L1,L2,L3 storage;
     class E1,E2,E3 external;
-```
+
 
 ```
 vocab-handwriting-trainer/
