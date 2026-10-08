@@ -122,10 +122,8 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
     const startDraw = (e: React.MouseEvent | React.TouchEvent) => {
       if (disabled) return;
 
-      // 🔒 鎖定檢查：第一筆落下後，拒絕所有新筆畫
-      //   用 ref 判斷（同步、不受 React batching 影響），
-      //   防止學生「快速點一下再清除」的漏洞
-      if (lockMode === 'locked' && hasContentRef.current) return;
+      // 不應該阻止新筆畫（學生需要寫完整個單字）
+      // if (lockMode === 'locked' && hasContentRef.current) return;
 
       e.preventDefault();
       setIsDrawing(true);
