@@ -1,6 +1,7 @@
 // src/features/quiz/QuizSessionApi.ts
 import { QuizQuestion, AnswerSubmission, SubmitAnswerResult } from './QuizOrchestrator';
 import { ActiveAssignment } from '../../services/assignment/AssignmentService';
+import type { HandwritingMode } from '../../domain/quiz/HandwritingLockPolicy';
 
 /**
  * QuizScreen 需要的介面。
@@ -65,6 +66,8 @@ export interface QuizSessionApi {
    * 結束 session 時呼叫（可選）。
    */
   finalizeSession?(): Promise<void>;
+
+  getHandwritingMode(): HandwritingMode; // 新增
 }
 
 export interface SessionDisplayInfo {

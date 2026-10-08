@@ -554,6 +554,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
           maxChars={question.word.word.length + 2}
           onImageData={(data) => setSnapshotUrl(data)}
           disabled={status !== 'answering'}
+          lockMode={orchestrator.getHandwritingMode()}
         />
       </div>
 

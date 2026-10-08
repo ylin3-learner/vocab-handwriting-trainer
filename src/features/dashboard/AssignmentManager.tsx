@@ -13,6 +13,11 @@ import type { QuotaExceededBehavior } from '../../domain/quiz/SessionQuotaPolicy
 import { QuizTimingPolicy } from '../../domain/quiz/QuizTimingPolicy';
 import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
 
+import {
+  HandwritingLockPolicy,
+  HandwritingMode,
+} from '../../domain/quiz/HandwritingLockPolicy';
+
 const service = new AssignmentService();
 
 type AssignMode = 'class' | 'individual';
@@ -34,6 +39,7 @@ interface FormState {
   quotaExceededBehavior: QuotaExceededBehavior;
   // 🔥 新增：作答時限（用秒，UI 友善）
   timeLimitSeconds: number;
+  handwritingMode: HandwritingMode;
 }
 
 const emptyForm = (): FormState => ({
@@ -53,6 +59,7 @@ const emptyForm = (): FormState => ({
   quotaExceededBehavior: 'stop',
   // 🔥 預設 8 秒（比賽標準）
   timeLimitSeconds: QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS / 1000,
+  handwritingMode: HandwritingLockPolicy.DEFAULT_MODE,
 });
 
 const FOCUS_LABEL: Record<ReviewFocus, string> = {
@@ -184,6 +191,7 @@ export const AssignmentManager: React.FC = () => {
       quotaExceededBehavior: form.quotaExceededBehavior,
       // 🔥 秒 → 毫秒
       timeLimitMs: form.timeLimitSeconds * 1000,
+      handwritingMode: form.handwritingMode,
     };
 
     try {
@@ -228,6 +236,7 @@ export const AssignmentManager: React.FC = () => {
       quotaExceededBehavior: a.quotaExceededBehavior ?? 'stop',
       // 🔥 毫秒 → 秒；舊作業 fallback 到 8 秒
       timeLimitSeconds: (a.timeLimitMs ?? QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS) / 1000,
+      handwritingMode: a.handwritingMode ?? HandwritingLockPolicy.DEFAULT_MODE,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -479,6 +488,24 @@ export const AssignmentManager: React.FC = () => {
             </small>
           </div>
 
+          {/* 🔥 手寫模式 */}
+          <div>
+            <label>🖊️ 手寫模式</label>
+            <select
+              value={form.handwritingMode}
+              onChange={(e) =>
+                setForm({ ...form, handwritingMode: e.target.value as HandwritingMode })
+              }
+              style={{ width: '100%', padding: '0.5rem' }}
+            >
+              <option value="normal">✏️ 一般練習（可清除重寫）</option>
+              <option value="locked">🔒 比賽模擬（一筆定生死）</option>
+            </select>
+            <small style={{ color: '#6c757d' }}>
+              比賽模擬：第一筆落下後不可清除、不可再寫，模擬真實比賽「不得塗改」的規則。
+            </small>
+          </div>
+
           {/* 預設語速 */}
           <div>
             <label>🔊 預設語速（首次播放）</label>
@@ -624,6 +651,7 @@ export const AssignmentManager: React.FC = () => {
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>目標等級</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>每日題數</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>配額後</th>
+              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>手寫</th>
               {/* 🔥 新增欄位 */}
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>時限</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>語速</th>
@@ -678,6 +706,9 @@ export const AssignmentManager: React.FC = () => {
                   <td style={{ padding: '10px' }}>{a.dailyQuota}</td>
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>
                     {a.quotaExceededBehavior === 'continue' ? '📚 加強' : '🛑 停止'}
+                  </td>
+                  <td style={{ padding: '10px', fontSize: '0.85rem' }}>
+                    {(a.handwritingMode ?? 'normal') === 'locked' ? '🔒 比賽' : '✏️ 一般'}
                   </td>
                   {/* 🔥 新增欄位 */}
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>

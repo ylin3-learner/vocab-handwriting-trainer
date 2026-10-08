@@ -19,6 +19,7 @@ import { db } from '../../firebase';
 import { selectActiveAssignment } from '../../domain/assignment/selectAssignment';
 import type { QuotaExceededBehavior } from '../../domain/quiz/SessionQuotaPolicy';
 import { removeUndefined } from '../../domain/firestore/removeUndefined';
+import type { HandwritingMode } from '../../domain/quiz/HandwritingLockPolicy';
 
 export type ReviewFocus = 'strict' | 'balanced' | 'explore';
 
@@ -41,6 +42,7 @@ export interface Assignment {
   speechFloorRate?: number;
   quotaExceededBehavior?: QuotaExceededBehavior;
   timeLimitMs?: number;
+  handwritingMode?: HandwritingMode;   // 新增
 }
 
 export interface ActiveAssignment {

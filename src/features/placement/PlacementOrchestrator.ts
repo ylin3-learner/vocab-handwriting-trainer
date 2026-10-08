@@ -13,6 +13,7 @@ import {
 } from '../../types/progression';
 import { sanitizeFirestoreId } from '../../domain/string/sanitizeId';
 import { buildDisplayId } from '../../domain/string/displayId';
+import type { HandwritingMode } from '../../domain/quiz/HandwritingLockPolicy';
 
 import {
     decidePlacementStep,
@@ -275,6 +276,18 @@ export class PlacementOrchestrator implements QuizSessionApi {
      */
     getSpeechFloorRate(): number | null {
         return null;
+    }
+
+    /**
+     * 🔥 鑑定模式的手寫模式固定為 'normal'（可清除重寫）。
+     *
+     * 理由：
+     *   - 鑑定要測「真實的拼字能力」，不是測「一筆成型的壓力反應」
+     *   - 學生需要能修正筆誤，讓辨識結果反映他的真實知識
+     *   - 比賽模擬的 locked 模式只在正式練習時透過作業設定啟用
+     */
+    getHandwritingMode(): HandwritingMode {
+        return 'normal';
     }
 
     async finalizeSession(): Promise<void> {

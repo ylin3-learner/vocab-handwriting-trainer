@@ -34,6 +34,11 @@ import { buildDisplayId } from '../../domain/string/displayId';
 
 import { getLocalDateString } from '../../domain/date/timezone';
 
+import {
+  HandwritingLockPolicy,
+  HandwritingMode,
+} from '../../domain/quiz/HandwritingLockPolicy';
+
 export interface QuizQuestion {
   word: Word;
   timeLimitMs: number;
@@ -101,6 +106,9 @@ export class QuizOrchestrator implements QuizSessionApi {
 
   private timingPolicy = new QuizTimingPolicy();
   private resolvedTimeLimitMs: number = QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS;
+
+  private handwritingLockPolicy = new HandwritingLockPolicy();
+  private resolvedHandwritingMode: HandwritingMode = HandwritingLockPolicy.DEFAULT_MODE;
 
   private studentTimeZone: string = 'Asia/Taipei';
 
@@ -182,6 +190,10 @@ export class QuizOrchestrator implements QuizSessionApi {
 
   getTimeLimitMs(): number {
     return this.resolvedTimeLimitMs;
+  }
+
+  getHandwritingMode(): HandwritingMode {
+    return this.resolvedHandwritingMode;
   }
 
   // ============================================================
@@ -271,6 +283,14 @@ export class QuizOrchestrator implements QuizSessionApi {
       assignmentMs: this.activeAssignment?.assignment.timeLimitMs,
     });
     console.log(`   ⏱️ 作答時限：${this.resolvedTimeLimitMs}ms（${this.resolvedTimeLimitMs / 1000} 秒）`);
+
+    this.resolvedHandwritingMode = this.handwritingLockPolicy.resolve({
+      assignmentMode: this.activeAssignment?.assignment.handwritingMode,
+    });
+    console.log(
+      `   🖊️ 手寫模式：${this.resolvedHandwritingMode === 'locked' ? '🔒 比賽模擬（動筆即鎖）' : '✏️ 一般練習'
+      }`
+    );
 
     this.stateCache = await this.deps.progressStore.getAllStates(displayId);
     console.log(`   ✅ 已載入 ${this.stateCache.size} 個單字的進度狀態`);
