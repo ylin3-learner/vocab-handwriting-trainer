@@ -125,7 +125,10 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
       // 不應該阻止新筆畫（學生需要寫完整個單字）
       // if (lockMode === 'locked' && hasContentRef.current) return;
 
-      e.preventDefault();
+      // 🔥 移除 e.preventDefault()：canvas 的 touchAction: 'none'
+      //    已經在 CSS 層阻止了瀏覽器預設手勢，不需要這行。
+      //    在 passive listener 中呼叫它只會噴警告，且被忽略。
+      // e.preventDefault();  ← 刪除這行
       setIsDrawing(true);
 
       // 🔒 一動筆就鎖：在 startDraw 時就標記為有內容
@@ -147,7 +150,7 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
 
     const draw = (e: React.MouseEvent | React.TouchEvent) => {
       if (!isDrawing || disabled) return;
-      e.preventDefault();
+      // e.preventDefault();
       const { x, y } = getPos(e);
       currentStrokeRef.current.push({ x, y });
       const canvas = canvasRef.current;
