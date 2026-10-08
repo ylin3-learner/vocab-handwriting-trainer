@@ -66,3 +66,5 @@ service-account.json
 serviceAccountKey.json
 
 firestore.rules
+
+vocab_csv/
