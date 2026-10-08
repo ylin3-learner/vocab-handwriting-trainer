@@ -67,4 +67,5 @@ serviceAccountKey.json
 
 firestore.rules
 
-vocab_csv/
+/vocab_csv/*.csv
+!/vocab_csv/vocab_example.csv
