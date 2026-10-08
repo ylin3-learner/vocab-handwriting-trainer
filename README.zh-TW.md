@@ -42,6 +42,7 @@
 | 語音 | Web Speech API，可調整播放語速（預設 1.0x 訓練真實英聽）＋「🐢 重聽一次（慢速）」按鈕，速度下限由老師設定（預設 0.85x）。**倒數在語音結束後才啟動**（另有 8 秒保險計時器），模擬⽐賽現場節奏 |
 | **例句遮罩** | 作答期間目標單字以同長度下底線遮罩，答完才揭露。使用 **Porter Stemmer** 正規化，`recite` / `recited` / `reciting` 都會被遮罩；但不會過度詞幹化（`art` 與 `artist` 保持區分） |
 | **可調每題作答時限** | 每份作業可設定作答秒數（3–30 秒，預設選項 5/8/10/15/20 秒）。由 `QuizTimingPolicy` 三層優先序解析：學生個人覆蓋 > 作業設定 > 系統預設（8 秒） |
+| **比賽模擬手寫模式** | 每份作業可設定手寫模式。`normal`（可清除重寫）或 `locked`（動筆後清除鍵鎖定，模擬比賽「不得塗改」）。由 `HandwritingLockPolicy` 三層優先序解析：學生個人覆蓋 > 作業設定 > 系統預設（`normal`）。第一筆落下的瞬間就鎖定清除鍵，不影響後續筆畫（學生可繼續寫完整個單字） |
 | **課後加強** | 學生答完每日配額後，若老師允許，完成頁面會顯示「📚 繼續練習」按鈕。這是兩層選擇：老師選 `stop` 或 `continue`，學生再主動決定是否延長 |
 | 適應性分級 | `PlacementOrchestrator` 用二分搜尋式的階梯（L3 起始、每級 3 題）將新學生放到合適層級；`LevelProgressionService` ＋ `RuleBasedStrategy` 依滾動表現持續升／降級，且**評估頻率與滑動視窗對齊（每 30 題評估一次）**。升級門檻：正確率 ≥ 85%、平均 < 7 秒、當前等級或以下的作答 ≥ 20 筆。降級需正確率 < 50% **且** 平均時間 ≥ 5 秒（過濾快速猜錯）。趨勢保護：若學生在進步中（前後半段正確率差 > 20%），不降級。Probe 高階題表現優異可獨立觸發升級。升降級後鎖定：50 題 |
 | 作業系統 | 老師可設定每日配額、新舊字比例、複習專注度、**目標難度層級**（加權出題：目標 ＋ 當前 ＋ 探針）、每份作業的語速下限、每份作業的作答時限、每份作業的配額用盡後行為。優先序：個人 > 班級 > 全校 |
@@ -357,6 +358,12 @@ vocab-handwriting-trainer/
   值由 `QuizTimingPolicy.resolve()` 依優先序解析：學生個人覆蓋 > 作業設定 > 系統預
   設（8000 ms）。這讓時限規則可測試，也讓 UI 不需要知道解析邏輯。
 
+- **比賽模擬手寫模式：鎖定清除鍵，而非鎖定畫布。** 
+  真實比賽規則是「動筆後不得塗改」，但學生寫一個單字本來就會有多個筆畫（`apple` 需要 10+ 筆）。第一版實作誤把「第一筆落下後拒絕所有新筆畫」當成規則，結果學生只能寫第一個字母。正確的設計是：**鎖定的是「清除鍵」，不是「畫布」**。`HandwritingLockPolicy` 提供 `normal` / `locked` 兩種模式，由 `QuizTimingPolicy` 相同的三層優先序解析（學生覆蓋 > 作業設定 > 系統預設）。在 `locked` 模式下，`HandwritingCanvas` 用一個 `hasContentRef`（同步 ref，避免 React batching race）在 `startDraw` 的瞬間就標記「已動筆」，立即 disabled 清除鍵並顯示「🔒 已鎖定（比賽模式）」；但學生仍可繼續寫其他筆畫，直到提交。`clearCanvas()` 在鎖定後拒絕使用者主動清除，但保留 `force = true` 參數供內部初始化使用。`PlacementOrchestrator` 固定回傳 `'normal'`——鑑定要測真實拼字能力，不是壓力反應。老師可在 `AssignmentManager` 為每份作業切換模式，實現「平常練習」與「賽前模擬」的一鍵切換，不需改程式碼。
+
+- **手寫事件不再呼叫 `preventDefault()`。** 
+  `HandwritingCanvas` 原本在 `onTouchStart` / `onTouchMove` 中呼叫 `e.preventDefault()`，但現代瀏覽器（Chrome、Safari）預設把觸控事件註冊為 **passive listener**，在裡面呼叫 `preventDefault()` 只會被忽略並噴出 `Unable to preventDefault inside passive event listener invocation` 警告，把 console 洗版。canvas 的 CSS 已經設了 `touch-action: none`，這比 JS 層的 `preventDefault()` 更早、更可靠地阻止了瀏覽器預設手勢（滾動、縮放、雙擊放大）。移除 JS 層的呼叫後，功能完全不變，但 console 乾淨很多。
+
 - **舊 UID profile 的自動清理由 localStorage 驅動，而非 Firestore。** 每次匿名登入
   都會產生新 UID，`students/{uid}` 集合會累積孤兒 profile。走 Firestore 查詢需要在
   每次登入多一次讀取；改由 `ProfileCleanupTracker` 在 localStorage 記錄每個
@@ -547,14 +554,11 @@ Firestore 離線持久化、熔斷器＋重試佇列、配額監控、`everWrong
 答對 5 次後自動清除），孤兒 UID profile 的自動清理、以及 `RuleBasedStrategy` 的門檻修正——修復了一個
 在 30 筆滑動視窗下數學上不可能達成的升級條件（詳見「值得特別說明的設計決策」）。
 
-**自動化測試：131 個單元測試、7 個 suites**，涵蓋 `grader`、`sm2`、
+**自動化測試：155 個單元測試、14 個 suites**，涵蓋 `grader`、`sm2`、
 `questionSelector`、`studentAnalyzer`、`RuleBasedStrategy`、`placementDecision`、
-`selectAssignment`、`evaluationGuard`、`AnswerProcessor`，以及 `maskWord`（同時涵蓋
-`porterStemmer`）的純邏輯單元測試。測試聚焦在最高風險的純函式；I/O 層刻意不寫單元
-測試（需要 Firestore emulator，延後到 Stage 7+ 處理）。
-
-Stage 6-A 之所以刻意排在 6-B 之前，是因為儀表板**只讀**、完全不影響現有測驗流程，而
-單字庫上傳需要重新接線核⼼的 `WordRepository`，是整個系統中風險最高的重構。
+`selectAssignment`、`evaluationGuard`、`AnswerProcessor`、`HandwritingLockPolicy`，
+以及 `maskWord`（同時涵蓋 `porterStemmer`）的純邏輯單元測試。測試聚焦在最高風險的純函
+式；I/O 層刻意不寫單元測試（需要 Firestore emulator，延後到 Stage 7+ 處理）。
 
 ## 🛠️ 技術棧
 
@@ -817,7 +821,7 @@ Stage 0 到 Stage 6-E 已完成，Stage 7（真實試點）**進行中**——�
 老師可設定的作業與目標層級加權出題、個人化語速控制、每題作答時限控制、含成長曲線視
 覺化的教師儀表板、單一學生 PDF 報告匯出，以及學生／教師／管理員的角色權限。
 
-**自動化測試：131 個通過、7 個 suites、0 個失敗。**
+**自動化測試：155 個通過、14 個 suites、0 個失敗。**
 
 **Stage 7 剩下工作：** 繼續蒐集辨識錯誤案例、依真實學生樣本調整手寫辨識流程、依試點
 發現持續迭代。功能到此凍結——優先順序是真實世界的驗證，而不是繼續擴充功能。

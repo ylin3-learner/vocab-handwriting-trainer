@@ -51,6 +51,7 @@ project centers on:
 | Speech | Web Speech API with configurable playback rate (default 1.0x for authentic listening practice) + a "🐢 Replay slower" button bounded by a teacher-configurable floor (default 0.85x). Speech-driven countdown: the countdown does not start until speech ends (with an 8-second fallback safety timer) |
 | **Example-sentence masking** | The target word is masked (underscores of matching length) while answering, revealed after submission. Uses **Porter Stemmer** normalization so `recite` / `recited` / `reciting` are all masked, but does not over-stem (`art` and `artist` stay distinct) |
 | **Configurable per-question time limit** | Each assignment can set the answer window (3–30 s; presets 5/8/10/15/20 s). Resolved via `QuizTimingPolicy` with three-layer priority: student override > assignment > system default (8 s) |
+| **Competition-simulation handwriting mode** | Each assignment can set the handwriting mode: `normal` (clear and rewrite allowed) or `locked` (clear button disabled once the first stroke lands, simulating the competition's "no corrections" rule). Resolved via `HandwritingLockPolicy` with three-layer priority: student override > assignment > system default (`normal`). The clear button locks at the instant the first stroke lands, but subsequent strokes are still allowed — students can finish writing the whole word |
 | **After-quota practice** | When a student finishes their daily quota, the done screen offers "📚 Continue practicing" if the teacher enabled it. This is a two-layer opt-in: teacher chooses `stop` vs `continue`, then the student actively chooses whether to extend |
 | **Adaptive difficulty** | `PlacementOrchestrator` places new students at roughly the right tier using a binary-search-style ladder (start L3, 3 questions per tier); `LevelProgressionService` + `RuleBasedStrategy` continuously promote/demote based on rolling performance over a 30-attempt window, with the evaluation frequency aligned to the window size (every 30 attempts). Promotion gate: ≥ 85% correct, < 7 s average, ≥ 20 attempts at or below the current level. Demotion requires ≥ 50% wrong **and** ≥ 5 s average (filters out fast guessing). A trend guard blocks demotion when the student is improving (> 20% late-vs-early delta), and probe questions at higher levels can trigger promotion independently. Post-change lock: 50 attempts |
 | **Assignment system** | Teacher-configurable daily quota, new-vs-review ratio, exploration focus, **target difficulty tier** (weighted question selection mixes target + current + probe), per-assignment speech-rate floor, per-assignment time limit, and per-assignment quota-exceeded behavior. Priority order: individual > class > school-wide |
@@ -395,6 +396,38 @@ vocab-handwriting-trainer/
   setting > system default (8000 ms). This keeps the timing rule testable and keeps the UI
   from having to know about any of the resolution logic.
 
+- **Competition-simulation mode locks the clear button, not the canvas.** The
+  real competition rule is "no corrections once you've started writing," but
+  writing a single word naturally involves multiple strokes (`apple` takes
+  10+). The first implementation misread this as "reject all new strokes after
+  the first one," which made it impossible for students to finish the word.
+  The correct design is: **lock the clear button, not the canvas.** The new
+  `HandwritingLockPolicy` offers two modes (`normal` / `locked`), resolved
+  through the same three-layer priority as `QuizTimingPolicy` (student
+  override > assignment > system default). In `locked` mode,
+  `HandwritingCanvas` uses a synchronous `hasContentRef` (avoiding React
+  batching races) to mark "has content" the instant `startDraw` fires — the
+  clear button is immediately disabled and shows "🔒 已鎖定（比賽模式）", but
+  the student can keep writing additional strokes until submission.
+  `clearCanvas()` rejects user-initiated clears after lock, but keeps a
+  `force = true` parameter for internal initialization.
+  `PlacementOrchestrator` always returns `'normal'` — placement measures true
+  spelling ability, not stress response. Teachers can toggle the mode per
+  assignment in `AssignmentManager`, enabling a one-click switch between
+  "normal practice" and "competition simulation" without touching code.
+
+- **Handwriting touch handlers no longer call `preventDefault()`.**
+  `HandwritingCanvas` used to call `e.preventDefault()` inside
+  `onTouchStart` / `onTouchMove`, but modern browsers (Chrome, Safari)
+  register touch events as **passive listeners** by default. Calling
+  `preventDefault()` inside a passive listener is ignored and emits an
+  `Unable to preventDefault inside passive event listener invocation`
+  warning, flooding the console. The canvas CSS already sets
+  `touch-action: none`, which prevents browser gestures (scroll, zoom,
+  double-tap) more reliably and earlier than a JS-level `preventDefault()`
+  ever could. Removing the JS-level call changes no behavior but greatly
+  cleans up the console.
+
 - **Auto-cleanup of old UID profiles is localStorage-driven, not Firestore-driven.** Every
   anonymous login generates a new UID, which means the `students/{uid}` collection
   accumulates orphan profiles over time. A Firestore-based cleanup would need an extra
@@ -628,16 +661,13 @@ after 5 consecutive correct answers), and automatic cleanup of orphaned UID prof
 unreachable under the 30-attempt sliding window (see "Design decisions worth calling
 out").
 
-**Automated test coverage: 131 unit tests across 7 suites**, covering `grader`, `sm2`,
-`questionSelector`, `studentAnalyzer`, `RuleBasedStrategy`, `placementDecision`,
-`selectAssignment`, `evaluationGuard`, `AnswerProcessor`, and `maskWord` (which also covers
-`porterStemmer`). Tests focus on the highest-risk pure functions; I/O layers are
-intentionally not unit-tested (they would require a Firestore emulator, which is deferred
+**Automated test coverage: 155 unit tests across 14 suites**, covering `grader`,
+`sm2`, `questionSelector`, `studentAnalyzer`, `RuleBasedStrategy`,
+`placementDecision`, `selectAssignment`, `evaluationGuard`, `AnswerProcessor`,
+`HandwritingLockPolicy`, and `maskWord` (which also covers `porterStemmer`).
+Tests focus on the highest-risk pure functions; I/O layers are intentionally
+not unit-tested (they would require a Firestore emulator, which is deferred
 to Stage 7+).
-
-Stage 6-A was deliberately prioritized over 6-B: dashboards are **read-only** and touch
-nothing in the existing quiz flow, while word-bank upload requires rewiring the core
-`WordRepository`, which is the highest-risk refactor in the whole system.
 
 ## 🛠️ Tech Stack
 
@@ -903,7 +933,7 @@ rate control, per-question time limit control, the teacher dashboard with growth
 visualization, per-student PDF report export, and role-based auth for
 students/teachers/admins.
 
-**Automated tests: 131 passing across 7 suites, 0 failing.**
+**Automated tests: 155 passing across 14 suites, 0 failing.**
 
 **Remaining work in Stage 7:** continue collecting recognition error cases, tune the
 handwriting pipeline against real student samples, and iterate on the pilot findings.
