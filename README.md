@@ -52,6 +52,7 @@ project centers on:
 | **Example-sentence masking** | The target word is masked (underscores of matching length) while answering, revealed after submission. Uses **Porter Stemmer** normalization so `recite` / `recited` / `reciting` are all masked, but does not over-stem (`art` and `artist` stay distinct) |
 | **Configurable per-question time limit** | Each assignment can set the answer window (3–30 s; presets 5/8/10/15/20 s). Resolved via `QuizTimingPolicy` with three-layer priority: student override > assignment > system default (8 s) |
 | **Competition-simulation handwriting mode** | Each assignment can set the handwriting mode: `normal` (clear and rewrite allowed) or `locked` (clear button disabled once the first stroke lands, simulating the competition's "no corrections" rule). Resolved via `HandwritingLockPolicy` with three-layer priority: student override > assignment > system default (`normal`). The clear button locks at the instant the first stroke lands, but subsequent strokes are still allowed — students can finish writing the whole word |
+| **Competition sprint mode** | Each assignment can enable "🏁 Competition Mode". When enabled, the system **freezes DDA level evaluation** and **forces 100% of questions from the target level only** (no current-level or probe mixing). Resolved via `CompetitionModePolicy` with the same three-layer priority as `QuizTimingPolicy` and `HandwritingLockPolicy`. **Lifecycle is controlled automatically by the assignment's `endDate`** — once the assignment expires, `selectActiveAssignment` excludes it, `QuizOrchestrator` returns to normal mode, and DDA resumes naturally. The first post-competition evaluation uses a fully-refreshed 30-attempt window (`MIN_ATTEMPTS_BETWEEN_EVALUATIONS = WINDOW_SIZE`), corresponding to the academic Freeze-and-Refresh mechanism in CAT |
 | **After-quota practice** | When a student finishes their daily quota, the done screen offers "📚 Continue practicing" if the teacher enabled it. This is a two-layer opt-in: teacher chooses `stop` vs `continue`, then the student actively chooses whether to extend |
 | **Adaptive difficulty** | `PlacementOrchestrator` places new students at roughly the right tier using a binary-search-style ladder (start L3, 3 questions per tier); `LevelProgressionService` + `RuleBasedStrategy` continuously promote/demote based on rolling performance over a 30-attempt window, with the evaluation frequency aligned to the window size (every 30 attempts). Promotion gate: ≥ 85% correct, < 7 s average, ≥ 20 attempts at or below the current level. Demotion requires ≥ 50% wrong **and** ≥ 5 s average (filters out fast guessing). A trend guard blocks demotion when the student is improving (> 20% late-vs-early delta), and probe questions at higher levels can trigger promotion independently. Post-change lock: 50 attempts |
 | **Assignment system** | Teacher-configurable daily quota, new-vs-review ratio, exploration focus, **target difficulty tier** (weighted question selection mixes target + current + probe), per-assignment speech-rate floor, per-assignment time limit, and per-assignment quota-exceeded behavior. Priority order: individual > class > school-wide |
@@ -170,6 +171,8 @@ vocab-handwriting-trainer/
 │ │ └── progression.test.ts
 │ ├── quiz/
 │ │ ├── QuizTimingPolicy.ts # 3-layer per-question time limit resolver
+│ │ ├── HandwritingLockPolicy.ts # 3-layer handwriting mode resolver (normal/locked)
+│ │ ├── CompetitionModePolicy.ts # 3-layer competition mode resolver (freezes DDA)
 │ │ └── SessionQuotaPolicy.ts # 2-layer after-quota behavior (stop/continue)
 │ ├── scheduler/
 │ │ ├── sm2.ts (+test) # Spaced-repetition math
@@ -428,6 +431,37 @@ vocab-handwriting-trainer/
   ever could. Removing the JS-level call changes no behavior but greatly
   cleans up the console.
 
+- **Competition mode's auto-expiry reuses two existing mechanisms.**
+  Competition sprint mode (`competitionMode`) lets a teacher freeze DDA and force
+  questions from the target level only, shifting students' memory from "self-driven
+  high level" back to "the competition's designated range". It **does not need a
+  dedicated expiry mechanism** — `selectActiveAssignment` already filters by
+  `endDate`, so a competition assignment expires automatically when the date
+  passes; `QuizOrchestrator` returns to normal mode and DDA resumes naturally.
+
+  More importantly, the "post-thaw re-evaluation" works for free:
+  `MIN_ATTEMPTS_BETWEEN_EVALUATIONS = 30` is already aligned with
+  `WINDOW_SIZE = 30`, so the first evaluation after the competition uses a
+  **fully-refreshed 30-attempt window** — no stale data from the competition
+  period dilutes the decision. This is exactly what Choi & van der Linden (2018)
+  call "reselecteds" in their Freeze-and-Refresh mechanism. Industry products
+  do the same: W.W. Norton Smartwork's Exam Mode automatically disables Adaptive
+  settings, and DataClassroom's exam mode auto-expires after 3 months.
+
+  Teachers don't need to remember to turn it off — the system turns it off
+  itself, and `AssignmentManager` shows the status with the same "transparency
+  over automation" philosophy as the dashboard's cache freshness display:
+  active (N days left), expiring soon, or ended (system has resumed adaptive
+  evaluation).
+
+  Real-world results: in the pilot, 7 students were forced from L4–L6 back to
+  L3 (the competition's upper bound). After the switch, the first 50 questions
+  showed accuracy dropping from 89% to 26% — proving that "self-driven high
+  level" and "competition designated range" are two non-overlapping memory
+  distributions. This is exactly why competition mode exists: without it,
+  students would enter the competition with "L4 false confidence" and lose
+  points on L3 words.
+
 - **Auto-cleanup of old UID profiles is localStorage-driven, not Firestore-driven.** Every
   anonymous login generates a new UID, which means the `students/{uid}` collection
   accumulates orphan profiles over time. A Firestore-based cleanup would need an extra
@@ -661,13 +695,13 @@ after 5 consecutive correct answers), and automatic cleanup of orphaned UID prof
 unreachable under the 30-attempt sliding window (see "Design decisions worth calling
 out").
 
-**Automated test coverage: 155 unit tests across 14 suites**, covering `grader`,
-`sm2`, `questionSelector`, `studentAnalyzer`, `RuleBasedStrategy`,
+**Automated test coverage: 168 unit tests across 19 suites**, covering
+`grader`, `sm2`, `questionSelector`, `studentAnalyzer`, `RuleBasedStrategy`,
 `placementDecision`, `selectAssignment`, `evaluationGuard`, `AnswerProcessor`,
-`HandwritingLockPolicy`, and `maskWord` (which also covers `porterStemmer`).
-Tests focus on the highest-risk pure functions; I/O layers are intentionally
-not unit-tested (they would require a Firestore emulator, which is deferred
-to Stage 7+).
+`HandwritingLockPolicy`, `CompetitionModePolicy`, and `maskWord` (which also
+covers `porterStemmer`). Tests focus on the highest-risk pure functions; I/O
+layers are intentionally not unit-tested (they would require a Firestore
+emulator, which is deferred to Stage 7+).
 
 ## 🛠️ Tech Stack
 
@@ -933,7 +967,7 @@ rate control, per-question time limit control, the teacher dashboard with growth
 visualization, per-student PDF report export, and role-based auth for
 students/teachers/admins.
 
-**Automated tests: 155 passing across 14 suites, 0 failing.**
+**Automated tests: 168 passing across 19 suites, 0 failing.**
 
 **Remaining work in Stage 7:** continue collecting recognition error cases, tune the
 handwriting pipeline against real student samples, and iterate on the pilot findings.

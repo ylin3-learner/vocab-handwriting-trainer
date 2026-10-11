@@ -43,6 +43,7 @@
 | **例句遮罩** | 作答期間目標單字以同長度下底線遮罩，答完才揭露。使用 **Porter Stemmer** 正規化，`recite` / `recited` / `reciting` 都會被遮罩；但不會過度詞幹化（`art` 與 `artist` 保持區分） |
 | **可調每題作答時限** | 每份作業可設定作答秒數（3–30 秒，預設選項 5/8/10/15/20 秒）。由 `QuizTimingPolicy` 三層優先序解析：學生個人覆蓋 > 作業設定 > 系統預設（8 秒） |
 | **比賽模擬手寫模式** | 每份作業可設定手寫模式。`normal`（可清除重寫）或 `locked`（動筆後清除鍵鎖定，模擬比賽「不得塗改」）。由 `HandwritingLockPolicy` 三層優先序解析：學生個人覆蓋 > 作業設定 > 系統預設（`normal`）。第一筆落下的瞬間就鎖定清除鍵，不影響後續筆畫（學生可繼續寫完整個單字） |
+| **賽前衝刺模式** | 每份作業可啟用「🏁 比賽模式」。啟用後，系統**凍結 DDA 等級評估**，並**強制 100% 從目標等級出題**（不混當前等級或 probe）。由 `CompetitionModePolicy` 三層優先序解析：學生個人覆蓋 > 作業設定 > 系統預設。**生命週期由作業的 `endDate` 自動控制**——作業過期後 `selectActiveAssignment` 自動排除，`QuizOrchestrator` 回到一般模式，DDA 自然恢復。解凍後的下一次評估用的是完全刷新的 30 題視窗（`MIN_ATTEMPTS_BETWEEN_EVALUATIONS = WINDOW_SIZE`），對應學術上 CAT 的 Freeze-and-Refresh 機制 |
 | **課後加強** | 學生答完每日配額後，若老師允許，完成頁面會顯示「📚 繼續練習」按鈕。這是兩層選擇：老師選 `stop` 或 `continue`，學生再主動決定是否延長 |
 | 適應性分級 | `PlacementOrchestrator` 用二分搜尋式的階梯（L3 起始、每級 3 題）將新學生放到合適層級；`LevelProgressionService` ＋ `RuleBasedStrategy` 依滾動表現持續升／降級，且**評估頻率與滑動視窗對齊（每 30 題評估一次）**。升級門檻：正確率 ≥ 85%、平均 < 7 秒、當前等級或以下的作答 ≥ 20 筆。降級需正確率 < 50% **且** 平均時間 ≥ 5 秒（過濾快速猜錯）。趨勢保護：若學生在進步中（前後半段正確率差 > 20%），不降級。Probe 高階題表現優異可獨立觸發升級。升降級後鎖定：50 題 |
 | 作業系統 | 老師可設定每日配額、新舊字比例、複習專注度、**目標難度層級**（加權出題：目標 ＋ 當前 ＋ 探針）、每份作業的語速下限、每份作業的作答時限、每份作業的配額用盡後行為。優先序：個人 > 班級 > 全校 |
@@ -161,6 +162,8 @@ vocab-handwriting-trainer/
 │ │ └── progression.test.ts
 │ ├── quiz/
 │ │ ├── QuizTimingPolicy.ts # 三層每題作答時限解析
+│ │ ├── HandwritingLockPolicy.ts # 三層手寫模式解析（normal/locked）
+│ │ ├── CompetitionModePolicy.ts # 三層比賽模式解析（凍結 DDA）
 │ │ └── SessionQuotaPolicy.ts # 兩層配額用盡後行為（stop/continue）
 │ ├── scheduler/
 │ │ ├── sm2.ts (+test) # 間隔重複演算法
@@ -364,6 +367,31 @@ vocab-handwriting-trainer/
 - **手寫事件不再呼叫 `preventDefault()`。** 
   `HandwritingCanvas` 原本在 `onTouchStart` / `onTouchMove` 中呼叫 `e.preventDefault()`，但現代瀏覽器（Chrome、Safari）預設把觸控事件註冊為 **passive listener**，在裡面呼叫 `preventDefault()` 只會被忽略並噴出 `Unable to preventDefault inside passive event listener invocation` 警告，把 console 洗版。canvas 的 CSS 已經設了 `touch-action: none`，這比 JS 層的 `preventDefault()` 更早、更可靠地阻止了瀏覽器預設手勢（滾動、縮放、雙擊放大）。移除 JS 層的呼叫後，功能完全不變，但 console 乾淨很多。
 
+- **比賽模式的自動過期，複用了作業日期與視窗對齊兩個既有機制。**
+  賽前衝刺模式（`competitionMode`）讓老師在作業層級凍結 DDA、強制從目標等級出題，
+  用來把學生的記憶從「自主練到的高等級」搬回「比賽指定的範圍」。它**不需要獨立的
+  過期機制**——`selectActiveAssignment` 已經在過濾 `endDate` 過期的作業，比賽模式
+  作業一過期，`QuizOrchestrator` 自然回到一般模式，DDA 自動恢復。
+
+  更關鍵的是「解凍後的重評估」：`MIN_ATTEMPTS_BETWEEN_EVALUATIONS = 30` 與
+  `WINDOW_SIZE = 30` 已經對齊，這意味著比賽結束後的下一次評估，用的是
+  **完全刷新的 30 題窗口**——沒有比賽期間的舊數據稀釋。這正是學術上 CAT 的
+  Freeze-and-Refresh 機制（Choi & van der Linden, 2018）所說的「未實施的題目根據
+  更新後的能力估計重新選擇」。工業界也有同樣的做法：W.W. Norton Smartwork 的
+  Exam Mode 開啟時，Adaptive 設定自動關閉；DataClassroom 的考試模式有 3 個月自動
+  過期機制。
+
+  老師端不需要記得「比賽模式什麼時候該關掉」——系統自己會關，並且在
+  `AssignmentManager` 中以與快取新鮮度相同的哲學顯示狀態：生效中（剩 N 天）、
+  即將過期、已結束（系統已恢復自適應評估）。這是一個 **「透明化勝過自動化」**
+  的案例，與教師儀表板的資料新鮮度設計一致。
+
+  實測效果：在真實試點中，7 位學生被強制從 L4-L6 拉回 L3（比賽範圍上限），
+  切換後前 50 題正確率從 89% 暴降到 26%——這證明了「自主練到的高等級」與
+  「比賽指定的範圍」是兩個不重疊的記憶分布。這正是比賽模式存在的理由：
+  如果沒有這個切換，學生會在比賽當天帶著「L4 的假自信」走進考場，然後在
+  L3 的字上失分。
+
 - **舊 UID profile 的自動清理由 localStorage 驅動，而非 Firestore。** 每次匿名登入
   都會產生新 UID，`students/{uid}` 集合會累積孤兒 profile。走 Firestore 查詢需要在
   每次登入多一次讀取；改由 `ProfileCleanupTracker` 在 localStorage 記錄每個
@@ -554,11 +582,12 @@ Firestore 離線持久化、熔斷器＋重試佇列、配額監控、`everWrong
 答對 5 次後自動清除），孤兒 UID profile 的自動清理、以及 `RuleBasedStrategy` 的門檻修正——修復了一個
 在 30 筆滑動視窗下數學上不可能達成的升級條件（詳見「值得特別說明的設計決策」）。
 
-**自動化測試：155 個單元測試、14 個 suites**，涵蓋 `grader`、`sm2`、
+**自動化測試：168 個單元測試、19 個 suites**，涵蓋 `grader`、`sm2`、
 `questionSelector`、`studentAnalyzer`、`RuleBasedStrategy`、`placementDecision`、
-`selectAssignment`、`evaluationGuard`、`AnswerProcessor`、`HandwritingLockPolicy`，
-以及 `maskWord`（同時涵蓋 `porterStemmer`）的純邏輯單元測試。測試聚焦在最高風險的純函
-式；I/O 層刻意不寫單元測試（需要 Firestore emulator，延後到 Stage 7+ 處理）。
+`selectAssignment`、`evaluationGuard`、`AnswerProcessor`、`HandwritingLockPolicy`、
+`CompetitionModePolicy`，以及 `maskWord`（同時涵蓋 `porterStemmer`）的純邏輯單元
+測試。測試聚焦在最高風險的純函式；I/O 層刻意不寫單元測試（需要 Firestore
+emulator，延後到 Stage 7+ 處理）。
 
 ## 🛠️ 技術棧
 
@@ -821,7 +850,7 @@ Stage 0 到 Stage 6-E 已完成，Stage 7（真實試點）**進行中**——�
 老師可設定的作業與目標層級加權出題、個人化語速控制、每題作答時限控制、含成長曲線視
 覺化的教師儀表板、單一學生 PDF 報告匯出，以及學生／教師／管理員的角色權限。
 
-**自動化測試：155 個通過、14 個 suites、0 個失敗。**
+**自動化測試：168 個通過、19 個 suites、0 個失敗。**
 
 **Stage 7 剩下工作：** 繼續蒐集辨識錯誤案例、依真實學生樣本調整手寫辨識流程、依試點
 發現持續迭代。功能到此凍結——優先順序是真實世界的驗證，而不是繼續擴充功能。
