@@ -19,9 +19,16 @@ export class LevelProgressionService {
   /**
    * 評估學生是否需要調整等級
    *
-   * 守衛邏輯（鎖定檢查、距上次評估時間）由純函式 checkEvaluationGuard 處理。
+   * 守衛邏輯（鎖定檢查、距上次評估時間、比賽模式）由純函式
+   * checkEvaluationGuard 處理。
+   *
+   * @param displayId 學生的複合識別碼
+   * @param competitionMode 🔥 是否處於比賽模式（由 QuizOrchestrator 傳入）
    */
-  async evaluate(displayId: string): Promise<ProgressionDecision | null> {
+  async evaluate(
+    displayId: string,
+    competitionMode: boolean = false
+  ): Promise<ProgressionDecision | null> {
     // ============================================================
     // 步驟 1：讀取當前狀態
     // ============================================================
@@ -29,16 +36,19 @@ export class LevelProgressionService {
     const totalAttempts = state.totalAttempts;
 
     // ============================================================
-    // 步驟 2：守衛檢查（鎖定期 + 距上次評估時間）
+    // 步驟 2：守衛檢查（比賽模式 + 鎖定期 + 距上次評估時間）
     // ============================================================
     const guard = checkEvaluationGuard({
       totalAttempts,
       levelLockedUntilTotalAttempts: state.levelLockedUntilTotalAttempts,
       lastEvaluatedAtTotalAttempts: state.lastEvaluatedAtTotalAttempts,
+      competitionMode,
     });
 
     if (!guard.shouldEvaluate) {
-      if (guard.reason === 'locked') {
+      if (guard.reason === 'competition-mode') {
+        console.log(`🏁 [LevelProgression] 比賽模式啟用中，跳過等級評估`);
+      } else if (guard.reason === 'locked') {
         console.log(`🔒 [LevelProgression] 鎖定中，剩 ${guard.remainingAttempts} 題`);
       } else {
         console.log(`⏭️ [LevelProgression] 距上次評估僅 ${guard.attemptsSinceLastEval} 題，跳過`);

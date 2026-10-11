@@ -9,14 +9,12 @@ import {
   DEFAULT_SPEECH_FLOOR_RATE,
 } from '../../services/assignment/AssignmentService';
 import type { QuotaExceededBehavior } from '../../domain/quiz/SessionQuotaPolicy';
-// 🔥 新增
 import { QuizTimingPolicy } from '../../domain/quiz/QuizTimingPolicy';
-import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
-
 import {
   HandwritingLockPolicy,
   HandwritingMode,
 } from '../../domain/quiz/HandwritingLockPolicy';
+import { RECOMMENDED_MIN_QUOTA } from '../../types/progression';
 
 const service = new AssignmentService();
 
@@ -37,9 +35,9 @@ interface FormState {
   speechRate: number;
   speechFloorRate: number;
   quotaExceededBehavior: QuotaExceededBehavior;
-  // 🔥 新增：作答時限（用秒，UI 友善）
   timeLimitSeconds: number;
   handwritingMode: HandwritingMode;
+  competitionMode: boolean;
 }
 
 const emptyForm = (): FormState => ({
@@ -57,9 +55,9 @@ const emptyForm = (): FormState => ({
   speechRate: DEFAULT_SPEECH_RATE,
   speechFloorRate: DEFAULT_SPEECH_FLOOR_RATE,
   quotaExceededBehavior: 'stop',
-  // 🔥 預設 8 秒（比賽標準）
   timeLimitSeconds: QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS / 1000,
   handwritingMode: HandwritingLockPolicy.DEFAULT_MODE,
+  competitionMode: false,
 });
 
 const FOCUS_LABEL: Record<ReviewFocus, string> = {
@@ -81,6 +79,44 @@ function formatTarget(className: string | null): string {
 
 function isPersonal(className: string | null): boolean {
   return !!className && className.includes('_');
+}
+
+/**
+ * 🔥 計算比賽模式狀態（與快取過期同一套思路）。
+ */
+function getCompetitionStatus(a: Assignment): {
+  label: string;
+  color: string;
+  bg: string;
+} | null {
+  if (!a.competitionMode) return null;
+
+  const now = Date.now();
+  const end = new Date(a.endDate).getTime();
+  const daysLeft = Math.ceil((end - now) / (24 * 60 * 60 * 1000));
+
+  if (!a.isActive) {
+    return { label: '⏸ 已停用', color: '#6c757d', bg: '#e9ecef' };
+  }
+  if (daysLeft < 0) {
+    return {
+      label: '✅ 已結束（系統已恢復自適應評估）',
+      color: '#0f5132',
+      bg: '#d1e7dd',
+    };
+  }
+  if (daysLeft <= 3) {
+    return {
+      label: `⚠️ 比賽模式 · 剩 ${daysLeft} 天（到期後自動恢復自適應）`,
+      color: '#664d03',
+      bg: '#fff3cd',
+    };
+  }
+  return {
+    label: `🏁 比賽模式 · 剩 ${daysLeft} 天`,
+    color: '#084298',
+    bg: '#cfe2ff',
+  };
 }
 
 export const AssignmentManager: React.FC = () => {
@@ -167,6 +203,10 @@ export const AssignmentManager: React.FC = () => {
       setStatus('❌ 請選擇學生');
       return;
     }
+    if (form.competitionMode && !form.targetLevel) {
+      setStatus('❌ 比賽模式需要指定目標等級');
+      return;
+    }
 
     const className =
       form.assignMode === 'individual'
@@ -189,9 +229,9 @@ export const AssignmentManager: React.FC = () => {
       speechRate: form.speechRate,
       speechFloorRate: form.speechFloorRate,
       quotaExceededBehavior: form.quotaExceededBehavior,
-      // 🔥 秒 → 毫秒
       timeLimitMs: form.timeLimitSeconds * 1000,
       handwritingMode: form.handwritingMode,
+      competitionMode: form.competitionMode || undefined,
     };
 
     try {
@@ -234,9 +274,9 @@ export const AssignmentManager: React.FC = () => {
       speechRate: a.speechRate ?? DEFAULT_SPEECH_RATE,
       speechFloorRate: a.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE,
       quotaExceededBehavior: a.quotaExceededBehavior ?? 'stop',
-      // 🔥 毫秒 → 秒；舊作業 fallback 到 8 秒
       timeLimitSeconds: (a.timeLimitMs ?? QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS) / 1000,
       handwritingMode: a.handwritingMode ?? HandwritingLockPolicy.DEFAULT_MODE,
+      competitionMode: a.competitionMode ?? false,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -459,13 +499,10 @@ export const AssignmentManager: React.FC = () => {
                 <option value="stop">🛑 停止練習（比賽節奏）</option>
                 <option value="continue">📚 允許課後加強（初學建議）</option>
               </select>
-              <small style={{ color: '#6c757d' }}>
-                剛接觸的學生建議「課後加強」，達到配額後仍可繼續練習。
-              </small>
             </div>
           </div>
 
-          {/* 🔥 每題作答時限 */}
+          {/* 每題作答時限 */}
           <div>
             <label>⏱️ 每題作答時限</label>
             <select
@@ -483,12 +520,9 @@ export const AssignmentManager: React.FC = () => {
                 </option>
               ))}
             </select>
-            <small style={{ color: '#6c757d' }}>
-              剛接觸的學生建議 15 秒，熟練後可縮短至 8 秒（比賽標準）。
-            </small>
           </div>
 
-          {/* 🔥 手寫模式 */}
+          {/* 手寫模式 */}
           <div>
             <label>🖊️ 手寫模式</label>
             <select
@@ -506,6 +540,38 @@ export const AssignmentManager: React.FC = () => {
             </small>
           </div>
 
+          {/* 🔥 比賽模式 */}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label>🏁 比賽模式</label>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              marginTop: '0.25rem',
+              padding: '0.5rem',
+              background: form.competitionMode ? '#cfe2ff' : 'transparent',
+              borderRadius: '4px',
+            }}>
+              <input
+                type="checkbox"
+                checked={form.competitionMode}
+                onChange={(e) => setForm({ ...form, competitionMode: e.target.checked })}
+                style={{ marginRight: '0.5rem' }}
+              />
+              <span style={{ fontWeight: form.competitionMode ? 'bold' : 'normal' }}>
+                啟用比賽模式（凍結 DDA，強制從目標等級出題）
+              </span>
+            </div>
+            {form.competitionMode && !form.targetLevel && (
+              <small style={{ color: '#dc3545', display: 'block', marginTop: '0.25rem' }}>
+                ⚠️ 比賽模式需要指定目標等級，請於上方設定。
+              </small>
+            )}
+            <small style={{ color: '#6c757d', display: 'block', marginTop: '0.25rem' }}>
+              啟用後，系統將凍結等級評估，學生只會看到目標等級的單字。
+              作業結束日期一到，系統會自動恢復自適應評估。
+            </small>
+          </div>
+
           {/* 預設語速 */}
           <div>
             <label>🔊 預設語速（首次播放）</label>
@@ -518,9 +584,6 @@ export const AssignmentManager: React.FC = () => {
               <option value="0.9">0.9x</option>
               <option value="0.85">0.85x</option>
             </select>
-            <small style={{ color: '#6c757d' }}>
-              學生首次聽到題目的語速，建議維持 1.0x 訓練真實英聽
-            </small>
           </div>
 
           {/* 全班語速下限 */}
@@ -536,9 +599,6 @@ export const AssignmentManager: React.FC = () => {
               <option value="0.6">0.6x</option>
               <option value="0.5">0.5x</option>
             </select>
-            <small style={{ color: '#6c757d' }}>
-              學生按「🐢 重聽一次」時的語速。個別學生可在學生詳情調整。
-            </small>
           </div>
 
           {/* 新字比例 */}
@@ -651,9 +711,9 @@ export const AssignmentManager: React.FC = () => {
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>目標等級</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>每日題數</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>配額後</th>
-              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>手寫</th>
-              {/* 🔥 新增欄位 */}
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>時限</th>
+              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>手寫</th>
+              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>模式</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>語速</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>期間</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>狀態</th>
@@ -667,6 +727,7 @@ export const AssignmentManager: React.FC = () => {
               const floor = a.speechFloorRate ?? DEFAULT_SPEECH_FLOOR_RATE;
               const timeSec = (a.timeLimitMs ?? QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS) / 1000;
               const isDefaultTime = timeSec === QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS / 1000;
+              const competitionStatus = getCompetitionStatus(a);
               return (
                 <tr key={a.id} style={{ borderBottom: '1px solid #f1f3f5' }}>
                   <td style={{ padding: '10px' }}>
@@ -708,14 +769,16 @@ export const AssignmentManager: React.FC = () => {
                     {a.quotaExceededBehavior === 'continue' ? '📚 加強' : '🛑 停止'}
                   </td>
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>
-                    {(a.handwritingMode ?? 'normal') === 'locked' ? '🔒 比賽' : '✏️ 一般'}
-                  </td>
-                  {/* 🔥 新增欄位 */}
-                  <td style={{ padding: '10px', fontSize: '0.85rem' }}>
                     ⏱️ {timeSec}s
                     {isDefaultTime && (
                       <span style={{ color: '#6c757d', marginLeft: '0.3rem' }}>（標準）</span>
                     )}
+                  </td>
+                  <td style={{ padding: '10px', fontSize: '0.85rem' }}>
+                    {(a.handwritingMode ?? 'normal') === 'locked' ? '🔒 比賽' : '✏️ 一般'}
+                  </td>
+                  <td style={{ padding: '10px', fontSize: '0.85rem' }}>
+                    {a.competitionMode ? '🏁 比賽' : '—'}
                   </td>
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>
                     🔊 {rate}x / 🐢 {floor}x
@@ -738,6 +801,22 @@ export const AssignmentManager: React.FC = () => {
                     >
                       {a.isActive ? '✅ 啟用' : '❌ 停用'}
                     </button>
+                    {competitionStatus && (
+                      <div
+                        style={{
+                          marginTop: '4px',
+                          fontSize: '0.7rem',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: competitionStatus.bg,
+                          color: competitionStatus.color,
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={competitionStatus.label}
+                      >
+                        {competitionStatus.label}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: '10px', display: 'flex', gap: '0.5rem' }}>
                     <button

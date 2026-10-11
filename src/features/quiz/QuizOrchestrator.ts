@@ -30,14 +30,19 @@ import {
 
 import { QuizTimingPolicy } from '../../domain/quiz/QuizTimingPolicy';
 
-import { buildDisplayId } from '../../domain/string/displayId';
-
-import { getLocalDateString } from '../../domain/date/timezone';
-
 import {
   HandwritingLockPolicy,
   HandwritingMode,
 } from '../../domain/quiz/HandwritingLockPolicy';
+
+import {
+  CompetitionModePolicy,
+  CompetitionModeConfig,
+} from '../../domain/quiz/CompetitionModePolicy';
+
+import { buildDisplayId } from '../../domain/string/displayId';
+
+import { getLocalDateString } from '../../domain/date/timezone';
 
 export interface QuizQuestion {
   word: Word;
@@ -99,7 +104,6 @@ export class QuizOrchestrator implements QuizSessionApi {
   private dailyCorrectCount = 0;
   private dailyTotalResponseTime = 0;
 
-  // 新增：跨 session 累計今日統計
   private dailyStatsTracker = new DailyStatsTracker();
 
   private quotaPolicy: SessionQuotaPolicy;
@@ -109,6 +113,10 @@ export class QuizOrchestrator implements QuizSessionApi {
 
   private handwritingLockPolicy = new HandwritingLockPolicy();
   private resolvedHandwritingMode: HandwritingMode = HandwritingLockPolicy.DEFAULT_MODE;
+
+  // 🔥 比賽模式
+  private competitionModePolicy = new CompetitionModePolicy();
+  private competitionConfig: CompetitionModeConfig = CompetitionModePolicy.DEFAULT;
 
   private studentTimeZone: string = 'Asia/Taipei';
 
@@ -165,7 +173,9 @@ export class QuizOrchestrator implements QuizSessionApi {
     return {
       mode: 'normal',
       title: assignmentName,
-      subtitle: '',
+      subtitle: this.competitionConfig.enabled
+        ? `🏁 比賽模式 · 凍結 L${this.competitionConfig.targetLevel}`
+        : '',
       progressCurrent: this.dailyAnsweredCount,
       progressTotal: this.dailyMaxQuota,
       progressLabel: '進度',
@@ -196,8 +206,15 @@ export class QuizOrchestrator implements QuizSessionApi {
     return this.resolvedHandwritingMode;
   }
 
+  /**
+   * 🔥 比賽模式查詢（供 UI 顯示用）。
+   */
+  isCompetitionMode(): boolean {
+    return this.competitionConfig.enabled;
+  }
+
   // ============================================================
-  // 選項 3：學生主動繼續練習
+  // 學生主動繼續練習
   // ============================================================
 
   canOfferContinue(): boolean {
@@ -227,7 +244,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       const learningState = await this.studentStateService.getState(displayId);
       this.currentLevel = learningState.currentLevel;
       this.customSpeechFloor = learningState.customSpeechFloor;
-      this.studentTimeZone = learningState.timeZone ?? 'Asia/Taipei'; // 新增
+      this.studentTimeZone = learningState.timeZone ?? 'Asia/Taipei';
       console.log(`   ✅ 當前等級：L${this.currentLevel}`);
       if (this.customSpeechFloor !== undefined) {
         console.log(`   🔊 個人語速下限：${this.customSpeechFloor}`);
@@ -237,7 +254,6 @@ export class QuizOrchestrator implements QuizSessionApi {
       this.currentLevel = 1;
     }
 
-    // 步驟 0.5：從 localStorage 載入今日累計統計
     const today = getLocalDateString(this.getNow(), this.studentTimeZone);
     const todayStats = this.dailyStatsTracker.load(displayId, today);
     this.dailyAnsweredCount = todayStats.answeredCount;
@@ -288,9 +304,23 @@ export class QuizOrchestrator implements QuizSessionApi {
       assignmentMode: this.activeAssignment?.assignment.handwritingMode,
     });
     console.log(
-      `   🖊️ 手寫模式：${this.resolvedHandwritingMode === 'locked' ? '🔒 比賽模擬（動筆即鎖）' : '✏️ 一般練習'
+      `   🖊️ 手寫模式：${
+        this.resolvedHandwritingMode === 'locked' ? '🔒 比賽模擬（動筆即鎖）' : '✏️ 一般練習'
       }`
     );
+
+    // 🔥 比賽模式解析
+    this.competitionConfig = this.competitionModePolicy.resolve({
+      assignmentMode: this.activeAssignment?.assignment.competitionMode,
+      targetLevel: this.activeAssignment?.assignment.targetLevel,
+    });
+    if (this.competitionConfig.enabled) {
+      console.log(
+        `   🏁 比賽模式：啟用（凍結等級 L${this.competitionConfig.targetLevel}，DDA 暫停）`
+      );
+    } else {
+      console.log(`   🏁 比賽模式：關閉`);
+    }
 
     this.stateCache = await this.deps.progressStore.getAllStates(displayId);
     console.log(`   ✅ 已載入 ${this.stateCache.size} 個單字的進度狀態`);
@@ -350,13 +380,30 @@ export class QuizOrchestrator implements QuizSessionApi {
     }
 
     const excludeIds = new Set(this.stateCache!.keys());
-    const targetLevel = this.activeAssignment?.assignment.targetLevel;
 
+    // ============================================================
+    // 🔥 比賽模式：100% 從目標等級出題
+    //
+    // 不混入當前等級或 probe。目標是讓學生在比賽前專注於
+    // 考試範圍，而不是被系統推到不該去的等級。
+    // ============================================================
     let newWords: Word[];
-    if (targetLevel && targetLevel !== this.currentLevel) {
-      newWords = await this.buildWeightedNewWords(excludeIds, targetLevel, newPoolSize);
+    if (this.competitionConfig.enabled) {
+      newWords = await this.deps.wordRepository.getNewWordsByLevels(
+        excludeIds,
+        [this.competitionConfig.targetLevel],
+        newPoolSize
+      );
+      console.log(
+        `🏁 [比賽模式] 出題等級鎖定 L${this.competitionConfig.targetLevel}，取得 ${newWords.length} 個單字`
+      );
     } else {
-      newWords = await this.buildDefaultNewWords(excludeIds, newPoolSize);
+      const targetLevel = this.activeAssignment?.assignment.targetLevel;
+      if (targetLevel && targetLevel !== this.currentLevel) {
+        newWords = await this.buildWeightedNewWords(excludeIds, targetLevel, newPoolSize);
+      } else {
+        newWords = await this.buildDefaultNewWords(excludeIds, newPoolSize);
+      }
     }
 
     this.words = [...reviewWords, ...newWords];
@@ -466,20 +513,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     return this.deps.now ? this.deps.now() : new Date();
   }
 
-  // ============================================================
-  // 🔥 nextQuestion：重構後只做協調
-  //
-  // 職責分工：
-  //   - SessionQuotaPolicy：「能不能出下一題」的唯一真實來源
-  //   - pickNextWordId：「選誰」的純選擇
-  //   - 本方法：協調者，依序呼叫兩者
-  //
-  // 重構前有「兩層配額檢查」（policy + selector），
-  // 導致課後加強模式需要傳 Number.MAX_SAFE_INTEGER 的 hack。
-  // 重構後只剩一層，不需要任何 hack。
-  // ============================================================
   async nextQuestion(): Promise<QuizQuestion | null> {
-    // 唯一真實來源：配額是否允許
     if (!this.quotaPolicy.shouldContinue(this.dailyAnsweredCount)) {
       return null;
     }
@@ -494,7 +528,6 @@ export class QuizOrchestrator implements QuizSessionApi {
       entries.push({ wordId: word.id, state, overdueDays });
     }
 
-    // 🔥 傳入精簡後的 quota（只有新字偏好）
     const selectedId = pickNextWordId(
       entries,
       { dailyNewQuotaRemaining: this.dailyNewQuotaRemaining },
@@ -502,8 +535,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     );
 
     if (!selectedId) {
-      // 課後加強模式下無候選，是「池子用完」而非「配額用盡」
-      // （因為上面的 shouldContinue 已通過）
       const isContinueMode = this.quotaPolicy.isInContinueMode(this.dailyAnsweredCount);
       if (isContinueMode) {
         console.warn(
@@ -553,7 +584,6 @@ export class QuizOrchestrator implements QuizSessionApi {
       now,
     });
 
-    // 🔥 透過 tracker 累計今日統計（跨 session 持久化）
     const today = getLocalDateString(now, this.studentTimeZone);
     const todayStats = this.dailyStatsTracker.increment(
       displayId,
@@ -573,7 +603,6 @@ export class QuizOrchestrator implements QuizSessionApi {
       }
     }
 
-    // 🔥 每次答題都更新每日快照（反映今日累計，而非只記錄第一題）
     const dailySnapshot: DailySnapshot = {
       date: today,
       totalAttempts: todayStats.answeredCount,
@@ -643,10 +672,13 @@ export class QuizOrchestrator implements QuizSessionApi {
     console.log(`✍️ [submitAnswer]「${word.word}」→ ${processed.grading.isCorrect ? '✅ 正確' : '❌ 錯誤'}（quality=${processed.grading.quality}）`);
 
     let progressionDecision: ProgressionDecision | null = null;
-    // 🔥 從 `% 10` 改為 `% 30`，與 MIN_ATTEMPTS_BETWEEN_EVALUATIONS 對齊
     if (this.sessionAttempts > 0 && this.sessionAttempts % 30 === 0) {
       try {
-        progressionDecision = await this.levelProgressionService.evaluate(displayId);
+        // 🔥 傳入比賽模式：啟用時 LevelProgressionService 會直接跳過評估
+        progressionDecision = await this.levelProgressionService.evaluate(
+          displayId,
+          this.competitionConfig.enabled
+        );
         if (progressionDecision && progressionDecision.action !== 'hold') {
           console.log(`🎉 [submitAnswer] 等級調整：${progressionDecision.action} → L${progressionDecision.newLevel}`);
           this.currentLevel = progressionDecision.newLevel;
