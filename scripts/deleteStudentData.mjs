@@ -25,7 +25,7 @@ const APPLY = process.argv.includes('--apply');
 // ============================================================
 // 🔥 設定要刪除的學生
 // ============================================================
-const TARGET_DISPLAY_ID = '709_1_Test';  // 這裡改成要刪除的學生 displayId
+const TARGET_DISPLAY_ID = '805_ㄉ_李忠訓';  // 這裡改成要刪除的學生 displayId
 
 // ============================================================
 // 初始化
@@ -174,6 +174,12 @@ async function processStudents() {
 
 // ============================================================
 // 3. studentStates/{displayId} + 子集合
+//
+// 🔥 修正：即使主文件不存在，也要檢查並刪除子集合。
+//
+// 原因：Firestore 允許「子集合存在、父文件不存在」。
+//      控制台會把這種情況顯示為灰色斜體的虛擬路徑。
+//      docRef.get() 會回傳 exists: false，但子集合還在。
 // ============================================================
 async function processStudentStates() {
   console.log(`\n${'═'.repeat(60)}`);
@@ -181,58 +187,75 @@ async function processStudentStates() {
   console.log('═'.repeat(60));
 
   const docRef = db.doc(`studentStates/${TARGET_DISPLAY_ID}`);
-  const snap = await docRef.get();
 
-  if (!snap.exists) {
-    console.log('   ✅ 文件不存在，跳過');
-    return { found: 0, deleted: 0, wordsDeleted: 0, snapshotsDeleted: 0 };
+  // 先檢查所有可能的子集合（不論主文件是否存在）
+  const SUBS = ['words', 'dailySnapshots', 'dailyStats'];
+
+  console.log('   檢查子集合：');
+  const subCounts = {};
+  for (const sub of SUBS) {
+    const snap = await docRef.collection(sub).get();
+    subCounts[sub] = snap.docs.length;
+    console.log(`      ${sub}: ${snap.docs.length} 筆`);
   }
 
-  // 檢查子集合
-  const wordsSnap = await docRef.collection('words').get();
-  const snapshotsSnap = await docRef.collection('dailySnapshots').get();
+  // 再檢查主文件
+  const mainSnap = await docRef.get();
+  const mainExists = mainSnap.exists;
 
-  console.log(`   主文件：1 筆`);
-  console.log(`   子集合 words：${wordsSnap.docs.length} 筆`);
-  console.log(`   子集合 dailySnapshots：${snapshotsSnap.docs.length} 筆`);
+  console.log(`   主文件：${mainExists ? '存在' : '不存在'}`);
 
-  const data = snap.data() || {};
-  console.log('\n📋 主文件預覽：');
-  console.log(`   currentLevel: ${data.currentLevel}`);
-  console.log(`   totalAttempts: ${data.totalAttempts}`);
-  console.log(`   placementDone: ${data.placementDone}`);
+  if (mainExists) {
+    const data = mainSnap.data() || {};
+    console.log(`      currentLevel: ${data.currentLevel}`);
+    console.log(`      totalAttempts: ${data.totalAttempts}`);
+    console.log(`      placementDone: ${data.placementDone}`);
+  }
+
+  const totalSubDocs = Object.values(subCounts).reduce((a, b) => a + b, 0);
+  const totalFound = totalSubDocs + (mainExists ? 1 : 0);
+
+  if (totalFound === 0) {
+    console.log('   ✅ 沒有主文件也沒有子集合，跳過');
+    return {
+      found: 0,
+      deleted: 0,
+      subsDeleted: {},
+    };
+  }
 
   if (!APPLY) {
     return {
-      found: 1 + wordsSnap.docs.length + snapshotsSnap.docs.length,
+      found: totalFound,
       deleted: 0,
-      wordsDeleted: 0,
-      snapshotsDeleted: 0,
+      subsDeleted: {},
     };
   }
 
   console.log('\n🗑️ 開始刪除 studentStates...');
 
-  // 先刪子集合
-  const wordsDeleted = await deleteCollectionDocs(
-    docRef.collection('words')
-  );
-  console.log(`   ✅ 已刪除 words 子集合（${wordsDeleted} 筆）`);
+  // 先刪所有子集合（不論主文件是否存在）
+  const subsDeleted = {};
+  for (const sub of SUBS) {
+    if (subCounts[sub] > 0) {
+      const deleted = await deleteCollectionDocs(docRef.collection(sub));
+      subsDeleted[sub] = deleted;
+      console.log(`   ✅ 已刪除 ${sub} 子集合（${deleted} 筆）`);
+    }
+  }
 
-  const snapshotsDeleted = await deleteCollectionDocs(
-    docRef.collection('dailySnapshots')
-  );
-  console.log(`   ✅ 已刪除 dailySnapshots 子集合（${snapshotsDeleted} 筆）`);
-
-  // 再刪主文件
-  await docRef.delete();
-  console.log(`   ✅ 已刪除主文件`);
+  // 再刪主文件（如果存在）
+  if (mainExists) {
+    await docRef.delete();
+    console.log(`   ✅ 已刪除主文件`);
+  } else {
+    console.log(`   ℹ️ 主文件本來就不存在，無需刪除`);
+  }
 
   return {
-    found: 1 + wordsSnap.docs.length + snapshotsSnap.docs.length,
-    deleted: 1 + wordsDeleted + snapshotsDeleted,
-    wordsDeleted,
-    snapshotsDeleted,
+    found: totalFound,
+    deleted: totalSubDocs + (mainExists ? 1 : 0),
+    subsDeleted,
   };
 }
 
@@ -319,6 +342,11 @@ async function main() {
   console.log(`      找到 ${studentsResult.found} 筆，刪除 ${studentsResult.deleted} 筆`);
   console.log(`   studentStates：`);
   console.log(`      找到 ${studentStatesResult.found} 筆，刪除 ${studentStatesResult.deleted} 筆`);
+  if (studentStatesResult.subsDeleted) {
+    for (const [sub, count] of Object.entries(studentStatesResult.subsDeleted)) {
+      console.log(`      ${sub} 子集合：刪除 ${count} 筆`);
+    }
+  }
   console.log(`   classStats：`);
   console.log(`      找到 ${classStatsResult.found} 筆，更新 ${classStatsResult.updated} 筆`);
 
