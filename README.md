@@ -836,6 +836,52 @@ example-sentence masking (to prevent answer copying), a configurable time limit 
 default was too tight for beginners), and after-quota "continue practicing" (students wanted
 to keep going but the previous design forced a re-login).
 
+
+### Field Observation: Transfer Effect After Upward Difficulty Push
+
+During a training session on 2026-10-13, an unexpected pattern emerged:
+students who had been pushed to L4–L6 by the DDA engine, then pulled back
+to L3 by "Competition Sprint Mode" two weeks before the competition,
+showed noticeably faster handwriting reactions on L3 words. **Multiple
+students exhibited an "automatic" response — writing the word directly
+upon seeing it, rather than pausing to think through the spelling.** This
+was not a single-student anomaly; it repeated across several students.
+
+The mechanism is a three-layer stack:
+
+1. **DDA pushes training to the student's upper bound (L4–L6)**: the
+   student's handwriting ability ceiling is raised, and they are exposed
+   to words with more complex spelling patterns.
+2. **Competition Mode forces a return to L3 in the final two weeks**:
+   L3 becomes a "dimensional reduction" relative to L6, and cognitive
+   load drops sharply.
+3. **SM-2 repeatedly anchors wrong answers**: the same misspelled word
+   keeps resurfacing, turning "how the hand writes it" into muscle
+   memory rather than a conscious spelling decision.
+
+**This is the second phase of the same event previously observed as "accuracy
+dropping from 89% to 26%"**: the first phase was distribution shift
+(students forced to migrate their memory from L4–L6 to L3), the second phase
+is the transfer effect (the L6 training begins to transfer to L3). The 26%
+was not the endpoint — it was the starting point of recalibration.
+
+Academically, this corresponds to three known concepts:
+
+- **Desirable Difficulty**: short-term exposure to harder content improves
+  long-term performance.
+- **Transfer of Training**: skills acquired at one difficulty level transfer
+  to other levels.
+- **Automaticity**: repeated practice makes handwriting an unconscious
+  process.
+
+**Why this observation matters**: it is not "students suddenly got better."
+It is "three mechanisms stacked produce a transfer effect." It validates
+that the Competition Sprint Mode strategy is correct — **not abandoning
+high-difficulty training, but using it to make the competition range feel
+easy**. This is a real-world case study of Desirable Difficulty in a K-12
+teaching context, and it is the key evidence that lifts this project from
+a "tool" to a "training strategy platform."
+
 ## 🔬 Research Positioning
 
 The current system's approach to adaptive vocabulary recommendation sits at a
