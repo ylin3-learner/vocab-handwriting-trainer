@@ -80,6 +80,15 @@ export class DailyStatsTracker {
     }
   }
 
+  /**
+  * 直接設定指定日期的統計（覆寫）。
+  *
+  * 用於：從 Firestore 讀取權威值後，同步回 localStorage 作為快取。
+  */
+  set(displayId: string, stats: DailyStats): void {
+    this.save(displayId, stats);
+  }
+
   private save(displayId: string, stats: DailyStats): void {
     try {
       localStorage.setItem(

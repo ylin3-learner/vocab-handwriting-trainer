@@ -8,8 +8,8 @@ import { DailySnapshot } from '../../types/dailySnapshot';
 import { removeUndefined } from '../../domain/firestore/removeUndefined';
 
 export interface AttemptBatchParams {
-  studentId: string;         // uid（用於 attempts 的 studentId 欄位）
-  studentDisplayId?: string; // displayId（用於 studentStates、dailySnapshots）
+  studentId: string;
+  studentDisplayId?: string;
   className: string;
   wordId: string;
   nextState: ReviewState;
@@ -23,17 +23,15 @@ export interface AttemptBatchParams {
 /**
  * 將一次作答的所有 Firestore 寫入合併為單一原子批次。
  *
- * 合併前（4~5 次網路請求）：
- *   1. studentStates/{displayId}/words/{wordId}  ← SM-2 進度
- *   2. studentStates/{displayId}                 ← totalAttempts 累加
- *   3. attempts/{autoId}                          ← 作答紀錄
- *   4. classStats/{className}                     ← 班級統計
- *   5. studentStates/{displayId}/dailySnapshots/{date} ← 每日快照
+ * 合併前（6 次網路請求）：
+ *   1. studentStates/{displayId}/words/{wordId}          ← SM-2 進度
+ *   2. studentStates/{displayId}                          ← totalAttempts 累加
+ *   3. attempts/{autoId}                                  ← 作答紀錄
+ *   4. classStats/{className}                             ← 班級統計
+ *   5. studentStates/{displayId}/dailySnapshots/{date}    ← 每日快照
+ *   6. studentStates/{displayId}/dailyStats/{date}        ← 每日累計
  *
  * 合併後（1 次網路請求）：writeBatch.commit()
- *
- * 🔥 所有學生狀態（SM-2、totalAttempts、快照）統一存在 studentStates/{displayId}，
- *   跨 UID 追蹤，換裝置或重新登入不遺失。
  */
 export class AttemptBatcher {
   async commit(params: AttemptBatchParams): Promise<void> {
@@ -54,15 +52,10 @@ export class AttemptBatcher {
     const safeWordId = sanitizeFirestoreId(wordId);
     const now = new Date().toISOString();
 
-    // 🔥 統一使用 displayId（若無則 fallback uid）
     const stateKey = studentDisplayId ?? studentId;
 
     // ============================================================
     // 1. SM-2 進度：studentStates/{displayId}/words/{wordId}
-    //
-    // 🔥 用 removeUndefined 過濾 undefined，避免 Firestore 拒絕
-    //    （即使 ReviewState 已改為全必填，這層防守仍保留，
-    //      以防未來新增 optional 欄位時忘記處理）
     // ============================================================
     batch.set(
       doc(db, 'studentStates', stateKey, 'words', safeWordId),
@@ -83,8 +76,6 @@ export class AttemptBatcher {
 
     // ============================================================
     // 3. 作答紀錄：attempts/{autoId}
-    //
-    // 🔥 也過濾 undefined（AttemptRecord 有些欄位是 optional）
     // ============================================================
     batch.set(
       doc(collection(db, 'attempts')),
@@ -92,7 +83,7 @@ export class AttemptBatcher {
     );
 
     // ============================================================
-    // 4. 班級統計（嵌套物件）
+    // 4. 班級統計
     // ============================================================
     if (className && className.trim()) {
       const studentDisplayIdLocal = studentName && studentSeatNumber
@@ -126,12 +117,30 @@ export class AttemptBatcher {
     }
 
     // ============================================================
-    // 5. 每日快照：studentStates/{displayId}/dailySnapshots/{date}
+    // 5. 每日快照 + 每日累計
+    //
+    // 兩者一起寫入，因為它們都需要 dailySnapshot.date：
+    //   - dailySnapshots: 給成長曲線用的聚合快照（每次覆寫）
+    //   - dailyStats:     給 init 讀取的權威累計（用 increment 累加）
     // ============================================================
     if (dailySnapshot) {
+      // 5a. 每日快照（覆寫）
       batch.set(
         doc(db, 'studentStates', stateKey, 'dailySnapshots', dailySnapshot.date),
         dailySnapshot
+      );
+
+      // 5b. 每日累計（原子遞增）
+      batch.set(
+        doc(db, 'studentStates', stateKey, 'dailyStats', dailySnapshot.date),
+        {
+          date: dailySnapshot.date,
+          answeredCount: increment(1),
+          correctCount: increment(isCorrect ? 1 : 0),
+          totalResponseTimeMs: increment(attempt.responseTimeMs ?? 0),
+          lastUpdated: now,
+        },
+        { merge: true }
       );
     }
 

@@ -44,6 +44,9 @@ import { buildDisplayId } from '../../domain/string/displayId';
 
 import { getLocalDateString } from '../../domain/date/timezone';
 
+import { doc, getDoc, getDocs, setDoc, query, where, collection } from 'firebase/firestore';
+import { db } from '../../firebase';
+
 export interface QuizQuestion {
   word: Word;
   timeLimitMs: number;
@@ -254,13 +257,19 @@ export class QuizOrchestrator implements QuizSessionApi {
       this.currentLevel = 1;
     }
 
+    // ============================================================
+    // 今日統計：從 Firestore 讀取（權威來源）
+    //
+    // 為什麼不信任 localStorage：
+    //   - 學生可能清瀏覽器資料（老師教的 troubleshooting）
+    //   - 學生可能換裝置（平板、手機、家裡電腦）
+    //   - 學生可能用無痕模式
+    //   這些都會導致 localStorage 歸零，但 Firestore 不會
+    // ============================================================
     const today = getLocalDateString(this.getNow(), this.studentTimeZone);
-    const todayStats = this.dailyStatsTracker.load(displayId, today);
-    this.dailyAnsweredCount = todayStats.answeredCount;
-    this.dailyCorrectCount = todayStats.correctCount;
-    this.dailyTotalResponseTime = todayStats.totalResponseTimeMs;
+    await this.loadTodayStats(displayId, today);
     console.log(
-      `   📊 今日累計：${todayStats.answeredCount} 題（答對 ${todayStats.correctCount}）`
+      `   📊 今日累計：${this.dailyAnsweredCount} 題（答對 ${this.dailyCorrectCount}）`
     );
 
     try {
@@ -304,8 +313,7 @@ export class QuizOrchestrator implements QuizSessionApi {
       assignmentMode: this.activeAssignment?.assignment.handwritingMode,
     });
     console.log(
-      `   🖊️ 手寫模式：${
-        this.resolvedHandwritingMode === 'locked' ? '🔒 比賽模擬（動筆即鎖）' : '✏️ 一般練習'
+      `   🖊️ 手寫模式：${this.resolvedHandwritingMode === 'locked' ? '🔒 比賽模擬（動筆即鎖）' : '✏️ 一般練習'
       }`
     );
 
@@ -328,6 +336,113 @@ export class QuizOrchestrator implements QuizSessionApi {
     await this.buildWordPool();
 
     console.log(`✅ [QuizOrchestrator.init] 完成！單字池：${this.words.length} 個，等級：L${this.currentLevel}`);
+  }
+
+  /**
+   * 🔥 從 Firestore 載入今日統計，並同步回 localStorage。
+   *
+   * 讀取順序：
+   *   1. studentStates/{displayId}/dailyStats/{date}（權威來源，0 讀取成本）
+   *   2. attempts 集合查詢（舊資料 fallback，用於第一次遷移）
+   *   3. localStorage（最後 fallback）
+   *
+   * 寫入：不論走哪條路徑，都同步回 localStorage 作為快取。
+   */
+  private async loadTodayStats(displayId: string, today: string): Promise<void> {
+    try {
+      // ============================================================
+      // 路徑 1：讀 dailyStats 文件（權威來源，最快）
+      // ============================================================
+      const statsSnap = await getDoc(
+        doc(db, 'studentStates', displayId, 'dailyStats', today)
+      );
+
+      if (statsSnap.exists()) {
+        const d = statsSnap.data();
+        this.dailyAnsweredCount = d.answeredCount ?? 0;
+        this.dailyCorrectCount = d.correctCount ?? 0;
+        this.dailyTotalResponseTime = d.totalResponseTimeMs ?? 0;
+        console.log(`   📊 從 Firestore dailyStats 讀取`);
+        this.syncToLocalStorage(displayId, today);
+        return;
+      }
+
+      // ============================================================
+      // 路徑 2：查 attempts 集合（舊資料 fallback）
+      //
+      // 用於：遷移前就存在的學生，還沒有 dailyStats 文件
+      // ============================================================
+      const todayStart = new Date(`${today}T00:00:00+08:00`);
+      const attemptsSnap = await getDocs(
+        query(
+          collection(db, 'attempts'),
+          where('studentDisplayId', '==', displayId),
+          where('timestamp', '>=', todayStart.toISOString())
+        )
+      );
+
+      if (!attemptsSnap.empty) {
+        const attempts = attemptsSnap.docs.map(d => d.data());
+        this.dailyAnsweredCount = attempts.length;
+        this.dailyCorrectCount = attempts.filter(a => a.isCorrect).length;
+        this.dailyTotalResponseTime = attempts.reduce(
+          (sum, a) => sum + (a.responseTimeMs ?? 0), 0
+        );
+        console.log(`   📊 從 attempts 集合回填（${attempts.length} 筆）`);
+
+        // 🔥 回填 dailyStats 文件，供下次快速讀取
+        try {
+          await setDoc(
+            doc(db, 'studentStates', displayId, 'dailyStats', today),
+            {
+              date: today,
+              answeredCount: this.dailyAnsweredCount,
+              correctCount: this.dailyCorrectCount,
+              totalResponseTimeMs: this.dailyTotalResponseTime,
+              lastUpdated: this.getNow().toISOString(),
+            }
+          );
+          console.log(`   📝 已回填 dailyStats 文件`);
+        } catch (e) {
+          console.warn('   ⚠️ 回填 dailyStats 失敗（不影響主流程）:', e);
+        }
+
+        this.syncToLocalStorage(displayId, today);
+        return;
+      }
+
+      // ============================================================
+      // 路徑 3：localStorage（最後 fallback）
+      // ============================================================
+      const localStats = this.dailyStatsTracker.load(displayId, today);
+      this.dailyAnsweredCount = localStats.answeredCount;
+      this.dailyCorrectCount = localStats.correctCount;
+      this.dailyTotalResponseTime = localStats.totalResponseTimeMs;
+      console.log(`   📊 從 localStorage 讀取（Firestore 無資料）`);
+
+    } catch (e) {
+      console.warn('⚠️ 無法從 Firestore 讀取今日統計，回退到 localStorage:', e);
+      const localStats = this.dailyStatsTracker.load(displayId, today);
+      this.dailyAnsweredCount = localStats.answeredCount;
+      this.dailyCorrectCount = localStats.correctCount;
+      this.dailyTotalResponseTime = localStats.totalResponseTimeMs;
+    }
+  }
+
+  /**
+   * 把目前的今日統計同步回 localStorage（作為快取）。
+   */
+  private syncToLocalStorage(displayId: string, today: string): void {
+    try {
+      this.dailyStatsTracker.set(displayId, {
+        date: today,
+        answeredCount: this.dailyAnsweredCount,
+        correctCount: this.dailyCorrectCount,
+        totalResponseTimeMs: this.dailyTotalResponseTime,
+      });
+    } catch (e) {
+      console.warn('⚠️ 同步 localStorage 失敗（不影響主流程）:', e);
+    }
   }
 
   private async buildWordPool(): Promise<void> {
@@ -559,7 +674,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     };
   }
 
-  async submitAnswer(
+    async submitAnswer(
     wordId: string,
     submission: AnswerSubmission
   ): Promise<SubmitAnswerResult> {
@@ -584,39 +699,54 @@ export class QuizOrchestrator implements QuizSessionApi {
       now,
     });
 
+    // ============================================================
+    // 🔥 今日統計：直接遞增記憶體計數（不依賴 localStorage）
+    //
+    // 為什麼不呼叫 dailyStatsTracker.increment()：
+    //   它會從 localStorage 讀取舊值再加 1。但 localStorage 可能
+    //   被清空（學生清瀏覽器資料、換裝置），導致計數從 0 開始。
+    //   這裡直接操作記憶體計數，權威值在 Firestore 的 dailyStats，
+    //   localStorage 只是快取。
+    // ============================================================
     const today = getLocalDateString(now, this.studentTimeZone);
-    const todayStats = this.dailyStatsTracker.increment(
-      displayId,
-      today,
-      processed.grading.isCorrect,
-      submission.elapsedMs
-    );
-    this.dailyAnsweredCount = todayStats.answeredCount;
-    this.dailyCorrectCount = todayStats.correctCount;
-    this.dailyTotalResponseTime = todayStats.totalResponseTimeMs;
+    this.dailyAnsweredCount += 1;
+    if (processed.grading.isCorrect) {
+      this.dailyCorrectCount += 1;
+    }
+    this.dailyTotalResponseTime += submission.elapsedMs;
+
+    // 同步回 localStorage（作為快取，失敗不影響主流程）
+    this.syncToLocalStorage(displayId, today);
+
+    // ============================================================
+    // 準備每日快照（使用記憶體計數）
+    // ============================================================
+    const dailySnapshot: DailySnapshot = {
+      date: today,
+      totalAttempts: this.dailyAnsweredCount,
+      correctCount: this.dailyCorrectCount,
+      correctRate: this.dailyAnsweredCount > 0
+        ? Math.round((this.dailyCorrectCount / this.dailyAnsweredCount) * 100)
+        : 0,
+      avgResponseTimeMs: this.dailyAnsweredCount > 0
+        ? Math.round(this.dailyTotalResponseTime / this.dailyAnsweredCount)
+        : 0,
+      level: this.currentLevel,
+      capturedAt: now.toISOString(),
+    };
 
     this.sessionAttempts += 1;
 
+    // 新字配額扣除
     if (processed.grading.isCorrect) {
       if (currentState.reviewCount === 0 && !currentState.lastReviewed) {
         this.dailyNewQuotaRemaining = Math.max(0, this.dailyNewQuotaRemaining - 1);
       }
     }
 
-    const dailySnapshot: DailySnapshot = {
-      date: today,
-      totalAttempts: todayStats.answeredCount,
-      correctCount: todayStats.correctCount,
-      correctRate: todayStats.answeredCount > 0
-        ? Math.round((todayStats.correctCount / todayStats.answeredCount) * 100)
-        : 0,
-      avgResponseTimeMs: todayStats.answeredCount > 0
-        ? Math.round(todayStats.totalResponseTimeMs / todayStats.answeredCount)
-        : 0,
-      level: this.currentLevel,
-      capturedAt: now.toISOString(),
-    };
-
+    // ============================================================
+    // 本地寫入（快取）
+    // ============================================================
     try {
       await this.localStore.saveState(displayId, wordId, processed.nextState);
       await this.localStore.recordAttempt(processed.attempt);
@@ -625,6 +755,9 @@ export class QuizOrchestrator implements QuizSessionApi {
       console.warn('⚠️ 本地寫入失敗:', e);
     }
 
+    // ============================================================
+    // 雲端原子寫入（6 個寫入合併成 1 個 writeBatch）
+    // ============================================================
     try {
       await this.attemptBatcher.commit({
         studentId: this.studentId,
@@ -671,10 +804,12 @@ export class QuizOrchestrator implements QuizSessionApi {
 
     console.log(`✍️ [submitAnswer]「${word.word}」→ ${processed.grading.isCorrect ? '✅ 正確' : '❌ 錯誤'}（quality=${processed.grading.quality}）`);
 
+    // ============================================================
+    // 等級評估（比賽模式下會跳過）
+    // ============================================================
     let progressionDecision: ProgressionDecision | null = null;
     if (this.sessionAttempts > 0 && this.sessionAttempts % 30 === 0) {
       try {
-        // 🔥 傳入比賽模式：啟用時 LevelProgressionService 會直接跳過評估
         progressionDecision = await this.levelProgressionService.evaluate(
           displayId,
           this.competitionConfig.enabled
