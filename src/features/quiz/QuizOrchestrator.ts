@@ -58,6 +58,18 @@ export interface AnswerSubmission {
   elapsedMs: number;
   timedOut: boolean;
   snapshotImageUrl?: string;
+
+  // 🔥 新增：IME 辨識的品質訊號
+  //
+  // forcedMatch：
+  //   true  → IME 候選清單中存在目標字，系統主動選中它
+  //           （可能是學生寫對，也可能是學生寫錯但 IME 猜成目標字）
+  //   false → IME 候選清單中沒有目標字，系統選了候選[0]
+  //
+  // candidatesSnapshot：
+  //   IME 回傳的前 5 個候選字，供訓練時分析辨識信心
+  forcedMatch?: boolean;
+  candidatesSnapshot?: string[];
 }
 
 export interface SubmitAnswerResult {

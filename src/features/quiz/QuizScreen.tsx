@@ -323,15 +323,39 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
     try {
       let recognizedText = '';
+      let forcedMatch = false;
+      let candidatesSnapshot: string[] = [];
+
       const trace = canvasRef.current?.getTrace() || [];
       if (trace.length > 0 && trace[0] && Array.isArray(trace[0][0]) && trace[0][0].length > 0) {
         const candidates = await callGoogleIME(trace, 'en');
         console.log('🔍 [IME] 候選字：', candidates);
+
         if (candidates.length > 0) {
           const exactMatch = candidates.find(
             (cand) => cand.toLowerCase() === question.word.word.toLowerCase()
           );
           recognizedText = exactMatch || candidates[0] || '';
+
+          // 🔥 記錄是否為「強制匹配目標字」
+          //
+          // 為什麼重要：
+          //   當 exactMatch 存在，代表 IME 的候選清單中出現目標字。
+          //   但這不代表學生真的寫了目標字——可能只是 IME 根據字典
+          //   權重把目標字排進來。
+          //
+          //   訓練資料時：
+          //     forcedMatch = false → 高信賴度正樣本（IME 直接辨識出目標字）
+          //     forcedMatch = true  → 中信賴度（IME 候選中有目標字，但不確定學生是否真的寫對）
+          //
+          //   若沒有這個訊號，訓練時無法區分這兩種樣本，會把
+          //   「學生寫了 appease 但被系統選成 appear」的樣本當成
+          //   「學生真的寫了 appear」來訓練，污染訓練集。
+          forcedMatch = exactMatch !== undefined;
+
+          // 🔥 記錄候選清單的前 5 個
+          //   訓練後可以分析：哪些候選組合代表「辨識信心低」
+          candidatesSnapshot = candidates.slice(0, 5);
         }
       }
 
@@ -349,6 +373,9 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         elapsedMs,
         timedOut: timedOutRef.current,
         snapshotImageUrl: snapshotUrl || '',
+        // 🔥 新增：IME 辨識的品質訊號
+        forcedMatch,
+        candidatesSnapshot,
       };
 
       let isCorrect = false;

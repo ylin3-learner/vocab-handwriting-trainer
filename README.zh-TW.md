@@ -52,6 +52,7 @@
 | ⾝份與權限 | 學⽣匿名登⼊、教師／管理員 Email/Password 登⼊；Firestore 安全規則依⾓⾊限制存取；自訂聲明透過 `getIdTokenResult(true)` 強制刷新讀取 |
 | 防作弊訊號 | 依 editDistance ＋作答時間偵測「亂答」，與真正的拼字錯誤分開標記 |
 | 效能設計 | Top-K 候選池、預聚合班級統計、批次寫入（`AttemptBatcher` 把每次作答的 **6 個寫入**合併成單一原子 commit）、以 `random` 欄位做隨機抽樣、**教師儀表板三層快取**（記憶體 → Firestore IndexedDB → 伺服器）、即時配額監控與全域橫幅警示 |
+| **多層品質訊號** | 每次作答現在帶有三層獨立的品質訊號，供未來的 ML 訓練使用：`correctnessSignal`（matched × timedOut 的四象限）、`signalSource`（measured vs inferred）、以及 `imeConfidence`（依目標字在 IME 候選清單中的排名）。詳見下方「從布林值 `isCorrect` 到多層品質訊號」 |
 | 跨裝置狀態 | 學習狀態（當前等級、SM-2 進度、每日快照）以複合 `displayId`（`{班級}_{座號}_{姓名}`）為 key，而非 Firebase UID，換裝置或重新登入都不會遺失進度 |
 | Profile 衛生 | 每次學生登入時，會透過 localStorage 追蹤器自動清理同 `displayId` 的舊 UID profile——零額外 Firestore 讀取，也不會累積孤兒 profile 文件 |
 | 報表與生命週期 | 單一學生 PDF 報告匯出；針對畢業／退場學生的封存服務 |
@@ -499,6 +500,64 @@ vocab-handwriting-trainer/
 檻值集中匯出為 `RULE_BASED_THRESHOLDS`，讓單元測試以符號引用而非寫死數字；
 下次調參只要改一個檔案。
 
+- **從布林值 `isCorrect` 到多層品質訊號。** 最初版本的 `gradeAnswer` 只回傳一個布林值：
+
+  ```typescript
+  isCorrect = !timedOut && isExactMatch(recognizedText, correctAnswer);
+  ```
+
+  這個設計對 SM-2 排程足夠，但對「訓練資料生成」嚴重不足。它把兩個正交的事實混在一起：
+時間訊號（是否超時）與辨識訊號（拼字是否匹配）。當我們拿 isCorrect 當訓練標籤時，
+「寫對但超時」的高品質手寫樣本會被標成負樣本，污染訓練集。
+
+**修正一：CorrectnessSignal 四象限分類。** 把兩個事實分離成四象限：
+| 象限               | 條件       | 訓練用途               |
+| ---------------- | -------- | ------------------ |
+| `true-positive`  | 寫對 + 未超時 | 手寫辨識正樣本            |
+| `false-negative` | 寫對 + 超時  | **手寫辨識正樣本** + 速度訓練 |
+| `true-negative`  | 寫錯 + 未超時 | 錯誤偵測負樣本            |
+| `compound-error` | 寫錯 + 超時  | 邊緣樣本，可排除           |
+
+`isCorrect` 現在從 `correctnessSignal === 'true-positive'` 派生，保持單一真實來源。
+SM-2 排程行為不變，但訓練資料可以精準分流。
+
+**修正二：IME 候選清單的品質訊號。** 第一個修正解決了「時間 vs 辨識」的混淆，但還有一個
+隱藏的偏差來源。Google IME 在辨識時回傳候選清單，而系統的邏輯是：
+
+``` typescript
+const exactMatch = candidates.find(cand => cand === word);
+recognizedText = exactMatch || candidates[0] || '';
+```
+
+當學生寫的字與目標字相似時（例如寫 `appease` 但目標是 `appear`），IME 的候選清單可能包含
+目標字（因為 `appear 是常用字`），系統就會主動選中它。這導致 `matched = true` 的樣本中
+有一部份是假陽性——學生其實寫錯了，但被系統的「強制匹配」邏輯誤判為正確。
+
+三個新欄位捕捉這個訊號：
+
+- `forcedMatch`：系統是否主動選中了目標字。在當前邏輯下恆等於 matched，因此目前是
+冗餘的；顯式記錄是為了未來邏輯變更時仍可追溯。
+
+- `candidatesSnapshot`：IME 回傳的前 5 個候選字。這才是真正有價值的訊號——它讓我們
+可以在訓練後分析「目標字在候選清單中的排名」。
+
+- `targetRank（衍生欄位）`：目標字在 candidatesSnapshot 中的位置（0-indexed）。0
+表示 IME 第一候選就是目標字（高信賴度），null 表示不在前 5 名（極低信賴度）。
+
+有了這三層訊號，訓練策略可以分層：
+
+| 策略     | 資料篩選                            | 適用        |
+| ------ | ------------------------------- | --------- |
+| **嚴格** | `matched=true` 且 `targetRank=0` | 少量高品質樣本   |
+| **寬鬆** | `matched=true`（全部）              | 大量資料，容忍雜訊 |
+| **加權** | 用 `targetRank` 當損失權重            | 平衡數量與品質   |
+
+**為什麼不在提交時就過濾假陽性？** 因為提交時無法判斷。系統只能看到「IME 候選中有目標
+字」，無法知道「學生實際寫了什麼」。唯一可靠的辨識方式是訓練後用模型反查——跑一遍
+訓練集，找出「模型強烈不同意標籤」的樣本，這些就是假陽性的候選，再人工複核。
+`candidatesSnapshot` 與 `targetRank` 讓這個流程更精準：優先複核 `targetRank` 排名較低的
+樣本。
+
 - **關鍵決策邏輯抽出為可測試的純函式。** 最高風險的演算法放在 `domain/` 底下的純函
   式：`placementDecision.ts`（分級階梯）、`evaluationGuard.ts`（DDA 的「現在該不該
   評估」守衛）、`selectAssignment.ts`（作業優先序）、`QuizTimingPolicy.ts`（時限解
@@ -600,6 +659,22 @@ vocab-handwriting-trainer/
 | `level` | – | 難度／分組標籤（1–6） |
 
 推動隨機抽樣的 `random` 欄位由系統在發布時自動生成，老師不需要提供。
+
+### 作答紀錄 Schema（Firestore）
+
+`attempts` 集合中的每一筆文件帶有三層品質訊號，是在試點過程中逐步加入的：
+
+| 欄位 | 加入時間 | 用途 |
+|---|---|---|
+| `isCorrect` | 最初 | SM-2 排程用的布林值 |
+| `editDistance`、`similarity` | 早期 | 錯誤類型分類 |
+| `timedOut` | 2026-10-13 | 分離時間與辨識訊號 |
+| `correctnessSignal` | 2026-10-13 | 四象限分類 |
+| `forcedMatch` | 2026-10-13 | 系統是否主動選中目標字 |
+| `candidatesSnapshot` | 2026-10-13 | IME 前 5 候選字（供事後分析） |
+
+這些欄位**只存在於訓練資料生成**與未來的手寫辨識模型微調。它們永遠不進入 SM-2 排程路徑。
+完整的設計理由見上方「從布林值 `isCorrect` 到多層品質訊號」。
 
 ## 🗺️ 開發路線圖
 

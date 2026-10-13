@@ -163,9 +163,11 @@ export class AnswerProcessor {
       similarity,
       snapshotEaseFactor: scheduling.nextEaseFactor,
       snapshotInterval: scheduling.nextInterval,
-      // 🔥 新增
       timedOut: submission.timedOut,
       correctnessSignal: grading.correctnessSignal,
+      // 🔥 新增：IME 辨識的品質訊號
+      forcedMatch: submission.forcedMatch,
+      candidatesSnapshot: submission.candidatesSnapshot,
     };
 
     return {

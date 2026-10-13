@@ -61,6 +61,7 @@ project centers on:
 | Roles & auth | Anonymous auth for students, Email/Password for teachers/admins, Firestore security rules enforcing per-role access, custom claims read via `getIdTokenResult(true)` |
 | Anti-cheat signals | Edit-distance + response-time based "random guessing" detection, flagged separately from genuine spelling mistakes |
 | Performance | Top-K candidate pooling, pre-aggregated class stats, batched writes (`AttemptBatcher` merging **6 writes** per attempt into a single atomic commit), random-sampling word selection via a `random` field, **three-layer dashboard cache** (in-memory → Firestore IndexedDB → server), live Firestore quota monitoring with a global banner when exhausted |
+| **Multi-layer quality signals** | Each attempt now carries three independent quality signals for future ML training: `correctnessSignal` (four quadrants of matched × timedOut), `signalSource` (measured vs inferred), and `imeConfidence` (based on the target word's rank in the IME candidate list). See "From boolean `isCorrect` to multi-layer quality signals" below |
 | Cross-device state | Learning state (current level, SM-2 progress, daily snapshots) keyed by a compound `displayId` (`{class}_{seat}_{name}`) rather than Firebase UID, so a student who re-logs-in or switches devices keeps their progress |
 | Profile hygiene | On every student login, old UID profiles for the same `displayId` are automatically cleaned up via a localStorage-based tracker — zero extra Firestore reads, and no accumulation of orphan profile documents |
 | Reporting & lifecycle | Per-student PDF report export; archiving service for students who graduate out of a cohort |
@@ -601,6 +602,83 @@ vocab-handwriting-trainer/
   so the unit tests reference them symbolically instead of hardcoding numbers — the next
   time a threshold is tuned, only one file changes.
 
+- **From boolean `isCorrect` to multi-layer quality signals.** The original
+  `gradeAnswer` returned only a boolean:
+
+  ```typescript
+  isCorrect = !timedOut && isExactMatch(recognizedText, correctAnswer);
+  ```
+
+  This was sufficient for SM-2 scheduling but insufficient for training-data
+generation. It conflated two orthogonal facts — timing (did the student
+run out of time?) and matching (did the recognized text equal the answer?) —
+into one bit. When used as a training label, a student who wrote the correct
+answer but exceeded the time limit produced a high-quality handwriting sample
+tagged as a negative example, polluting the training set.
+
+Fix 1: CorrectnessSignal four-quadrant classification. The two facts
+are separated:
+
+| Quadrant         | Condition                   | Training use                                                  |
+| ---------------- | --------------------------- | ------------------------------------------------------------- |
+| `true-positive`  | matched + not timed out     | Handwriting recognition positive samples                      |
+| `false-negative` | matched + timed out         | **Handwriting recognition positive samples** + speed training |
+| `true-negative`  | not matched + not timed out | Error-detection negative samples                              |
+| `compound-error` | not matched + timed out     | Edge cases, may exclude                                       |
+
+isCorrect is now derived from correctnessSignal === 'true-positive'
+(single source of truth). SM-2 behavior is unchanged, but training data
+can be split precisely.
+
+Fix 2: IME candidate-list quality signal. The first fix addressed
+"timing vs matching," but a second hidden bias remained. Google IME
+returns a candidate list, and the resolution logic is:
+
+```typescript
+const exactMatch = candidates.find(cand => cand === word);
+recognizedText = exactMatch || candidates[0] || '';
+```
+
+When a student writes a word visually similar to the target (e.g. appease
+when the target is appear), IME may include the target in its candidate
+list (because appear is more common). The system then actively picks
+it, producing a matched = true sample that is actually a false
+positive — the student wrote something else, but the system "forced" a
+match.
+
+Three new fields capture this:
+
+- forcedMatch — whether the system actively picked the target from
+the candidates. Under the current logic this is mathematically equal to
+matched, so it's redundant for now; it's stored to keep the signal
+available if the resolution logic changes later.
+
+- candidatesSnapshot — the top 5 IME candidates. This is the
+actually valuable signal: it lets us analyze "where the target word
+ranked in the candidate list" during post-training data cleaning.
+
+- targetRank (derived) — the target word's 0-indexed position in
+candidatesSnapshot. 0 means IME's top candidate was the target (high
+confidence); null means the target wasn't in the top 5 (extremely low
+confidence).
+
+With these three layers, training can be stratified:
+
+| Strategy     | Filter                            | Use case                      |
+| ------------ | --------------------------------- | ----------------------------- |
+| **Strict**   | `matched=true` AND `targetRank=0` | Small, high-quality sample    |
+| **Loose**    | `matched=true` (all)              | Larger sample, tolerate noise |
+| **Weighted** | Use `targetRank` as loss weight   | Balance quantity and quality  |
+
+**Why not filter false positives at submission time?** Because it's
+impossible to detect at that moment. The system can see "the target is
+in the candidate list" but cannot know "what the student actually wrote."
+The only reliable way to detect false positives is post-training: run
+the trained model over the training set, find samples where the model
+strongly disagrees with the label, and manually review. The
+candidatesSnapshot and targetRank fields make this review targeted
+by prioritizing low-ranked samples.
+
 - **Pure decision logic is extracted for testability.** The highest-risk algorithms live as
   pure functions in `domain/`: `placementDecision.ts` (placement ladder),
   `evaluationGuard.ts` (DDA "should we evaluate now?" gate), `selectAssignment.ts`
@@ -718,6 +796,25 @@ Teachers only ever touch a `.xlsx` file with these columns:
 
 The `random` field that powers random word sampling is generated automatically at publish
 time — teachers never need to supply it.
+
+### Attempt Record Schema (Firestore)
+
+Each attempt document in the `attempts` collection carries three layers of
+quality signals, added incrementally as the pilot progressed:
+
+| Field | Added in | Purpose |
+|---|---|---|
+| `isCorrect` | original | Boolean for SM-2 scheduling |
+| `editDistance`, `similarity` | early | Error-type classification |
+| `timedOut` | 2026-10-13 | Separates timing from matching |
+| `correctnessSignal` | 2026-10-13 | Four-quadrant classification |
+| `forcedMatch` | 2026-10-13 | Whether IME's target was actively chosen |
+| `candidatesSnapshot` | 2026-10-13 | Top 5 IME candidates (for post-hoc analysis) |
+
+These fields exist **only for training-data generation** and future
+handwriting-recognition model fine-tuning. They never enter the SM-2
+scheduling path. See "From boolean `isCorrect` to multi-layer quality
+signals" above for the full rationale.
 
 ## 🗺️ Development Roadmap
 

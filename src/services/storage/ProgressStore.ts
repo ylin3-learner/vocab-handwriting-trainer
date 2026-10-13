@@ -36,6 +36,17 @@ export interface AttemptRecord {
   //                    （反正 isCorrect 也存了，這是同類設計）
   timedOut?: boolean;
   correctnessSignal?: CorrectnessSignal;
+
+  // 🔥 新增：IME 辨識的品質訊號
+  //
+  // forcedMatch：系統是否主動選中了目標字
+  //   false（或 undefined，舊資料）→ 高信賴度
+  //   true → 中信賴度（IME 候選中有目標字，但不確定學生是否真的寫對）
+  //
+  // candidatesSnapshot：IME 回傳的前 5 個候選字
+  //   訓練後可用於分析辨識信心分佈
+  forcedMatch?: boolean;
+  candidatesSnapshot?: string[];
 }
 
 export interface ProgressStore {
