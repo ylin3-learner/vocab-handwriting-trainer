@@ -60,7 +60,7 @@ project centers on:
 | **Teacher dashboard** | Student overview, at-risk detection, Top-K weakness analysis, response-time distribution, learning-style radar, error-type pie, memory-curve growth chart (unlocked after 7 days of practice), per-student PDF report export, student archiving |
 | Roles & auth | Anonymous auth for students, Email/Password for teachers/admins, Firestore security rules enforcing per-role access, custom claims read via `getIdTokenResult(true)` |
 | Anti-cheat signals | Edit-distance + response-time based "random guessing" detection, flagged separately from genuine spelling mistakes |
-| Performance | Top-K candidate pooling, pre-aggregated class stats, batched writes (`AttemptBatcher` merging 5 writes per attempt into a single atomic commit), random-sampling word selection via a `random` field, **three-layer dashboard cache** (in-memory → Firestore IndexedDB → server), live Firestore quota monitoring with a global banner when exhausted |
+| Performance | Top-K candidate pooling, pre-aggregated class stats, batched writes (`AttemptBatcher` merging **6 writes** per attempt into a single atomic commit), random-sampling word selection via a `random` field, **three-layer dashboard cache** (in-memory → Firestore IndexedDB → server), live Firestore quota monitoring with a global banner when exhausted |
 | Cross-device state | Learning state (current level, SM-2 progress, daily snapshots) keyed by a compound `displayId` (`{class}_{seat}_{name}`) rather than Firebase UID, so a student who re-logs-in or switches devices keeps their progress |
 | Profile hygiene | On every student login, old UID profiles for the same `displayId` are automatically cleaned up via a localStorage-based tracker — zero extra Firestore reads, and no accumulation of orphan profile documents |
 | Reporting & lifecycle | Per-student PDF report export; archiving service for students who graduate out of a cohort |
@@ -136,10 +136,15 @@ vocab-handwriting-trainer/
 │ ├── cleanupAnonymousProfiles.mjs # Remove duplicate students/{uid} profiles
 │ ├── deleteStudentData.mjs # One-off: delete all attempts+profile for a displayId
 │ ├── inspectStudent.mjs # Print a student's learning state, daily snapshots, recent attempts
-│ ├── diagnoseDDA.mjs # Diagnose why level evaluation isn't triggering (count vs totalAttempts, time gaps, classStats)
-│ ├── diagnoseAttemptsGap.mjs # Find mismatches between totalAttempts and the real attempts count (by displayId vs by uid)
-│ ├── fixStudentStates.mjs # Backfill missing StudentLearningState fields (totalAttempts, levelLockedUntil, levelHistory)
-│ ├── simulateEvaluation.mjs # Replay RuleBasedStrategy on a student's real attempts, old vs new thresholds
+│ ├── diagnoseDDA.mjs # Diagnose why level evaluation isn't triggering
+│ ├── diagnoseAttemptsGap.mjs # Find mismatches between totalAttempts and the real attempts count
+│ ├── diagnoseStudentPool.mjs # Diagnose why a student keeps seeing the same question
+│ ├── diagnoseSnapshot.mjs # List all dailySnapshots and dailyStats docs
+│ ├── probeVocabulary.mjs # Dump Firestore collection structure (doc IDs, fields, subcollections)
+│ ├── fixStudentStates.mjs # Backfill missing StudentLearningState fields
+│ ├── simulateEvaluation.mjs # Replay RuleBasedStrategy on real attempts, old vs new thresholds
+│ ├── backfillDailyStats.mjs # Backfill dailyStats from historical attempts
+│ ├── backfillDailySnapshots.mjs # Backfill dailySnapshots from dailyStats (~200 reads)
 │ └── tsconfig.json
 │
 ├── vocab_csv/
@@ -288,6 +293,57 @@ vocab-handwriting-trainer/
   mutations in `localStorage`, and displays a global banner. The circuit breaker releases
   at the next Pacific-midnight quota reset — not after a fixed delay that would just hit
   the same wall again.
+
+- **Daily stats are Firestore-authoritative, localStorage is only a cache.**
+  The early version stored daily stats in localStorage, which broke in
+  real school scenarios: students clear browser data (a troubleshooting
+  step teachers teach), switch devices (tablet, phone, home computer),
+  or use incognito mode. Any of these resets localStorage to zero,
+  causing the growth chart to display wrong data (e.g. 45 real attempts
+  shown as 0%).
+
+  The fix writes daily stats to
+  `studentStates/{displayId}/dailyStats/{date}` using atomic increments.
+  `init()` reads this document first, falls back to querying `attempts`
+  for one-time migration, and only uses localStorage as a last resort.
+  localStorage is demoted from "source of truth" to "cache" — even if
+  cleared, correctness is unaffected.
+
+  This fix is necessary for SaaS: users expect cross-device consistency
+  and cannot rely on browser storage.
+
+- **Local-first architecture was validated during a quota exhaustion
+  event.** On 2026-10-13, an unoptimized `backfillDailyStats` script
+  (reading `studentStates` inside a loop) consumed most of the Spark
+  daily 50K read quota. Student practice was **not affected**, because:
+
+    1. **In-memory layer**: once `QuizOrchestrator.init()` completes, the
+       word pool and learning state live in memory; no further Firestore
+       reads are needed per question.
+    2. **Local storage layer**: `LocalStorageProgressStore` writes every
+       attempt to the browser first.
+    3. **Circuit breaker + retry queue**: when cloud writes fail,
+       `HybridProgressStore` stops trying, queues mutations in
+       localStorage, and shows a global banner.
+
+  This event proved the "local-first + cloud sync" architecture is
+  correct. It also exposed the **free-tier boundary**: any script that
+  scans the full `attempts` collection must estimate read volume first
+  and avoid student practice hours. This is a concrete reason to upgrade
+  to Blaze or move to BYOI — not to save money, but to stop "maintenance
+  scripts" and "student practice" from competing for the same quota.
+
+- **`HybridProgressStore` syncs immediately on initialization.**
+  The first version only set a `setInterval`, so the first sync waited
+  60 seconds after page load. For students who practice briefly and
+  close the page (the common case on school tablets), this meant the
+  pending queue was never flushed during a session.
+
+  The fix calls `syncNow()` once inside `startAutoSync()` before setting
+  up the periodic interval. This is especially important in school
+  settings: a student reopening the tablet the next day will immediately
+  retry their pending queue — clearing it as soon as the quota resets,
+  or reopening the circuit breaker if it hasn't.
 
 - **Candidate pools, not full scans.** Early versions loaded a student's entire review
   history on login, which blew through Firestore's free-tier read quota (7,000+ reads at
@@ -946,6 +1002,42 @@ As a partial mitigation, the deployed site is marked `noindex, nofollow` and shi
 automated tests. The pure logic they delegate to *is* tested. Adding emulator-based
 integration tests is planned for Stage 7+.
 
+### Firebase Spark free-tier quota boundary
+
+The Spark tier allows 50,000 reads per day. Under normal student
+practice, this system uses ~2–3K/day, but two categories of operation
+consume quota significantly:
+
+1. **Full-table scans in maintenance scripts**: reading all `attempts`
+   (11,400 documents as of Oct 2026) uses ~23% of the daily quota.
+   `backfillDailyStats` and `backfillDailySnapshots` have been optimized
+   (the latter reads only ~200 documents), but other scripts still need
+   care.
+2. **Teacher dashboard cold start**: if all three cache layers miss,
+   it triggers many reads. This doesn't happen in daily use, but does
+   when the cache is cleared or the device is switched.
+
+**Recommended practices**:
+- Always run maintenance scripts in preview mode first to estimate reads
+- Avoid student practice hours (09:00–15:00 Taipei)
+- For long-term use, upgrade to Blaze ($0.30/month base) or move to BYOI
+
+### Multi-school deployment for commercial version (BYOI mode)
+
+If this system is commercialized, the recommended approach is "managed
+BYOI": each school creates its own Firebase project, the code is
+maintained by the vendor (private repo + obfuscation), and the school
+receives a deployed URL rather than source code. This provides:
+
+- **Physical data isolation**: each school's own Firebase, no mixing
+- **No quota competition**: each school has its own 50K/day
+- **Zero maintenance cost**: school pays its own cloud bill
+- **Zero quota contention**: one school's scripts cannot affect another
+
+The vendor becomes a "software supplier" rather than a "data custodian",
+and schools retain data sovereignty. This is a strong selling point
+for B2G sales.
+
 ### Future Work: Root-Based Leverage Analysis
 
 The current question selector treats each word independently. A future
@@ -973,6 +1065,17 @@ students/teachers/admins.
 handwriting pipeline against real student samples, and iterate on the pilot findings.
 Feature scope is frozen at this point — the priority is real-world validation, not
 additional scope.
+
+**2026-10-13 incident log**: During the pilot, an accidental quota
+exhaustion occurred. An unoptimized `backfillDailyStats` script (reading
+`studentStates` inside a loop) consumed most of the Spark daily 50K
+read quota before student practice. **Student practice was not
+affected** — the local-first architecture allowed already-loaded pages
+to keep working, and unsynced data stayed in the localStorage queue,
+synced automatically after the quota reset. This event produced five
+new diagnostic scripts (`diagnoseStudentPool`, `diagnoseSnapshot`,
+`probeVocabulary`, `backfillDailyStats`, `backfillDailySnapshots`),
+plus the `dailyStats` subcollection as the authoritative source.
 
 ## 📄 License
 

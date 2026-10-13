@@ -51,7 +51,7 @@
 | 教師儀表板 | 學⽣總覽、⾵險偵測、Top-K 弱點分析、作答時間分佈、學習風格雷達圖、錯誤類型圓餅圖、成長曲線（累積 7 天後解鎖）、單一學生 PDF 報告匯出、學生封存 |
 | ⾝份與權限 | 學⽣匿名登⼊、教師／管理員 Email/Password 登⼊；Firestore 安全規則依⾓⾊限制存取；自訂聲明透過 `getIdTokenResult(true)` 強制刷新讀取 |
 | 防作弊訊號 | 依 editDistance ＋作答時間偵測「亂答」，與真正的拼字錯誤分開標記 |
-| 效能設計 | Top-K 候選池、預聚合班級統計、批次寫入（`AttemptBatcher` 把每次作答的 5 個寫入合併成單一原子 commit）、以 `random` 欄位做隨機抽樣、**教師儀表板三層快取**（記憶體 → Firestore IndexedDB → 伺服器）、即時配額監控與全域橫幅警示 |
+| 效能設計 | Top-K 候選池、預聚合班級統計、批次寫入（`AttemptBatcher` 把每次作答的 **6 個寫入**合併成單一原子 commit）、以 `random` 欄位做隨機抽樣、**教師儀表板三層快取**（記憶體 → Firestore IndexedDB → 伺服器）、即時配額監控與全域橫幅警示 |
 | 跨裝置狀態 | 學習狀態（當前等級、SM-2 進度、每日快照）以複合 `displayId`（`{班級}_{座號}_{姓名}`）為 key，而非 Firebase UID，換裝置或重新登入都不會遺失進度 |
 | Profile 衛生 | 每次學生登入時，會透過 localStorage 追蹤器自動清理同 `displayId` 的舊 UID profile——零額外 Firestore 讀取，也不會累積孤兒 profile 文件 |
 | 報表與生命週期 | 單一學生 PDF 報告匯出；針對畢業／退場學生的封存服務 |
@@ -127,10 +127,15 @@ vocab-handwriting-trainer/
 │ ├── cleanupAnonymousProfiles.mjs # 清理重複的 students/{uid} profile
 │ ├── deleteStudentData.mjs # 一次性刪除指定 displayId 的所有測試資料
 │ ├── inspectStudent.mjs # 印出學生學習狀態、每日快照、最近作答
-│ ├── diagnoseDDA.mjs # 診斷等級評估為何沒觸發（count vs totalAttempts、時間缺口、classStats）
-│ ├── diagnoseAttemptsGap.mjs # 找出 totalAttempts 與 attempts 實際筆數的落差（by displayId vs by uid）
-│ ├── fixStudentStates.mjs # 補齊 StudentLearningState 缺漏欄位（totalAttempts、levelLockedUntil、levelHistory）
+│ ├── diagnoseDDA.mjs # 診斷等級評估為何沒觸發
+│ ├── diagnoseAttemptsGap.mjs # 找出 totalAttempts 與 attempts 實際筆數的落差
+│ ├── diagnoseStudentPool.mjs # 診斷特定學生「一直出同一題」的原因（pool 大小、重複率）
+│ ├── diagnoseSnapshot.mjs # 列出所有 dailySnapshots 與 dailyStats 文件，診斷成長曲線異常
+│ ├── probeVocabulary.mjs # 探測 Firestore 集合結構（doc ID、欄位、子集合）
+│ ├── fixStudentStates.mjs # 補齊 StudentLearningState 缺漏欄位
 │ ├── simulateEvaluation.mjs # 用真實 attempts 重播 RuleBasedStrategy，對比新舊門檻
+│ ├── backfillDailyStats.mjs # 從歷史 attempts 回填 dailyStats 文件
+│ ├── backfillDailySnapshots.mjs # 從 dailyStats 回填 dailySnapshots（只讀 ~200 筆）
 │ └── tsconfig.json
 │
 ├── vocab_csv/
@@ -273,6 +278,47 @@ vocab-handwriting-trainer/
   `HybridProgressStore` 會停止嘗試寫雲端、把變更排入 `localStorage` 佇列，並顯示全
   域橫幅。熔斷器在下一個太平洋午夜配額重置時才解除——而不是固定延遲後解除，那樣只是
   再撞一次牆。
+
+- **每日統計以 Firestore 為權威來源，localStorage 僅為快取。**
+  早期版本的每日統計存在 localStorage，但在學校場景會失效：
+  學生會清瀏覽器資料（老師教的 troubleshooting）、換裝置（平板、
+  手機、家用電腦）、用無痕模式。任何一種都會讓 localStorage 歸零，
+  導致成長曲線顯示錯誤數據（例如實際 45 題卻顯示 0%）。
+
+  修正方式是把每日統計寫入
+  `studentStates/{displayId}/dailyStats/{date}`，用 `increment`
+  原子累加。`init()` 時優先讀這個文件，Firestore 無資料時查
+  `attempts` 集合回填（用於舊資料遷移），localStorage 只作為最後
+  fallback。localStorage 從「權威來源」降級為「快取」，即使被清空
+  也不影響正確性。
+
+  這個修正對 SaaS 化是必要的——SaaS 的使用者預期跨裝置一致，
+  不能依賴瀏覽器儲存。
+
+- **本地優先架構在配額耗盡時得到驗證。** 2026-10-13 發生了一次
+  意外的配額耗盡事件：一個全表掃描的維護腳本用掉了 Spark 每日
+  50K 讀取的大部分額度。然而，學生的練習**完全不受影響**，因為：
+
+    1. **記憶體層**：`QuizOrchestrator` 一旦完成 `init()`，單字池
+       與學習狀態都在記憶體，下一題不需再讀 Firestore。
+    2. **本地儲存層**：`LocalStorageProgressStore` 每次作答先寫本地。
+    3. **熔斷器 + 重試佇列**：雲端寫入失敗時，`HybridProgressStore`
+       停止嘗試、把變更排入 `localStorage`，顯示全域橫幅。
+
+  這個事件證明「本地優先 + 雲端同步」的架構是正確的。**但同時
+  暴露了免費方案的邊界**：任何涉及 `attempts` 全表掃描的腳本，
+  都必須先估算讀取量，並避開學生練習時段。這是未來升級 Blaze
+  或走 BYOI 的具體理由——不是為了省錢，而是為了讓「維運腳本」
+  與「學生練習」不再互相排擠配額。
+
+- **`HybridProgressStore` 在初始化時立即嘗試同步。**
+  第一版只設定 `setInterval`，第一次同步要等 60 秒。學生打開頁面
+  後如果只練 30 秒就關掉，佇列永遠不會被處理。修正方式是在
+  `startAutoSync()` 內先呼叫一次 `syncNow()`，再設定週期性 interval。
+
+  這對學校場景尤其重要：學生隔天打開平板時，前一天的 pending
+  佇列會立刻被嘗試同步——如果配額已重置，佇列會在瞬間清空；
+  如果還沒重置，熔斷器會重新開啟，保護機制照常運作。
 
 - **候選池，而非全表掃描。** 早期版本在學⽣登入時載入全部複習歷史，直接把 Firestore
   免費⽅案的讀取配額打爆（⼀次 7,000 多次讀取）。現在由 `quotaMonitor.ts` 直接追蹤
@@ -801,6 +847,37 @@ profile 刪除影響。
 `FirestoreProgressStore`、`AnalyticsService`、`AssignmentService` 等 I/O 層沒有自動
 化測試。它們委派的純邏輯**有**測試。加入 emulator-based 整合測試排入 Stage 7+。
 
+### Firebase Spark 免費方案的配額邊界
+
+Spark 方案每日 50,000 次讀取。本系統在正常學生練習下每日約
+2–3K，但有兩類操作會顯著消耗配額：
+
+1. **維護腳本的全表掃描**：讀取全部 `attempts`（2026-10 時約
+   11,400 筆）會用掉約 23% 的每日額度。`backfillDailyStats` 與
+   `backfillDailySnapshots` 已經過優化（後者只讀 ~200 筆），但
+   其他腳本仍需注意。
+2. **教師儀表板的冷啟動**：如果三層快取都失效，會觸發大量讀取。
+   日常使用下不會發生，但清快取或換裝置時會。
+
+**建議的做法**：
+- 維護腳本一律先跑預覽模式，估算讀取量
+- 避開學生練習時段（09:00–15:00 台北時間）
+- 若長期使用，升級 Blaze 方案（每月 $0.30 美元起）或走 BYOI
+
+### 收費版的多校部署（BYOI 模式）
+
+若本系統未來商業化，建議採用「託管 BYOI」：每所學校建立自己
+的 Firebase 專案，程式碼由供應商維護（private repo + 混淆），
+學校拿到的是部署好的網址，不是原始碼。這樣：
+
+- **資料物理隔離**：每校自己的 Firebase，不可能混淆
+- **配額互不干擾**：每校有自己的 50K/天
+- **零維運成本**：學校自付雲端費用
+- **零配額競爭**：一所學校的腳本不會影響另一所
+
+供應商的角色變成「軟體供應商」而非「資料託管者」，學校保有
+資料主權。這對 B2G 銷售是重要的賣點。
+
 ## 🔮 未來方向
 
 ### 詞根槓桿：把單字庫建模成圖
@@ -854,6 +931,15 @@ Stage 0 到 Stage 6-E 已完成，Stage 7（真實試點）**進行中**——�
 
 **Stage 7 剩下工作：** 繼續蒐集辨識錯誤案例、依真實學生樣本調整手寫辨識流程、依試點
 發現持續迭代。功能到此凍結——優先順序是真實世界的驗證，而不是繼續擴充功能。
+
+**2026-10-13 事件記錄**：試點期間發生一次意外的配額耗盡，起因是
+一個未優化的 `backfillDailyStats` 腳本在迴圈內逐筆讀取
+`studentStates`，導致 Spark 每日 50K 讀取額度在學生練習前耗盡。
+**學生練習未受影響**，因為本地優先架構讓已載入的頁面能繼續運作；
+未同步的資料留在 `localStorage` 佇列，配額重置後自動補上。此事件
+催生了五個新診斷腳本（`diagnoseStudentPool`、`diagnoseSnapshot`、
+`probeVocabulary`、`backfillDailyStats`、`backfillDailySnapshots`），
+以及 `dailyStats` 子集合的權威來源設計。
 
 ## 📄 授權
 
