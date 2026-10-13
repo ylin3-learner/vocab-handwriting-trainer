@@ -4,7 +4,6 @@ import { ProgressStore, AttemptRecord } from './ProgressStore';
 import { FirestoreProgressStore } from './FirestoreProgressStore';
 import { LocalStorageProgressStore } from './LocalStorageProgressStore';
 import { notifyQuotaExceeded } from '../status/quotaMonitor';
-// 🔥 新增
 import { removeUndefined } from '../../domain/firestore/removeUndefined';
 
 // 待同步操作類型
@@ -20,6 +19,14 @@ type SyncOperation =
  *
  * 🔥 Firestore 拒絕 undefined 值，所有寫入雲端的資料
  *   都先經過 removeUndefined 過濾（治本 + 防守）。
+ *
+ * 🔥 熔斷器改為「隔天太平洋午夜」重置。
+ *   原因：Firestore 配額每天太平洋午夜重置，
+ *   之前用 5 分鐘會導致「解鎖 → 撞牆 → 再熔斷」的無限迴圈。
+ *
+ * 🔥 建構時立即嘗試同步一次。
+ *   原因：學生隔天打開平板時，前一天的 pending 佇列應立刻
+ *   被嘗試同步，而不是等 60 秒 interval 才觸發。
  */
 export class HybridProgressStore implements ProgressStore {
     private cloud: FirestoreProgressStore;
@@ -73,14 +80,14 @@ export class HybridProgressStore implements ProgressStore {
                 type: 'saveState',
                 studentId,
                 wordId,
-                state: cleanState,  // 🔥 用乾淨版本
+                state: cleanState,
                 timestamp: Date.now(),
             });
             return;
         }
 
         try {
-            await this.cloud.saveState(studentId, wordId, cleanState);  // 🔥
+            await this.cloud.saveState(studentId, wordId, cleanState);
             await this.removeFromSyncQueue('saveState', studentId, wordId);
         } catch (error) {
             console.warn('⚠️ 雲端儲存失敗，加入同步佇列:', error);
@@ -88,7 +95,7 @@ export class HybridProgressStore implements ProgressStore {
                 type: 'saveState',
                 studentId,
                 wordId,
-                state: cleanState,  // 🔥
+                state: cleanState,
                 timestamp: Date.now(),
             });
             this.checkCircuitBreaker(error);
@@ -106,20 +113,20 @@ export class HybridProgressStore implements ProgressStore {
         if (this.isCircuitBroken) {
             await this.addToSyncQueue({
                 type: 'recordAttempt',
-                attempt: cleanAttempt,  // 🔥
+                attempt: cleanAttempt,
                 timestamp: Date.now(),
             });
             return;
         }
 
         try {
-            await this.cloud.recordAttempt(cleanAttempt);  // 🔥
+            await this.cloud.recordAttempt(cleanAttempt);
             await this.removeFromSyncQueue('recordAttempt', attempt.studentId, attempt.wordId);
         } catch (error) {
             console.warn('⚠️ 雲端記錄作答失敗，加入同步佇列:', error);
             await this.addToSyncQueue({
                 type: 'recordAttempt',
-                attempt: cleanAttempt,  // 🔥
+                attempt: cleanAttempt,
                 timestamp: Date.now(),
             });
             this.checkCircuitBreaker(error);
@@ -206,8 +213,27 @@ export class HybridProgressStore implements ProgressStore {
         await this.saveSyncQueue(filtered);
     }
 
+    /**
+     * 🔥 啟動自動同步。
+     *
+     * 修正（2026-10-13）：
+     *   原本只設定 setInterval，第一次同步要等 60 秒。
+     *   現在改為「先立即嘗試一次，再設定週期性 interval」。
+     *
+     *   為什麼重要：
+     *     學生隔天打開平板時，前一天的 pending 佇列應立刻被
+     *     嘗試同步。如果配額已重置，佇列會在這個瞬間清空；
+     *     如果還沒重置，熔斷器會重新開啟，保護機制照常運作。
+     */
     private startAutoSync(intervalMs: number): void {
         if (this.syncInterval !== null) clearInterval(this.syncInterval);
+
+        // 🔥 先立即嘗試一次（讓隔天打開頁面時能立刻同步）
+        this.syncNow().catch(err =>
+            console.warn('初始同步失敗（可能是配額問題）:', err)
+        );
+
+        // 再設定週期性同步
         this.syncInterval = window.setInterval(() => {
             this.syncNow().catch(err => console.warn('背景同步失敗:', err));
         }, intervalMs);
