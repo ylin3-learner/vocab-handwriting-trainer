@@ -1,5 +1,6 @@
 // src/services/storage/ProgressStore.ts
 import { ReviewState } from '../../types/word';
+import type { CorrectnessSignal } from '../../domain/grading/correctnessSignal';
 
 export interface AttemptRecord {
   // === 既有欄位 ===
@@ -26,6 +27,15 @@ export interface AttemptRecord {
   
   // 預留給未來單字庫版本管理
   vocabVersion?: string;         // 例如 "v2026"
+
+  // 🔥 新增：把「事實」與「解讀」都持久化
+  //
+  // timedOut：原始事實，之前沒存，導致訓練資料無法區分
+  //           「寫對但超時」與「寫錯且沒超時」
+  // correctnessSignal：派生視圖，用於查詢與分流
+  //                    （反正 isCorrect 也存了，這是同類設計）
+  timedOut?: boolean;
+  correctnessSignal?: CorrectnessSignal;
 }
 
 export interface ProgressStore {

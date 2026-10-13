@@ -2,6 +2,8 @@
 // 唯一負責任判定「這題算不算對、SM-2 該給幾分」
 // 不接受任何使用者自評輸入,quality 完全由客觀訊號(拼字是否精準、有沒有超時)算出
 
+import { CorrectnessSignal, classifyCorrectness } from './correctnessSignal';
+
 export interface GradingInput {
   recognizedText: string;
   correctAnswer: string;
@@ -14,6 +16,7 @@ export interface GradingResult {
   isCorrect: boolean;
   quality: number; // 0-5,交給 sm2.ts 使用
   recognizedText: string;
+  correctnessSignal: CorrectnessSignal;  // 🔥 新增
 }
 
 function normalize(text: string): string {
@@ -41,11 +44,30 @@ export function calculateQuality(
   return Math.max(3, Math.min(5, quality));
 }
 
+/**
+ * 客觀判分。
+ *
+ * 🔥 設計原則：
+ *   - matched 只計算一次（DRY）
+ *   - isCorrect 從 correctnessSignal 派生（SSOT）
+ *   - 兩種視圖都回傳：isCorrect（SM-2 用）與 correctnessSignal（ML 用）
+ */
 export function gradeAnswer(input: GradingInput): GradingResult {
   const { recognizedText, correctAnswer, elapsedMs, timeLimitMs, timedOut } = input;
 
-  const isCorrect = !timedOut && isExactMatch(recognizedText, correctAnswer);
+  // 🔥 計算兩件事實，然後只算一次
+  const matched = isExactMatch(recognizedText, correctAnswer);
+  const correctnessSignal = classifyCorrectness(matched, timedOut);
+
+  // 🔥 isCorrect 從訊號派生（唯一真實來源）
+  const isCorrect = correctnessSignal === 'true-positive';
+
   const quality = calculateQuality(isCorrect, elapsedMs, timeLimitMs, timedOut);
 
-  return { isCorrect, quality, recognizedText };
+  return {
+    isCorrect,
+    quality,
+    recognizedText,
+    correctnessSignal,
+  };
 }

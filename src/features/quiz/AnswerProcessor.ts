@@ -144,6 +144,11 @@ export class AnswerProcessor {
 
     // ============================================================
     // 5. 組裝 AttemptRecord
+    //
+    // 注意：studentDisplayId 和 snapshotImageUrl 可能是 undefined，
+    //      這是刻意允許的——呼叫方（HybridProgressStore / AttemptBatcher）
+    //      會在寫入 Firestore 前用 removeUndefined 過濾。
+    //      這樣這個純運算函式不需要知道 Firestore 的限制。
     // ============================================================
     const attempt: AttemptRecord = {
       studentId,
@@ -158,6 +163,9 @@ export class AnswerProcessor {
       similarity,
       snapshotEaseFactor: scheduling.nextEaseFactor,
       snapshotInterval: scheduling.nextInterval,
+      // 🔥 新增
+      timedOut: submission.timedOut,
+      correctnessSignal: grading.correctnessSignal,
     };
 
     return {
