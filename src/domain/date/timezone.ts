@@ -52,6 +52,11 @@ export function getLocalDateString(
   date: Date,
   timeZone: string = DEFAULT_TIME_ZONE
 ): string {
+  // Guard: Invalid Date 會讓 toISOString 炸掉，必須先擋
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return '';  // 呼叫端負責處理空字串
+  }
+
   try {
     const formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone,
@@ -59,10 +64,9 @@ export function getLocalDateString(
       month: '2-digit',
       day: '2-digit',
     });
-    // en-CA 格式為 YYYY-MM-DD
     return formatter.format(date);
   } catch {
-    // 時區名稱無效時的 fallback
+    // 這裡只剩「timeZone 名稱無效」一種可能，date 已保證有效
     const fallback = new Date(date.getTime() + 8 * 60 * 60 * 1000);
     return fallback.toISOString().slice(0, 10);
   }

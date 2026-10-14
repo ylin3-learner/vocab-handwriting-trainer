@@ -85,7 +85,7 @@ function getEngagementStatus(analytics: StudentAnalytics): {
   const today = getLocalDateString(new Date(), tz);
   const lastDate = analytics.lastAttemptAt
     ? getLocalDateString(new Date(analytics.lastAttemptAt), tz)
-    : undefined;
+    : '—';
 
   if (lastDate === today) {
     return { label: '✅ 今天有練', color: '#155724', bgColor: '#d4edda' };

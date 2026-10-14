@@ -27,22 +27,25 @@ import { getLocalDateString } from '../date/timezone';
  * @returns 學生在該日期所處的等級（L1~L6）
  */
 export function resolveLevelOnDate(
-  date: string,
-  levelHistory: LevelHistoryEntry[],
-  timeZone: string
+    date: string,
+    levelHistory: LevelHistoryEntry[],
+    timeZone: string
 ): number {
-  if (levelHistory.length === 0) return 1;
+    if (levelHistory.length === 0) return 1;
 
-  const applicable = levelHistory.filter(h => {
-    const localDate = getLocalDateString(new Date(h.changedAt), timeZone);
-    return localDate <= date;
-  });
+    const applicable = levelHistory.filter(h => {
+        const t = new Date(h.changedAt).getTime();
+        if (Number.isNaN(t)) return false;   // 跳過壞掉的條目，不要讓它污染推導
+        const localDate = getLocalDateString(new Date(t), timeZone);
+        if (!localDate) return false;        // 第二層保險
+        return localDate <= date;
+    });
 
-  if (applicable.length === 0) return 1;
+    if (applicable.length === 0) return 1;
 
-  const latest = applicable.reduce((a, b) =>
-    new Date(a.changedAt) > new Date(b.changedAt) ? a : b
-  );
+    const latest = applicable.reduce((a, b) =>
+        new Date(a.changedAt).getTime() > new Date(b.changedAt).getTime() ? a : b
+    );
 
-  return latest.level;
+    return latest.level;
 }
