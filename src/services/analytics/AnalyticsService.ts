@@ -12,6 +12,7 @@ import { analyzeStudent } from '../../domain/analytics/studentAnalyzer';
 import { StudentAnalytics } from '../../types/analytics';
 import { Word } from '../../types/word';
 import { DailySnapshot } from '../../types/dailySnapshot';
+import type { LevelHistoryEntry } from '../../types/progression';
 
 function isAbortError(e: unknown): boolean {
     return (e as Error)?.name === 'AbortError';
@@ -289,11 +290,16 @@ export class AnalyticsService {
             }
         }
 
+        // 🔥 新增：讀取 levelHistory（成長曲線的等級資料來源）
+        let levelHistory: LevelHistoryEntry[] = [];
+
         if (stateData) {
             profile.currentLevel = stateData.currentLevel ?? 1;
             customSpeechFloor = stateData.customSpeechFloor;
             studentTimeZone = stateData.timeZone;
+            levelHistory = stateData.levelHistory ?? [];
             console.log(`✅ [AnalyticsService] 當前等級 L${profile.currentLevel}`);
+            console.log(`📜 [AnalyticsService] levelHistory 共 ${levelHistory.length} 筆`);
         }
 
         // ============================================================
@@ -377,6 +383,7 @@ export class AnalyticsService {
             weakWordsWindowDays: 7,
         });
         result.dailySnapshots = dailySnapshots;
+        result.levelHistory = levelHistory;
         result.customSpeechFloor = customSpeechFloor;
         result.timeZone = studentTimeZone;
 

@@ -2,6 +2,7 @@
 // 學生個人化分析的資料契約
 
 import { DailySnapshot } from './dailySnapshot';
+import type { LevelHistoryEntry } from './progression';
 
 export interface WeakWordDetail {
   wordId: string;
@@ -64,6 +65,19 @@ export interface StudentAnalytics {
 
   // 每日快照
   dailySnapshots: DailySnapshot[];
+
+  /**
+   * 🔥 等級變更歷史（來自 studentStates/{displayId}.levelHistory）
+   *
+   * 成長曲線的「等級」線改從這裡推導——這是等級的唯一真實來源。
+   * dailySnapshots.level 已棄用（見 DailySnapshot 型別註解）。
+   *
+   * 為什麼是 optional：
+   *   `analyzeStudent()` 是純函式，只根據 attempts 計算統計，
+   *   它拿不到 levelHistory（那是 AnalyticsService 從 studentStates
+   *   讀出來後注入的）。因此型別設為 optional，由 Service 層負責填。
+   */
+  levelHistory?: LevelHistoryEntry[];
 
   // 個人語速下限（若未設定則 undefined）
   customSpeechFloor?: number;

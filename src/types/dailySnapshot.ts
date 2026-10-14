@@ -27,8 +27,18 @@ export interface DailySnapshot {
   /** 當天平均反應時間（ms） */
   avgResponseTimeMs: number;
 
-  /** 當天結束時的等級（L1~L6） */
-  level: number;
+  /**
+   * @deprecated 自 2026-10-14 起不再寫入。
+   *
+   * 這個欄位記錄的是「快照建立當下學生的等級」，但成長曲線需要的是
+   * 「每一天學生所處的等級」。前者會在回填時被錯填成「今天的等級」，
+   * 導致圖表被抹平。
+   *
+   * 等級的唯一真實來源是 `studentStates/{displayId}.levelHistory`。
+   * 舊快照文件仍可能帶此欄位，讀取時忽略即可。型別保留 optional
+   * 是為了讓舊資料仍可反序列化。
+   */
+  level?: number;
 
   /** 快照建立時間（ISO） */
   capturedAt: string;

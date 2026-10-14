@@ -730,9 +730,9 @@ export class QuizOrchestrator implements QuizSessionApi {
     // 同步回 localStorage（作為快取，失敗不影響主流程）
     this.syncToLocalStorage(displayId, today);
 
-    // ============================================================
-    // 準備每日快照（使用記憶體計數）
-    // ============================================================
+    // 🔥 不再寫入 level 欄位。
+    //   等級的唯一真實來源是 studentStates/{displayId}.levelHistory。
+    //   快照只保留「當天表現」的聚合數據。
     const dailySnapshot: DailySnapshot = {
       date: today,
       totalAttempts: this.dailyAnsweredCount,
@@ -743,7 +743,6 @@ export class QuizOrchestrator implements QuizSessionApi {
       avgResponseTimeMs: this.dailyAnsweredCount > 0
         ? Math.round(this.dailyTotalResponseTime / this.dailyAnsweredCount)
         : 0,
-      level: this.currentLevel,
       capturedAt: now.toISOString(),
     };
 

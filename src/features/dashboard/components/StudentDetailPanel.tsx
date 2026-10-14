@@ -578,7 +578,11 @@ export const StudentDetailPanel: React.FC<Props> = ({
           </div>
 
           <div style={{ marginBottom: '1rem' }}>
-            <StudentGrowthChart snapshots={analytics.dailySnapshots} />
+            <StudentGrowthChart
+              snapshots={analytics.dailySnapshots}
+              levelHistory={analytics.levelHistory}
+              timeZone={analytics.timeZone}
+            />
           </div>
 
           <div style={{ marginBottom: '0.5rem', padding: '0.5rem 0.75rem', background: '#f1f3f5', borderRadius: '4px', fontSize: '0.8rem', color: '#6c757d' }}>

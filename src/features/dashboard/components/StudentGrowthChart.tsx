@@ -5,14 +5,65 @@ import {
   Legend, ResponsiveContainer,
 } from 'recharts';
 import { DailySnapshot } from '../../../types/dailySnapshot';
+import type { LevelHistoryEntry } from '../../../types/progression';
+import { getLocalDateString } from '../../../domain/date/timezone';
 
 interface Props {
   snapshots: DailySnapshot[];
+  /** 等級變更歷史。若無（例如舊 session 快取），fallback 到空陣列。 */
+  levelHistory?: LevelHistoryEntry[];
+  /** 學生所屬時區（IANA 名稱，例如 'Asia/Taipei'）。用於把 UTC 時間戳轉成本地日期。 */
+  timeZone?: string;
 }
 
 const UNLOCK_THRESHOLD = 7;
+const DEFAULT_TIME_ZONE = 'Asia/Taipei';
 
-export const StudentGrowthChart: React.FC<Props> = ({ snapshots }) => {
+/**
+ * 🔥 推導「某一天」學生所處的等級。
+ *
+ * 演算法：
+ *   1. 過濾出所有「變更日期 <= 目標日期」的 levelHistory 條目
+ *   2. 取最新的一筆（changedAt 最大）
+ *   3. 若無任何條目，回傳 1（初始等級）
+ *
+ * 為什麼需要這個函式：
+ *   dailySnapshots.level 在 2026-10-13 的回填時被錯填成「今天的等級」，
+ *   導致成長曲線的等級線被抹平。改從 levelHistory 推導，就能還原
+ *   每一天真實的等級。
+ *
+ * 為什麼用本地日期對齊：
+ *   levelHistory.changedAt 是 UTC ISO 字串，snapshot.date 是本地
+ *   YYYY-MM-DD。直接字串比對會在跨日邊界出錯（例如台北 00:30 的
+ *   變更，UTC 還在昨天）。用 getLocalDateString 統一轉成本地日期
+ *   再比對。
+ */
+function resolveLevelOnDate(
+  date: string,
+  levelHistory: LevelHistoryEntry[],
+  timeZone: string
+): number {
+  if (levelHistory.length === 0) return 1;
+
+  const applicable = levelHistory.filter(h => {
+    const localDate = getLocalDateString(new Date(h.changedAt), timeZone);
+    return localDate <= date;
+  });
+
+  if (applicable.length === 0) return 1;
+
+  const latest = applicable.reduce((a, b) =>
+    new Date(a.changedAt) > new Date(b.changedAt) ? a : b
+  );
+
+  return latest.level;
+}
+
+export const StudentGrowthChart: React.FC<Props> = ({
+  snapshots,
+  levelHistory = [],
+  timeZone = DEFAULT_TIME_ZONE,
+}) => {
   // 資料不足 → 顯示進度提示
   if (snapshots.length < UNLOCK_THRESHOLD) {
     const remaining = UNLOCK_THRESHOLD - snapshots.length;
@@ -48,11 +99,11 @@ export const StudentGrowthChart: React.FC<Props> = ({ snapshots }) => {
     );
   }
 
-  // 資料足夠 → 顯示雙軸折線圖
+  // 🔥 等級從 levelHistory 推導，不再讀 snapshot.level
   const chartData = snapshots.map(s => ({
     date: s.date.slice(5), // 只顯示 MM-DD
     正確率: s.correctRate,
-    等級: s.level,
+    等級: resolveLevelOnDate(s.date, levelHistory, timeZone),
   }));
 
   return (
@@ -103,7 +154,7 @@ export const StudentGrowthChart: React.FC<Props> = ({ snapshots }) => {
         </LineChart>
       </ResponsiveContainer>
       <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: '#6c757d', textAlign: 'center' }}>
-        資料來源：每日首次練習時自動記錄
+        資料來源：每日快照 ＋ 等級變更歷史
       </p>
     </div>
   );
