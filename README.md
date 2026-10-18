@@ -47,10 +47,10 @@ project centers on:
 |---|---|
 | Practice loop | TTS word + sentence prompt → timed handwriting capture → recognition → objective grading → SM-2 scheduling |
 | Spaced repetition | SM-2 algorithm, adapted from an earlier GRE vocabulary SRS project; **only wrong answers enter the review pool** (`everWrong` flag), and a word leaves the pool after **5 consecutive correct answers** |
-| Handwriting | Canvas capture + pluggable recognition engine (Google IME handwriting API) |
+| Handwriting | Canvas capture + pluggable recognition engine (Google IME handwriting API). **Conditional raw stroke data (x, y, time, pressure) is persisted only on incorrect or timed-out answers** to minimize Firestore quota while accumulating high-quality training data for a future in-house model. |
 | Speech | Web Speech API with configurable playback rate (default 1.0x for authentic listening practice) + a "🐢 Replay slower" button bounded by a teacher-configurable floor (default 0.85x). Speech-driven countdown: the countdown does not start until speech ends (with an 8-second fallback safety timer) |
 | **Example-sentence masking** | The target word is masked (underscores of matching length) while answering, revealed after submission. Uses **Porter Stemmer** normalization so `recite` / `recited` / `reciting` are all masked, but does not over-stem (`art` and `artist` stay distinct) |
-| **Configurable per-question time limit** | Each assignment can set the answer window (3–30 s; presets 5/8/10/15/20 s). Resolved via `QuizTimingPolicy` with three-layer priority: student override > assignment > system default (8 s) |
+| **Configurable per-question time limit** | Each assignment can set the answer window (3–30 s; presets 5/6/7/8/10/15/20 s). The 6s and 7s presets are specifically designed for **pre-competition overtraining (Desirable Difficulty)**, forcing faster retrieval. Resolved via `QuizTimingPolicy` with three-layer priority: student override > assignment > system default (8 s). |
 | **Competition-simulation handwriting mode** | Each assignment can set the handwriting mode: `normal` (clear and rewrite allowed) or `locked` (clear button disabled once the first stroke lands, simulating the competition's "no corrections" rule). Resolved via `HandwritingLockPolicy` with three-layer priority: student override > assignment > system default (`normal`). The clear button locks at the instant the first stroke lands, but subsequent strokes are still allowed — students can finish writing the whole word |
 | **Competition sprint mode** | Each assignment can enable "🏁 Competition Mode". When enabled, the system **freezes DDA level evaluation** and **forces 100% of questions from the target level only** (no current-level or probe mixing). Resolved via `CompetitionModePolicy` with the same three-layer priority as `QuizTimingPolicy` and `HandwritingLockPolicy`. **Lifecycle is controlled automatically by the assignment's `endDate`** — once the assignment expires, `selectActiveAssignment` excludes it, `QuizOrchestrator` returns to normal mode, and DDA resumes naturally. The first post-competition evaluation uses a fully-refreshed 30-attempt window (`MIN_ATTEMPTS_BETWEEN_EVALUATIONS = WINDOW_SIZE`), corresponding to the academic Freeze-and-Refresh mechanism in CAT |
 | **After-quota practice** | When a student finishes their daily quota, the done screen offers "📚 Continue practicing" if the teacher enabled it. This is a two-layer opt-in: teacher chooses `stop` vs `continue`, then the student actively chooses whether to extend |
@@ -763,6 +763,19 @@ by prioritizing low-ranked samples.
   reflect recent behavior. Three different data sources for three different
   semantic purposes — deliberately, not by accident.
 
+- **Overtraining and Data Provenance for Future ML.** 
+  We introduced 6s and 7s time limit presets to create a "Desirable Difficulty" 
+  environment before the competition. Simultaneously, we added `timeLimitMs` 
+  and `rawStrokeData` to the `AttemptRecord`. 
+  
+  The latter uses a **conditional capture strategy**: we only save the raw 
+  stroke vectors (including pressure and time deltas) when a student answers 
+  incorrectly or times out. This prevents the Spark free tier from blowing 
+  up, while providing a high-signal dataset of "edge cases" (e.g., the student 
+  knows the spelling but is too slow). This data pipeline is intentionally 
+  designed to be the training seed for a custom handwriting recognition model, 
+  shifting the project from an API-dependent tool to a self-sustaining ML platform.
+
 ## 🔐 Roles & Authentication
 
 | Role | Auth method | Access |
@@ -810,6 +823,8 @@ quality signals, added incrementally as the pilot progressed:
 | `correctnessSignal` | 2026-10-13 | Four-quadrant classification |
 | `forcedMatch` | 2026-10-13 | Whether IME's target was actively chosen |
 | `candidatesSnapshot` | 2026-10-13 | Top 5 IME candidates (for post-hoc analysis) |
+| `timeLimitMs` | 2026-10-18 | The exact time limit enforced at the moment of the attempt, enabling accurate post-hoc error classification even when teachers change the limit (e.g., 6s vs 8s). |
+| `rawStrokeData` | 2026-10-18 | **Conditional data capture**: `[[x, y, timeOffset, pressure], ...]`. Persisted **only** when the answer is incorrect or timed out. This serves as the foundational dataset for training a proprietary in-house handwriting recognition model (replacing the Google IME API), while successfully avoiding quota blowouts. |
 
 These fields exist **only for training-data generation** and future
 handwriting-recognition model fine-tuning. They never enter the SM-2
@@ -872,9 +887,9 @@ emulator, which is deferred to Stage 7+).
   pipeline validates, converts, builds, and deploys automatically
 - **Linting:** ESLint with `@typescript-eslint/recommended`
 
-## 🚀 Deployment & Self-Hosting (Bring Your Own Infrastructure)
+## 🚀 Deployment Model (Proprietary / BYOI)
 
-This project follows a **"Bring Your Own Infrastructure" (BYOI)** open-source model. The author does not provide a centrally hosted service, ensuring long-term sustainability and data sovereignty. Schools or teachers who wish to use this system can simply clone the repository and configure their own Firebase project.
+This project is **not open-source**; it follows a **"Bring Your Own Infrastructure" (BYOI)** commercial model. The source code is maintained privately. Schools or institutions who wish to use this system will receive a deployed URL and a tailored Firebase configuration, ensuring data sovereignty and long-term sustainability.
 
 ### 📦 Deployment Steps
 
@@ -1222,4 +1237,5 @@ plus the `dailyStats` subcollection as the authoritative source.
 
 ## 📄 License
 
-GPL 3.0
+**Proprietary / All Rights Reserved.** 
+Copyright (c) 2026. Unauthorized copying, modification, or distribution of this software via any medium is strictly prohibited.
