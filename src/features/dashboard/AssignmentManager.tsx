@@ -510,16 +510,35 @@ export const AssignmentManager: React.FC = () => {
               onChange={(e) => setForm({ ...form, timeLimitSeconds: Number(e.target.value) })}
               style={{ width: '100%', padding: '0.5rem' }}
             >
-              {QuizTimingPolicy.PRESETS_SECONDS.map((sec) => (
-                <option key={sec} value={sec}>
-                  {sec} 秒
-                  {sec === 8 && '（比賽標準）'}
-                  {sec === 5 && '（進階挑戰）'}
-                  {sec === 15 && '（初學建議）'}
-                  {sec === 20 && '（非常寬鬆）'}
-                </option>
-              ))}
+              {QuizTimingPolicy.PRESETS_SECONDS.map((sec) => {
+                // 根據秒數給予不同的標籤提示
+                let label = `${sec} 秒`;
+                if (sec === 6) label += '（極限特訓 - 超額訓練）';
+                else if (sec === 7) label += '（超額訓練 - 模擬高壓）';
+                else if (sec === 8) label += '（比賽標準）';
+                else if (sec === 5) label += '（進階挑戰）';
+                else if (sec === 15) label += '（初學建議）';
+                else if (sec === 20) label += '（非常寬鬆）';
+
+                return (
+                  <option key={sec} value={sec}>
+                    {label}
+                  </option>
+                );
+              })}
             </select>
+
+            {/* 🔥 超額訓練視覺警告 */}
+            {form.timeLimitSeconds <= 7 && (
+              <small style={{
+                color: '#dc3545',
+                display: 'block',
+                marginTop: '0.25rem',
+                fontWeight: 'bold'
+              }}>
+                ⚠️ 超額訓練模式：時限低於比賽標準（8 秒），強迫提取，增加比賽當天的反應餘裕。
+              </small>
+            )}
           </div>
 
           {/* 手寫模式 */}
@@ -772,6 +791,9 @@ export const AssignmentManager: React.FC = () => {
                     ⏱️ {timeSec}s
                     {isDefaultTime && (
                       <span style={{ color: '#6c757d', marginLeft: '0.3rem' }}>（標準）</span>
+                    )}
+                    {timeSec <= 7 && (
+                      <span style={{ color: '#dc3545', marginLeft: '0.3rem', fontWeight: 'bold' }}>（超額）</span>
                     )}
                   </td>
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>

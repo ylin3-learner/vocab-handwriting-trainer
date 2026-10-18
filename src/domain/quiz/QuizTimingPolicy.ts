@@ -32,8 +32,9 @@ export class QuizTimingPolicy {
   /**
    * 建議選項（給 UI 下拉用，單位：秒）。
    * 這些是經過教學現場推估的「合理值」。
+   * 🔥 新增 6 與 7 秒，用於比賽前的「超額訓練 (Overtraining)」
    */
-  static readonly PRESETS_SECONDS = [5, 8, 10, 15, 20] as const;
+  static readonly PRESETS_SECONDS = [5, 6, 7, 8, 10, 15, 20] as const;
 
   resolve(context: {
     studentCustomMs?: number;
