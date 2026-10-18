@@ -158,6 +158,7 @@ export class AnswerProcessor {
       recognizedText: submission.recognizedText,
       isCorrect: grading.isCorrect,
       responseTimeMs: submission.elapsedMs,
+      timeLimitMs, // 新增這行
       snapshotImageUrl: submission.snapshotImageUrl,
       editDistance,
       similarity,

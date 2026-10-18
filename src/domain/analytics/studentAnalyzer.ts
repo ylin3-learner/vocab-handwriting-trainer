@@ -233,7 +233,10 @@ function calculateErrorBreakdown(attempts: AttemptRecord[]): ErrorBreakdown {
     const text = (a.recognizedText || '').trim();
     const time = a.responseTimeMs || 0;
 
-    if (time > THRESHOLDS.NORMAL_MS) {
+    // 修改這裡：使用當下的時限，若無則 Fallback 到 8000
+    const limit = a.timeLimitMs ?? THRESHOLDS.NORMAL_MS;
+
+    if (time > limit) {
       breakdown.timeout++;
       continue;
     }

@@ -62,6 +62,9 @@ export class FirestoreProgressStore implements ProgressStore {
       recognizedText: attempt.recognizedText || '',
       isCorrect: attempt.isCorrect ?? false,
       responseTimeMs: attempt.responseTimeMs ?? 0,
+      timeLimitMs: attempt.timeLimitMs ?? 8000, // 新增
+      timedOut: attempt.timedOut ?? false,      // 順便補上
+      correctnessSignal: attempt.correctnessSignal ?? null, // 順便補上
       snapshotImageUrl: attempt.snapshotImageUrl || '',
       editDistance: attempt.editDistance ?? -1,
       similarity: attempt.similarity ?? 0,

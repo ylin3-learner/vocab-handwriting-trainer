@@ -10,6 +10,7 @@ export interface AttemptRecord {
   recognizedText: string;
   isCorrect: boolean;
   responseTimeMs: number;
+  timeLimitMs?: number; // 新增：記錄當下作答的時限 (ms)
   snapshotImageUrl?: string;
 
   // === Sprint 6-B 新增：資料品質訊號 (Data Quality Signals) ===
