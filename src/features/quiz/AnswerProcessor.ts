@@ -142,6 +142,11 @@ export class AnswerProcessor {
       );
     }
 
+    // 🔥 判斷是否要保留原始軌跡
+    // 條件：答錯 (not true-positive) 或 超時
+    const shouldCaptureStrokeData =
+      grading.correctnessSignal !== 'true-positive' || submission.timedOut;
+
     // ============================================================
     // 5. 組裝 AttemptRecord
     //
@@ -169,6 +174,9 @@ export class AnswerProcessor {
       // 🔥 新增：IME 辨識的品質訊號
       forcedMatch: submission.forcedMatch,
       candidatesSnapshot: submission.candidatesSnapshot,
+      // 🔥 只有符合條件才寫入，否則為 undefined。
+      // AttemptBatcher 的 removeUndefined 會自動忽略它。
+      rawStrokeData: shouldCaptureStrokeData ? submission.rawStrokeData : undefined,
     };
 
     return {

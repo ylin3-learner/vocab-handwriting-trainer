@@ -1,3 +1,4 @@
+// src/features/quiz/HandwritingCanvas.tsx
 import React, { forwardRef, useImperativeHandle, useRef, useState, useEffect } from 'react';
 import type { HandwritingMode } from '../../domain/quiz/HandwritingLockPolicy';
 
@@ -8,8 +9,18 @@ interface HandwritingCanvasProps {
   lockMode?: HandwritingMode;
 }
 
+// 內部使用的原始點位結構
+interface RawPoint {
+  x: number;
+  y: number;
+  t: number; // 相對於該筆畫開始的時間 (ms)
+  p: number; // 壓力值 (0~1)
+}
+
 export interface HandwritingCanvasRef {
   getTrace: () => number[][][];
+  // 🔥 新增：回傳結構為 [筆畫][點][x, y, time, pressure]
+  getRawTrace: () => number[][][]; 
   clear: () => void;
 }
 
@@ -22,8 +33,11 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
     // 🔒 用 ref 鏡像 state，避免 startDraw 內的 stale closure
     const hasContentRef = useRef(false);
 
-    const strokesRef = useRef<{ x: number; y: number }[][]>([]);
-    const currentStrokeRef = useRef<{ x: number; y: number }[]>([]);
+    // 🔥 將 strokesRef 改為儲存完整的 RawPoint，以相容 getTrace 與 getRawTrace
+    const strokesRef = useRef<RawPoint[][]>([]);
+    const currentStrokeRef = useRef<RawPoint[]>([]);
+    // 🔥 紀錄每一筆開始的絕對時間，用於計算相對時間 t
+    const strokeStartTimeRef = useRef<number>(0);
 
     // UI 用：是否需要顯示鎖定狀態（按鈕 disabled、顯示 🔒）
     const isLocked = lockMode === 'locked' && hasContent;
@@ -47,12 +61,8 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
 
     /**
      * 清除畫布。
-     *
-     * @param force 若為 true，跳過鎖定檢查（內部初始化用）。
-     *              使用者主動清除時傳 false（預設）。
      */
     const clearCanvas = (force: boolean = false) => {
-      // 🔒 鎖定模式下，拒絕使用者主動清除
       if (!force && lockMode === 'locked' && hasContentRef.current) return;
 
       const canvas = canvasRef.current;
@@ -61,6 +71,7 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       drawGrid(ctx, canvas.width, canvas.height);
+      
       strokesRef.current = [];
       currentStrokeRef.current = [];
 
@@ -72,14 +83,30 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
 
     useImperativeHandle(ref, () => ({
       getTrace: () => {
+        // 保持與 Google IME 相容的格式：[ [xs], [ys], [] ]
         const trace = strokesRef.current.map(stroke => {
           const xs = stroke.map(p => p.x);
           const ys = stroke.map(p => p.y);
           return [xs, ys, []] as number[][];
         });
-        console.log('🔍 轨迹数据 (笔画数):', trace.length, trace);
+        console.log('🔍 [IME] 轨迹数据 (笔画数):', trace.length);
         return trace;
       },
+      
+      // 🔥 新增：給 ML 訓練用的高精度資料
+      getRawTrace: () => {
+        // 回傳格式： [筆畫][點索引][ x, y, t, p ]
+        const rawTrace = strokesRef.current.map(stroke => 
+          stroke.map(p => [
+            Number(p.x.toFixed(3)), 
+            Number(p.y.toFixed(3)), 
+            Math.round(p.t), 
+            Number(p.p.toFixed(2))
+          ])
+        );
+        return rawTrace;
+      },
+      
       clear: () => clearCanvas(false),
     }));
 
@@ -93,7 +120,6 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
       ctx.lineJoin = 'round';
       ctx.strokeStyle = '#000000';
 
-      // 強制清除，跳過鎖定檢查（初始化時不應被鎖定擋住）
       clearCanvas(true);
       hasContentRef.current = false;
       setHasContent(false);
@@ -119,27 +145,32 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
       };
     };
 
+    // 🔥 輔助函式：獲取壓力值（觸控筆可能支援 force，滑鼠預設 0.5）
+    const getPressure = (e: React.MouseEvent | React.TouchEvent): number => {
+      if ('touches' in e) {
+        const force = (e.touches[0] as any)?.force;
+        return typeof force === 'number' && force > 0 ? force : 0.5;
+      }
+      return 0.5; // 滑鼠沒有壓力，給預設值
+    };
+
     const startDraw = (e: React.MouseEvent | React.TouchEvent) => {
       if (disabled) return;
 
-      // 不應該阻止新筆畫（學生需要寫完整個單字）
-      // if (lockMode === 'locked' && hasContentRef.current) return;
-
-      // 🔥 移除 e.preventDefault()：canvas 的 touchAction: 'none'
-      //    已經在 CSS 層阻止了瀏覽器預設手勢，不需要這行。
-      //    在 passive listener 中呼叫它只會噴警告，且被忽略。
-      // e.preventDefault();  ← 刪除這行
       setIsDrawing(true);
 
-      // 🔒 一動筆就鎖：在 startDraw 時就標記為有內容
-      //   （而非等 endDraw，防止「點一下沒拖動」繞過鎖定）
       if (lockMode === 'locked' && !hasContentRef.current) {
         hasContentRef.current = true;
         setHasContent(true);
       }
 
       const { x, y } = getPos(e);
-      currentStrokeRef.current = [{ x, y }];
+      const pressure = getPressure(e);
+      
+      // 🔥 記錄這筆的起始時間
+      strokeStartTimeRef.current = performance.now();
+      currentStrokeRef.current = [{ x, y, t: 0, p: pressure }];
+
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -150,9 +181,24 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
 
     const draw = (e: React.MouseEvent | React.TouchEvent) => {
       if (!isDrawing || disabled) return;
-      // e.preventDefault();
+
       const { x, y } = getPos(e);
-      currentStrokeRef.current.push({ x, y });
+      const pressure = getPressure(e);
+      const timeOffset = performance.now() - strokeStartTimeRef.current;
+
+      // 🔥 降採樣 (Downsampling)：節省 Firestore 空間
+      // 如果距離上一個點太近（< 0.5% 畫布寬度）且時間太短（< 8ms），就忽略
+      const lastPoint = currentStrokeRef.current[currentStrokeRef.current.length - 1];
+      if (lastPoint) {
+        const dx = x - lastPoint.x;
+        const dy = y - lastPoint.y;
+        const dt = timeOffset - lastPoint.t;
+        // Math.hypot 計算歐幾里得距離
+        if (Math.hypot(dx, dy) < 0.005 && dt < 8) return; 
+      }
+
+      currentStrokeRef.current.push({ x, y, t: timeOffset, p: pressure });
+
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -164,10 +210,13 @@ export const HandwritingCanvas = forwardRef<HandwritingCanvasRef, HandwritingCan
     const endDraw = () => {
       if (!isDrawing) return;
       setIsDrawing(false);
+
+      // 🔥 將這筆畫存入 strokesRef
       if (currentStrokeRef.current.length > 1) {
         strokesRef.current.push([...currentStrokeRef.current]);
       }
       currentStrokeRef.current = [];
+
       const canvas = canvasRef.current;
       if (!canvas) return;
       const dataUrl = canvas.toDataURL('image/png');

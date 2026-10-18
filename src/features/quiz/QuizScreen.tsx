@@ -327,6 +327,8 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
       let candidatesSnapshot: string[] = [];
 
       const trace = canvasRef.current?.getTrace() || [];
+      const rawTrace = canvasRef.current?.getRawTrace() || [];
+      
       if (trace.length > 0 && trace[0] && Array.isArray(trace[0][0]) && trace[0][0].length > 0) {
         const candidates = await callGoogleIME(trace, 'en');
         console.log('🔍 [IME] 候選字：', candidates);
@@ -368,6 +370,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         timedOut: timedOutRef.current,
         countdownStarted: countdownStartedRef.current,
       });
+
       const submission = {
         recognizedText,
         elapsedMs,
@@ -376,6 +379,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         // 🔥 新增：IME 辨識的品質訊號
         forcedMatch,
         candidatesSnapshot,
+        rawStrokeData: rawTrace.length > 0 ? rawTrace : undefined, // 🔥 新增
       };
 
       let isCorrect = false;

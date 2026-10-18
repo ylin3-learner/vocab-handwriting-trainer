@@ -70,6 +70,8 @@ export interface AnswerSubmission {
   //   IME 回傳的前 5 個候選字，供訓練時分析辨識信心
   forcedMatch?: boolean;
   candidatesSnapshot?: string[];
+  // 新增：原始筆跡軌跡 (三維陣列：筆畫 -> 點 -> [x, y, t, p])
+  rawStrokeData?: number[][][]; 
 }
 
 export interface SubmitAnswerResult {

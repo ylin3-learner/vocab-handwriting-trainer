@@ -48,6 +48,9 @@ export interface AttemptRecord {
   //   訓練後可用於分析辨識信心分佈
   forcedMatch?: boolean;
   candidatesSnapshot?: string[];
+  // 新增：原始筆跡軌跡 (僅在答錯或超時時收集)
+  // 格式：[筆畫][點][x, y, timeOffsetMs, pressure]
+  rawStrokeData?: number[][][]; // 修正為三維陣列
 }
 
 export interface ProgressStore {
