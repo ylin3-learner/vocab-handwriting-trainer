@@ -48,9 +48,6 @@ export class AnalyticsService {
         return this.classStatsService.getAllClassStats();
     }
 
-    /**
-     * 🔥 修改（2026-10）：改從 classStats 讀取，不再全表掃描 attempts
-     */
     async getAllStudentsStats(): Promise<StudentStat[]> {
         const classStats = await this.getAllClassStats();
         const studentMap = new Map<string, StudentStat>();
@@ -90,9 +87,6 @@ export class AnalyticsService {
         return result;
     }
 
-    /**
-     * 🔥 修改（2026-10）：改從 classStats.wordErrors 讀取，不再全表掃描
-     */
     async getTopWeakWords(limitCount: number = 5): Promise<WeakWord[]> {
         const classStats = await this.getAllClassStats();
         const wordErrorMap = new Map<string, { errorCount: number; totalCount: number }>();
@@ -161,35 +155,6 @@ export class AnalyticsService {
         return { className: '未分類', name: displayId };
     }
 
-    /**
-     * ============================================================
-     * 🔥 方案 1：快取優先策略（2026-10）
-     * ============================================================
-     *
-     * 三層快取階層：
-     *
-     *   Layer 1: useStudentDetail 的 module-level Map
-     *            → 同一個 session 內切換學生，0 延遲、0 配額
-     *
-     *   Layer 2: Firestore IndexedDB 快取
-     *            → 頁面刷新後仍在（persistentLocalCache）
-     *            → 由 getDocsFromCache() / getDocFromCache() 讀取
-     *            → 不消耗 Firestore 讀取配額
-     *
-     *   Layer 3: Firestore 伺服器
-     *            → 只有 Layer 1 + Layer 2 都 miss 才呼叫
-     *            → 消耗配額
-     *
-     * 為什麼有效：
-     *   - 老師連點學生：Layer 1 命中，0 配額
-     *   - 老師刷新頁面：Layer 2 命中，0 配額（原本會消耗 120 筆/學生）
-     *   - 老師隔天早上再看：Layer 3，正常消耗
-     *
-     * 代價：
-     *   - 老師看到的資料可能是 N 分鐘前的（IndexedDB 快取的版本）
-     *   - 「重新整理」按鈕會強制走 Layer 3
-     * ============================================================
-     */
     async getStudentDetail(
         displayId: string,
         options?: { forceServer?: boolean }
@@ -202,9 +167,7 @@ export class AnalyticsService {
 
         const attemptsRef = collection(db, 'attempts');
 
-        // ============================================================
         // 步驟 1：讀 attempts
-        // ============================================================
         const q1 = query(
             attemptsRef,
             where('studentDisplayId', '==', displayId),
@@ -215,7 +178,6 @@ export class AnalyticsService {
         let attempts: AttemptRecord[] = [];
         let attemptsSource: 'cache' | 'server' = 'cache';
 
-        // 🔥 Layer 2：只在「非強制更新」時嘗試
         if (!forceServer) {
             try {
                 const cachedSnap = await getDocsFromCache(q1);
@@ -224,11 +186,10 @@ export class AnalyticsService {
                     console.log(`📦 [AnalyticsService] "${displayId}" 從 IndexedDB 快取讀到 ${attempts.length} 筆 attempts（0 配額）`);
                 }
             } catch (e) {
-                // 快取不存在或查詢未執行過 → 正常，繼續往下走
+                // 快取 miss
             }
         }
 
-        // Layer 3：快取未命中或強制更新 → 走伺服器
         if (attempts.length === 0) {
             attemptsSource = 'server';
             console.log(`🌐 [AnalyticsService] "${displayId}" 從伺服器讀取 attempts...`);
@@ -250,9 +211,7 @@ export class AnalyticsService {
             console.log(`📊 [AnalyticsService] "${displayId}" → 從伺服器讀到 ${attempts.length} 筆`);
         }
 
-        // ============================================================
         // 步驟 2：讀 studentStates
-        // ============================================================
         let profile = {
             studentId: displayId,
             name: displayId,
@@ -265,7 +224,6 @@ export class AnalyticsService {
         const stateRef = doc(db, 'studentStates', displayId);
         let stateData: any = null;
 
-        // 🔥 Layer 2
         if (!forceServer) {
             try {
                 const cachedDoc = await getDocFromCache(stateRef);
@@ -276,7 +234,6 @@ export class AnalyticsService {
             } catch { /* 快取 miss */ }
         }
 
-        // Layer 3
         if (!stateData) {
             try {
                 const stateDoc = await getDoc(stateRef);
@@ -290,7 +247,6 @@ export class AnalyticsService {
             }
         }
 
-        // 🔥 新增：讀取 levelHistory（成長曲線的等級資料來源）
         let levelHistory: LevelHistoryEntry[] = [];
 
         if (stateData) {
@@ -303,27 +259,59 @@ export class AnalyticsService {
         }
 
         // ============================================================
-        // 步驟 3：從 displayId 解析姓名/班級
+        // 🔥 新增：讀取「最後一次配額」的學習進度（抓偷跑）
         // ============================================================
+        let recentQuotaStats: StudentAnalytics['recentQuotaStats'] = undefined;
+        try {
+            const targetQuota = stateData?.currentDailyQuota ?? 0;
+            const quotaDate = stateData?.quotaDate; // 例如 "2026-10-19"
+
+            if (targetQuota > 0 && quotaDate) {
+                // 去讀取「配額那天」的 dailyStats 文件，而不是系統的今天
+                const statsRef = doc(db, 'studentStates', displayId, 'dailyStats', quotaDate);
+                let answeredCount = 0;
+
+                // 嘗試從快取或伺服器讀取
+                if (!forceServer) {
+                    try {
+                        const cachedStats = await getDocFromCache(statsRef);
+                        if (cachedStats.exists()) answeredCount = cachedStats.data().answeredCount ?? 0;
+                    } catch { /* miss */ }
+                }
+                if (answeredCount === 0) {
+                    const serverStats = await getDoc(statsRef);
+                    if (serverStats.exists()) answeredCount = serverStats.data().answeredCount ?? 0;
+                }
+
+                // 判斷狀態
+                let status: 'completed' | 'incomplete' = 'incomplete';
+                if (answeredCount >= targetQuota) {
+                    status = 'completed';
+                }
+
+                recentQuotaStats = {
+                    date: quotaDate,
+                    answeredCount: answeredCount,
+                    targetQuota: targetQuota,
+                    status,
+                };
+            }
+        } catch (e) {
+            console.warn('⚠️ [AnalyticsService] 取得配額進度失敗:', e);
+        }
+
+        // 步驟 3：從 displayId 解析姓名/班級
         const parsed = this.parseDisplayId(displayId);
         profile.className = parsed.className;
         profile.name = parsed.name;
 
-        // ============================================================
         // 步驟 4：預分析
-        // ============================================================
         const preAnalysis = analyzeStudent(attempts, profile, new Map(), {
             weakWordsWindowDays: 7,
         });
         const weakWordIds = preAnalysis.weakestWords.map(w => w.wordId);
 
-        // ============================================================
         // 步驟 5：取得弱點單字物件
-        //
-        // 🔥 forceServer 時，單字也要從伺服器讀（避免快取版本）
-        //    但這需要改 FirestoreWordRepository，暫不處理。
-        //    弱點單字是「穩定的內容」，不會因強制更新而變動。
-        // ============================================================
         let wordMap = new Map<string, Word>();
         if (weakWordIds.length > 0) {
             try {
@@ -336,9 +324,7 @@ export class AnalyticsService {
             }
         }
 
-        // ============================================================
         // 步驟 6：讀取每日快照
-        // ============================================================
         const snapshotsRef = collection(db, 'studentStates', displayId, 'dailySnapshots');
         const snapshotsQuery = query(
             snapshotsRef,
@@ -348,7 +334,6 @@ export class AnalyticsService {
 
         let dailySnapshots: DailySnapshot[] = [];
 
-        // 🔥 Layer 2
         if (!forceServer) {
             try {
                 const cachedSnap = await getDocsFromCache(snapshotsQuery);
@@ -361,7 +346,6 @@ export class AnalyticsService {
             } catch { /* cache miss */ }
         }
 
-        // Layer 3
         if (dailySnapshots.length === 0) {
             try {
                 const snapshotsSnap = await getDocs(snapshotsQuery);
@@ -376,9 +360,7 @@ export class AnalyticsService {
             }
         }
 
-        // ============================================================
         // 步驟 7：最終分析
-        // ============================================================
         const result = analyzeStudent(attempts, profile, wordMap, {
             weakWordsWindowDays: 7,
         });
@@ -386,10 +368,10 @@ export class AnalyticsService {
         result.levelHistory = levelHistory;
         result.customSpeechFloor = customSpeechFloor;
         result.timeZone = studentTimeZone;
-
-        // 🔥 注入資料來源
-        //    以 attempts 的來源為準（attempts 是主要資料，其他欄位重要性較低）
         result.dataSource = attemptsSource;
+        
+        // 🔥 注入最後一次配額狀態
+        result.recentQuotaStats = recentQuotaStats;
 
         console.log(`✅ [AnalyticsService] "${displayId}" 完成（attempts 來源：${attemptsSource}）`);
         return result;

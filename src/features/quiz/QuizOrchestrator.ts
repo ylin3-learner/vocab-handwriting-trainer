@@ -302,6 +302,18 @@ export class QuizOrchestrator implements QuizSessionApi {
       console.log(
         `   ✅ 讀取作業「${this.activeAssignment.assignment.name}」，配額 ${this.dailyMaxQuota} 題`
       );
+
+      // 新增：將今日配額寫入 studentStates，供教師後台判斷是否烙跑
+      try {
+        const today = getLocalDateString(this.getNow(), this.studentTimeZone);
+        await setDoc(doc(db, 'studentStates', displayId), {
+          currentDailyQuota: this.dailyMaxQuota,
+          quotaDate: today,
+        }, { merge: true });
+      } catch (e) {
+        console.warn('⚠️ 寫入 currentDailyQuota 失敗:', e);
+      }
+
     } else {
       this.dailyMaxQuota = this.deps.defaultDailyMaxQuota;
       this.dailyNewQuotaRemaining = this.deps.defaultDailyNewQuota;

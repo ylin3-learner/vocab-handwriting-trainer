@@ -276,6 +276,27 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     );
   };
 
+  // 🔥 新增：防止學生「未完成每日額度」就烙跑
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // 條件：有設定配額 (max > 0)、還沒寫完 (answered < max)、且不在 done 狀態
+      const isUnfinished =
+        dailyProgress.max > 0 &&
+        dailyProgress.answered < dailyProgress.max &&
+        status !== 'done';
+
+      if (isUnfinished) {
+        e.preventDefault();
+        // 現代瀏覽器會忽略自訂文字，顯示預設的「確定要離開此網站嗎？」
+        e.returnValue = '您尚未完成今日的練習額度，確定要離開嗎？';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dailyProgress, status]);
+
   useEffect(() => {
     if (hasInitializedRef.current) {
       console.log('⚠️ [QuizScreen] useEffect 被觸發第二次，跳過');
@@ -328,7 +349,7 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
       const trace = canvasRef.current?.getTrace() || [];
       const rawTrace = canvasRef.current?.getRawTrace() || [];
-      
+
       if (trace.length > 0 && trace[0] && Array.isArray(trace[0][0]) && trace[0][0].length > 0) {
         const candidates = await callGoogleIME(trace, 'en');
         console.log('🔍 [IME] 候選字：', candidates);

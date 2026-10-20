@@ -12,39 +12,16 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { StudentStateService } from '../../../services/progression/StudentStateService';
 import { formatLocalDate, getLocalDateString, DEFAULT_TIME_ZONE } from '../../../domain/date/timezone';
 
-// ============================================================
-// 🔥 Spinner 動畫
-//
-// React 沒有內建 keyframes 的機制，所以用 <style> 標籤注入。
-// 為什麼不用 CSS-in-JS 庫：這個專案沒有引入 styled-components
-// 或 emotion，用純 CSS 最輕量。
-// ============================================================
 const SPINNER_KEYFRAMES = `
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 `;
 
-// 在 StudentDetailPanel 的 return 之前，注入到 DOM：
-// <style>{SPINNER_KEYFRAMES}</style>
-
 interface Props {
   analytics: StudentAnalytics;
-
-  // ============================================================
-  // 🔥 累積統計（來自 classStats）
-  //
-  // 為什麼獨立傳入：
-  //   analytics.totalAttempts / correctCount 是「最近 100 筆」的窗口統計
-  //   （AnalyticsService 為了效能只撈最近 100 筆）。
-  //   對老師來說，「累積練習量」比「窗口內題數」更有意義——可以用來鼓勵學生。
-  //
-  //   若未提供（例如 fallback 情境），則顯示 analytics 的窗口值，
-  //   並加上「（最近）」標籤提示語意不同。
-  // ============================================================
   cumulativeTotalAttempts?: number;
   cumulativeCorrectCount?: number;
-
   isArchived?: boolean;
   onArchiveToggle?: (
     displayId: string,
@@ -53,18 +30,8 @@ interface Props {
     isCurrentlyArchived: boolean,
     archivedBy: string
   ) => Promise<void>;
-  /** 手動觸發重新抓取。 */
   onRefetch?: () => void;
-  /** 手動重新整理中。用於顯示按鈕的 spinner。 */
   isRefreshing?: boolean;
-  /**
-   * 🔥 前端最後一次「從 server 成功讀取」此學生的時間（毫秒 timestamp）。
-   *
-   * 用途：判斷資料新鮮度。
-   *   - dataSource === 'server'：資料保證最新，無需警告
-   *   - dataSource === 'cache' 且此值 < 30 分鐘：資料可能是新的，無警告
-   *   - dataSource === 'cache' 且此值 ≥ 30 分鐘或未知：顯示過期警告
-   */
   lastServerFetchedAt?: number | null;
 }
 
@@ -109,39 +76,23 @@ function getLevelBadgeColor(level: number): string {
   return '#6c757d';
 }
 
-// ============================================================
-// 🔥 資料新鮮度判斷（重構版）
-//
-// 舊版：基於 lastFetchedAt（前端呼叫時間）→ 永遠顯示「剛剛」
-// 新版：基於「資料來源」+「最後一次 server 同步時間」
-//
-// 語意：
-//   - dataSource === 'server'：資料保證最新 → 綠色「即時」
-//   - dataSource === 'cache' 且 lastServerFetchedAt < 30 分鐘：
-//       快取還算新 → 灰色「快取版本」，無警告
-//   - dataSource === 'cache' 且 lastServerFetchedAt ≥ 30 分鐘或未知：
-//       快取可能過期 → 橘色警告，提示手動更新
-// ============================================================
 const STALE_THRESHOLD_MS = 30 * 60 * 1000;
 
 interface FreshnessInfo {
-  text: string;         // 「即時」或「快取版本（5 分鐘前同步）」
-  isWarning: boolean;   // 是否顯示警告
-  isServer: boolean;    // 是否來自 server（用於決定顏色）
+  text: string;
+  isWarning: boolean;
+  isServer: boolean;
 }
 
 function getFreshnessInfo(
   dataSource: 'cache' | 'server' | undefined,
   lastServerFetchedAt: number | null
 ): FreshnessInfo {
-  // 情境 A：來自 server（保證最新）
   if (dataSource === 'server') {
     return { text: '即時', isWarning: false, isServer: true };
   }
 
-  // 情境 B：來自 cache（可能過期）
   if (!lastServerFetchedAt) {
-    // 從未在此 session 從 server 讀過 → 未知新鮮度，顯示警告
     return { text: '快取版本（同步時間未知）', isWarning: true, isServer: false };
   }
 
@@ -179,11 +130,9 @@ export const StudentDetailPanel: React.FC<Props> = ({
   const [isArchiving, setIsArchiving] = useState(false);
   const { user } = useAuth();
 
-  // 🔥 語速下限
   const [speechFloor, setSpeechFloor] = useState<number | undefined>(analytics.customSpeechFloor);
   const [isUpdatingSpeech, setIsUpdatingSpeech] = useState(false);
 
-  // 🔥 資料新鮮度（每 60 秒重新計算，讓警告能自動觸發）
   const [freshness, setFreshness] = useState<FreshnessInfo>(
     () => getFreshnessInfo(analytics.dataSource, lastServerFetchedAt)
   );
@@ -198,7 +147,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
     return () => clearInterval(timer);
   }, [analytics.dataSource, lastServerFetchedAt]);
 
-  // 當切換學生時同步
   useEffect(() => {
     setSpeechFloor(analytics.customSpeechFloor);
   }, [analytics.studentId, analytics.customSpeechFloor]);
@@ -217,15 +165,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
     }
   };
 
-  // ============================================================
-  // 🔥 顯示用的統計值
-  //
-  // 累積值（若有提供）→ 顯示「總共答了 X 題」
-  // 窗口值（fallback）→ 顯示「最近 X 題」
-  //
-  // 圖表與分析（錯誤分佈、反應時間分佈、弱點單字）仍用 analytics，
-  // 因為那些指標本來就該反映「近期行為」，不是「歷史累積」。
-  // ============================================================
   const hasCumulative = cumulativeTotalAttempts !== undefined;
   const displayTotalAttempts = cumulativeTotalAttempts ?? analytics.totalAttempts;
   const displayCorrectCount = cumulativeCorrectCount ?? analytics.correctCount;
@@ -276,9 +215,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
     }
   };
 
-  // 🔥 用累積值判斷「尚無練習紀錄」，而非窗口值
-  //    理由：若學生今天答了 0 題，但歷史上有 500 題，
-  //         不該顯示「尚無練習紀錄」。
   if (displayTotalAttempts === 0) {
     return (
       <div style={{ background: '#f8f9fa', padding: '3rem', borderRadius: '8px', textAlign: 'center' }}>
@@ -303,7 +239,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
         }}>
           {/* 🔥 左側：資料新鮮度 + 重新整理 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', flexWrap: 'wrap' }}>
-            {/* 「資料截至」= 學生最後作答時間 */}
             <span style={{ color: '#6c757d' }}>
               🕐 資料截至：
               {analytics.lastAttemptAt
@@ -311,7 +246,6 @@ export const StudentDetailPanel: React.FC<Props> = ({
                 : '無紀錄'}
             </span>
 
-            {/* 「資料來源」= 即時 / 快取版本 */}
             <span
               style={{
                 color: freshness.isWarning ? '#856404' : freshness.isServer ? '#155724' : '#6c757d',
@@ -525,11 +459,24 @@ export const StudentDetailPanel: React.FC<Props> = ({
                 }}>
                   L{analytics.currentLevel}
                 </span>
+
+                {/* 🔥 修改：顯示最後一次配額的狀態 */}
+                {analytics.recentQuotaStats && (
+                  <span style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 'bold',
+                    marginLeft: '0.5rem',
+                    padding: '2px 10px',
+                    borderRadius: '12px',
+                    background: analytics.recentQuotaStats.status === 'completed' ? '#d4edda' : '#f8d7da',
+                    color: analytics.recentQuotaStats.status === 'completed' ? '#155724' : '#721c24',
+                  }}>
+                    {analytics.recentQuotaStats.date.slice(5)} 配額：{analytics.recentQuotaStats.answeredCount} / {analytics.recentQuotaStats.targetQuota} 題
+                    {analytics.recentQuotaStats.status === 'incomplete' && ' 🚩 未完成'}
+                  </span>
+                )}
               </h2>
 
-              {/* ============================================================
-                🔥 累積統計（若有提供，優先用；否則顯示窗口值）
-                ============================================================ */}
               <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#6c757d' }}>
                 共 {displayTotalAttempts} 題，答對 {displayCorrectCount} 題，
                 平均 {(analytics.avgResponseTimeMs / 1000).toFixed(1)} 秒

@@ -68,14 +68,6 @@ export interface StudentAnalytics {
 
   /**
    * 🔥 等級變更歷史（來自 studentStates/{displayId}.levelHistory）
-   *
-   * 成長曲線的「等級」線改從這裡推導——這是等級的唯一真實來源。
-   * dailySnapshots.level 已棄用（見 DailySnapshot 型別註解）。
-   *
-   * 為什麼是 optional：
-   *   `analyzeStudent()` 是純函式，只根據 attempts 計算統計，
-   *   它拿不到 levelHistory（那是 AnalyticsService 從 studentStates
-   *   讀出來後注入的）。因此型別設為 optional，由 Service 層負責填。
    */
   levelHistory?: LevelHistoryEntry[];
 
@@ -86,12 +78,13 @@ export interface StudentAnalytics {
   timeZone?: string;
 
   // 🔥 資料來源（由 AnalyticsService 注入）
-  //
-  // 為什麼需要：
-  //   前端無法區分「資料是剛剛從 server 拿的」與「資料是 N 小時前的
-  //   IndexedDB 快取」。UI 需要這個欄位才能誠實顯示資料新鮮度。
-  //
-  // 'cache'：來自 Firestore IndexedDB 快取（可能過期）
-  // 'server'：來自 Firestore 伺服器（保證最新）
   dataSource?: 'cache' | 'server';
+
+  // 🔥 新增：最後一次配額的學習進度（用於抓偷跑）
+  recentQuotaStats?: {
+    date: string;            // 例如 "2026-10-19"
+    answeredCount: number;   // 實際寫了幾題
+    targetQuota: number;     // 應該寫幾題
+    status: 'completed' | 'incomplete'; // 狀態
+  };
 }
