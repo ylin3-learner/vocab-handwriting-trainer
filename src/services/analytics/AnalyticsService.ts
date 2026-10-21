@@ -262,28 +262,23 @@ export class AnalyticsService {
         }
 
         // ============================================================
-        // 🔥 新增：讀取「最後一次配額」的學習進度（抓偷跑）
+        // 🔥 修正：讀取「最後一次配額」的學習進度（抓偷跑）
+        // 改用 attempts 陣列直接計算，保證與 queryStudentDay.mjs 一致
         // ============================================================
         let recentQuotaStats: StudentAnalytics['recentQuotaStats'] = undefined;
         try {
             const targetQuota = stateData?.currentDailyQuota ?? 0;
-            const quotaDate = stateData?.quotaDate;
+            const quotaDate = stateData?.quotaDate; // 例如 "2026-10-21"
 
             if (targetQuota > 0 && quotaDate) {
-                const statsRef = doc(db, 'studentStates', displayId, 'dailyStats', quotaDate);
-                let answeredCount = 0;
+                // 直接從我們已經拉下來的 attempts 陣列中，過濾出「配額當天」的紀錄
+                const answeredCount = attempts.filter(a => {
+                    if (!a.timestamp) return false;
+                    const localDate = getLocalDateString(new Date(a.timestamp), studentTimeZone ?? 'Asia/Taipei');
+                    return localDate === quotaDate;
+                }).length;
 
-                if (!forceServer) {
-                    try {
-                        const cachedStats = await getDocFromCache(statsRef);
-                        if (cachedStats.exists()) answeredCount = cachedStats.data().answeredCount ?? 0;
-                    } catch { /* miss */ }
-                }
-                if (answeredCount === 0) {
-                    const serverStats = await getDoc(statsRef);
-                    if (serverStats.exists()) answeredCount = serverStats.data().answeredCount ?? 0;
-                }
-
+                // 判斷狀態
                 let status: 'completed' | 'incomplete' = 'incomplete';
                 if (answeredCount >= targetQuota) {
                     status = 'completed';
