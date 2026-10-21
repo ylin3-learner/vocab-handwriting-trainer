@@ -471,12 +471,7 @@ export const StudentDetailPanel: React.FC<Props> = ({
                     background: analytics.recentQuotaStats.status === 'completed' ? '#d4edda' : '#f8d7da',
                     color: analytics.recentQuotaStats.status === 'completed' ? '#155724' : '#721c24',
                   }}>
-                    {analytics.recentQuotaStats.date.slice(5)} 配額：
-                    {/* 這裡處理 100+ 的顯示邏輯 */}
-                    {analytics.recentQuotaStats.isCapped
-                      ? `${analytics.recentQuotaStats.answeredCount}+`  // 顯示 100+
-                      : analytics.recentQuotaStats.answeredCount}  
-                    / {analytics.recentQuotaStats.targetQuota} 題
+                    {analytics.recentQuotaStats.date.slice(5)} 配額：{analytics.recentQuotaStats.answeredCount} / {analytics.recentQuotaStats.targetQuota} 題
                     {analytics.recentQuotaStats.status === 'incomplete' && ' 🚩 未完成'}
                   </span>
                 )}

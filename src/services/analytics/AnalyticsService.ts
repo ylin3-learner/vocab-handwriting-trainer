@@ -1,7 +1,7 @@
 // src/services/analytics/AnalyticsService.ts
 import {
     collection, getDocs, query, where, doc, getDoc, orderBy, limit,
-    getDocsFromCache, getDocFromCache
+    getDocsFromCache, getDocFromCache, getDocFromServer // 🔥 新增 getDocFromServer
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { AttemptRecord } from '../storage/ProgressStore';
@@ -14,7 +14,7 @@ import { Word } from '../../types/word';
 import { DailySnapshot } from '../../types/dailySnapshot';
 import type { LevelHistoryEntry } from '../../types/progression';
 import { getLocalDateString } from '../../domain/date/timezone';
-import { AssignmentService } from '../assignment/AssignmentService'; // 🔥 引入
+import { AssignmentService } from '../assignment/AssignmentService';
 
 function isAbortError(e: unknown): boolean {
     return (e as Error)?.name === 'AbortError';
@@ -42,10 +42,9 @@ export interface WeakWord {
 export class AnalyticsService {
     private classStatsService = new ClassStatsService();
     private wordRepository = new FirestoreWordRepository();
-    private assignmentService = new AssignmentService(); // 🔥 初始化
+    private assignmentService = new AssignmentService();
 
-    // 把常數改為 101 (多抓一筆作為探針)
-    private static readonly RECENT_ATTEMPTS_LIMIT = 101;
+    private static readonly RECENT_ATTEMPTS_LIMIT = 100; // 🔥 改回 100，因為我們不用它算了
     private static readonly RECENT_SNAPSHOTS_LIMIT = 30;
 
     async getAllClassStats(): Promise<ClassStats[]> {
@@ -194,7 +193,7 @@ export class AnalyticsService {
             }
         }
 
-        if (attempts.length === 0) {
+        if (attempts.length === 0 || forceServer) {
             attemptsSource = 'server';
             console.log(`🌐 [AnalyticsService] "${displayId}" 從伺服器讀取 attempts...`);
 
@@ -238,9 +237,9 @@ export class AnalyticsService {
             } catch { /* 快取 miss */ }
         }
 
-        if (!stateData) {
+        if (!stateData || forceServer) {
             try {
-                const stateDoc = await getDoc(stateRef);
+                const stateDoc = forceServer ? await getDocFromServer(stateRef) : await getDoc(stateRef);
                 if (stateDoc.exists()) {
                     stateData = stateDoc.data();
                 }
@@ -259,46 +258,6 @@ export class AnalyticsService {
             studentTimeZone = stateData.timeZone;
             levelHistory = stateData.levelHistory ?? [];
             console.log(`✅ [AnalyticsService] 當前等級 L${profile.currentLevel}`);
-            console.log(`📜 [AnalyticsService] levelHistory 共 ${levelHistory.length} 筆`);
-        }
-
-        // ============================================================
-        // 🔥 修正：讀取「最後一次配額」的學習進度（抓偷跑）
-        // 改用 attempts 陣列直接計算，保證與 queryStudentDay.mjs 一致
-        // ============================================================
-        let recentQuotaStats: StudentAnalytics['recentQuotaStats'] = undefined;
-        try {
-            const targetQuota = stateData?.currentDailyQuota ?? 0;
-            const quotaDate = stateData?.quotaDate; // 例如 "2026-10-21"
-
-            if (targetQuota > 0 && quotaDate) {
-                const todayAttempts = attempts.filter(a => {
-                    if (!a.timestamp) return false;
-                    const localDate = getLocalDateString(new Date(a.timestamp), studentTimeZone ?? 'Asia/Taipei');
-                    return localDate === quotaDate;
-                });
-
-                // 因為上限是 101，如果當天超過 100 題，就會抓到 101 筆
-                const answeredCount = todayAttempts.length;
-
-                // 只有當抓到的筆數大於 100 (也就是 101) 時，才判定為被截斷
-                const isCapped = todayAttempts.length > 100;
-
-                let status: 'completed' | 'incomplete' = 'incomplete';
-                if (answeredCount >= targetQuota) {
-                    status = 'completed';
-                }
-
-                recentQuotaStats = {
-                    date: quotaDate,
-                    answeredCount: isCapped ? 100 : answeredCount, // 如果被截斷，顯示 100，讓 UI 加上 +
-                    targetQuota: targetQuota,
-                    status,
-                    isCapped,
-                };
-            }
-        } catch (e) {
-            console.warn('⚠️ [AnalyticsService] 取得配額進度失敗:', e);
         }
 
         // 步驟 3：從 displayId 解析姓名/班級
@@ -342,18 +301,16 @@ export class AnalyticsService {
                     dailySnapshots = cachedSnap.docs
                         .map(d => d.data() as DailySnapshot)
                         .sort((a, b) => a.date.localeCompare(b.date));
-                    console.log(`📦 [AnalyticsService] "${displayId}" 從快取讀到 ${dailySnapshots.length} 筆快照`);
                 }
             } catch { /* cache miss */ }
         }
 
-        if (dailySnapshots.length === 0) {
+        if (dailySnapshots.length === 0 || forceServer) {
             try {
                 const snapshotsSnap = await getDocs(snapshotsQuery);
                 dailySnapshots = snapshotsSnap.docs
                     .map(d => d.data() as DailySnapshot)
                     .sort((a, b) => a.date.localeCompare(b.date));
-                console.log(`📸 [AnalyticsService] "${displayId}" 從伺服器讀到 ${dailySnapshots.length} 筆快照`);
             } catch (e) {
                 if (!isAbortError(e)) {
                     console.warn('⚠️ [AnalyticsService] 讀取每日快照失敗:', e);
@@ -362,7 +319,38 @@ export class AnalyticsService {
         }
 
         // ============================================================
-        // 🔥 新增：計算活躍天數達標率 (按比例計算)
+        // 🔥 終極修正：直接從 dailySnapshots 讀取該日的 totalAttempts
+        // ============================================================
+        let recentQuotaStats: StudentAnalytics['recentQuotaStats'] = undefined;
+        try {
+            const targetQuota = stateData?.currentDailyQuota ?? 0;
+            const quotaDate = stateData?.quotaDate;
+
+            if (targetQuota > 0 && quotaDate) {
+                // 直接在快照陣列中尋找該日期的紀錄
+                const targetSnapshot = dailySnapshots.find(s => s.date === quotaDate);
+
+                // 如果有找到，就拿 totalAttempts；如果找不到，代表那天沒練，就是 0
+                const answeredCount = targetSnapshot ? targetSnapshot.totalAttempts : 0;
+
+                let status: 'completed' | 'incomplete' = 'incomplete';
+                if (answeredCount >= targetQuota) {
+                    status = 'completed';
+                }
+
+                recentQuotaStats = {
+                    date: quotaDate,
+                    answeredCount: answeredCount,
+                    targetQuota: targetQuota,
+                    status,
+                };
+            }
+        } catch (e) {
+            console.warn('⚠️ [AnalyticsService] 取得配額進度失敗:', e);
+        }
+
+        // ============================================================
+        // 計算活躍天數達標率 (按比例計算)
         // ============================================================
         let attendanceStats: StudentAnalytics['attendanceStats'] = undefined;
         try {
@@ -417,7 +405,7 @@ export class AnalyticsService {
         result.timeZone = studentTimeZone;
         result.dataSource = attemptsSource;
         result.recentQuotaStats = recentQuotaStats;
-        result.attendanceStats = attendanceStats; // 🔥 注入
+        result.attendanceStats = attendanceStats;
 
         console.log(`✅ [AnalyticsService] "${displayId}" 完成（attempts 來源：${attemptsSource}）`);
         return result;

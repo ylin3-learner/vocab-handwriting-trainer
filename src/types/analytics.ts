@@ -55,7 +55,6 @@ export interface StudentAnalytics {
     answeredCount: number;
     targetQuota: number;
     status: 'completed' | 'incomplete';
-    isCapped?: boolean; // 新增：是否已達到抓取上限（100筆）
   };
   
   // 🔥 新增：出席率統計
