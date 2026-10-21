@@ -460,7 +460,7 @@ export const StudentDetailPanel: React.FC<Props> = ({
                   L{analytics.currentLevel}
                 </span>
 
-                {/* 🔥 修改：顯示最後一次配額的狀態 */}
+                {/* 🔥 最後一次配額狀態 */}
                 {analytics.recentQuotaStats && (
                   <span style={{
                     fontSize: '0.8rem',
@@ -473,6 +473,23 @@ export const StudentDetailPanel: React.FC<Props> = ({
                   }}>
                     {analytics.recentQuotaStats.date.slice(5)} 配額：{analytics.recentQuotaStats.answeredCount} / {analytics.recentQuotaStats.targetQuota} 題
                     {analytics.recentQuotaStats.status === 'incomplete' && ' 🚩 未完成'}
+                  </span>
+                )}
+
+                {/* 🔥 新增：活躍天數達標狀態 */}
+                {analytics.attendanceStats && (
+                  <span style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 'bold',
+                    marginLeft: '0.5rem',
+                    padding: '2px 10px',
+                    borderRadius: '12px',
+                    background: analytics.attendanceStats.isMet ? '#d4edda' : '#fff3cd',
+                    color: analytics.attendanceStats.isMet ? '#155724' : '#856404',
+                  }}>
+                    📅 {analytics.attendanceStats.windowDays}天內活躍 {analytics.attendanceStats.activeDays}/{analytics.attendanceStats.targetDays} 天
+                    {analytics.attendanceStats.isProportional && ' (按比例)'}
+                    {!analytics.attendanceStats.isMet && ' 🚩 未達標'}
                   </span>
                 )}
               </h2>

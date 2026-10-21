@@ -13,6 +13,8 @@ import { StudentAnalytics } from '../../types/analytics';
 import { Word } from '../../types/word';
 import { DailySnapshot } from '../../types/dailySnapshot';
 import type { LevelHistoryEntry } from '../../types/progression';
+import { getLocalDateString } from '../../domain/date/timezone';
+import { AssignmentService } from '../assignment/AssignmentService'; // 🔥 引入
 
 function isAbortError(e: unknown): boolean {
     return (e as Error)?.name === 'AbortError';
@@ -40,6 +42,7 @@ export interface WeakWord {
 export class AnalyticsService {
     private classStatsService = new ClassStatsService();
     private wordRepository = new FirestoreWordRepository();
+    private assignmentService = new AssignmentService(); // 🔥 初始化
 
     private static readonly RECENT_ATTEMPTS_LIMIT = 100;
     private static readonly RECENT_SNAPSHOTS_LIMIT = 30;
@@ -264,14 +267,12 @@ export class AnalyticsService {
         let recentQuotaStats: StudentAnalytics['recentQuotaStats'] = undefined;
         try {
             const targetQuota = stateData?.currentDailyQuota ?? 0;
-            const quotaDate = stateData?.quotaDate; // 例如 "2026-10-19"
+            const quotaDate = stateData?.quotaDate;
 
             if (targetQuota > 0 && quotaDate) {
-                // 去讀取「配額那天」的 dailyStats 文件，而不是系統的今天
                 const statsRef = doc(db, 'studentStates', displayId, 'dailyStats', quotaDate);
                 let answeredCount = 0;
 
-                // 嘗試從快取或伺服器讀取
                 if (!forceServer) {
                     try {
                         const cachedStats = await getDocFromCache(statsRef);
@@ -283,7 +284,6 @@ export class AnalyticsService {
                     if (serverStats.exists()) answeredCount = serverStats.data().answeredCount ?? 0;
                 }
 
-                // 判斷狀態
                 let status: 'completed' | 'incomplete' = 'incomplete';
                 if (answeredCount >= targetQuota) {
                     status = 'completed';
@@ -360,6 +360,52 @@ export class AnalyticsService {
             }
         }
 
+        // ============================================================
+        // 🔥 新增：計算活躍天數達標率 (按比例計算)
+        // ============================================================
+        let attendanceStats: StudentAnalytics['attendanceStats'] = undefined;
+        try {
+            const activeAssign = await this.assignmentService.getActiveAssignment(profile.className, displayId);
+
+            if (activeAssign?.assignment.minActiveDays && activeAssign?.assignment.windowSizeDays) {
+                const { minActiveDays, windowSizeDays, startDate } = activeAssign.assignment;
+
+                const tz = studentTimeZone ?? 'Asia/Taipei';
+                const todayStr = getLocalDateString(new Date(), tz);
+                const startStr = startDate.slice(0, 10);
+
+                const startMs = new Date(startStr).getTime();
+                const todayMs = new Date(todayStr).getTime();
+                const daysSinceStart = Math.max(1, Math.floor((todayMs - startMs) / (24 * 60 * 60 * 1000)) + 1);
+
+                let targetDays = minActiveDays;
+                let isProportional = false;
+
+                if (daysSinceStart < windowSizeDays) {
+                    targetDays = Math.ceil((minActiveDays / windowSizeDays) * daysSinceStart);
+                    isProportional = true;
+                }
+
+                const checkDays = Math.min(daysSinceStart, windowSizeDays);
+                const cutoffMs = todayMs - (checkDays - 1) * 24 * 60 * 60 * 1000;
+
+                const activeDaysCount = dailySnapshots.filter(s => {
+                    const sMs = new Date(s.date).getTime();
+                    return sMs >= cutoffMs && sMs <= todayMs && s.totalAttempts > 0;
+                }).length;
+
+                attendanceStats = {
+                    activeDays: activeDaysCount,
+                    targetDays,
+                    windowDays: checkDays,
+                    isProportional,
+                    isMet: activeDaysCount >= targetDays,
+                };
+            }
+        } catch (e) {
+            console.warn('⚠️ [AnalyticsService] 計算活躍天數失敗:', e);
+        }
+
         // 步驟 7：最終分析
         const result = analyzeStudent(attempts, profile, wordMap, {
             weakWordsWindowDays: 7,
@@ -369,9 +415,8 @@ export class AnalyticsService {
         result.customSpeechFloor = customSpeechFloor;
         result.timeZone = studentTimeZone;
         result.dataSource = attemptsSource;
-        
-        // 🔥 注入最後一次配額狀態
         result.recentQuotaStats = recentQuotaStats;
+        result.attendanceStats = attendanceStats; // 🔥 注入
 
         console.log(`✅ [AnalyticsService] "${displayId}" 完成（attempts 來源：${attemptsSource}）`);
         return result;

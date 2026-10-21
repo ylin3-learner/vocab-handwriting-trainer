@@ -38,6 +38,9 @@ interface FormState {
   timeLimitSeconds: number;
   handwritingMode: HandwritingMode;
   competitionMode: boolean;
+  // 🔥 新增
+  minActiveDays: number | undefined;
+  windowSizeDays: number | undefined;
 }
 
 const emptyForm = (): FormState => ({
@@ -58,8 +61,12 @@ const emptyForm = (): FormState => ({
   timeLimitSeconds: QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS / 1000,
   handwritingMode: HandwritingLockPolicy.DEFAULT_MODE,
   competitionMode: false,
+  // 🔥 新增
+  minActiveDays: undefined,
+  windowSizeDays: undefined,
 });
 
+// ... (FOCUS_LABEL, generateAutoName, formatTarget, isPersonal, getCompetitionStatus 保持不變) ...
 const FOCUS_LABEL: Record<ReviewFocus, string> = {
   strict: '🎯 精準複習',
   balanced: '⚖️ 均衡練習',
@@ -81,9 +88,6 @@ function isPersonal(className: string | null): boolean {
   return !!className && className.includes('_');
 }
 
-/**
- * 🔥 計算比賽模式狀態（與快取過期同一套思路）。
- */
 function getCompetitionStatus(a: Assignment): {
   label: string;
   color: string;
@@ -232,6 +236,9 @@ export const AssignmentManager: React.FC = () => {
       timeLimitMs: form.timeLimitSeconds * 1000,
       handwritingMode: form.handwritingMode,
       competitionMode: form.competitionMode || undefined,
+      // 🔥 新增
+      minActiveDays: form.minActiveDays,
+      windowSizeDays: form.windowSizeDays,
     };
 
     try {
@@ -277,6 +284,9 @@ export const AssignmentManager: React.FC = () => {
       timeLimitSeconds: (a.timeLimitMs ?? QuizTimingPolicy.DEFAULT_TIME_LIMIT_MS) / 1000,
       handwritingMode: a.handwritingMode ?? HandwritingLockPolicy.DEFAULT_MODE,
       competitionMode: a.competitionMode ?? false,
+      // 🔥 新增
+      minActiveDays: a.minActiveDays,
+      windowSizeDays: a.windowSizeDays,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -483,6 +493,30 @@ export const AssignmentManager: React.FC = () => {
               </div>
             )}
 
+            {/* 🔥 新增：出席率設定 */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: '0.9rem' }}>目標活躍天數</label>
+                <input
+                  type="number"
+                  placeholder="例如 5"
+                  value={form.minActiveDays ?? ''}
+                  onChange={(e) => setForm({ ...form, minActiveDays: e.target.value ? Number(e.target.value) : undefined })}
+                  style={{ width: '100%', padding: '0.5rem' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: '0.9rem' }}>計算視窗(天)</label>
+                <input
+                  type="number"
+                  placeholder="例如 7"
+                  value={form.windowSizeDays ?? ''}
+                  onChange={(e) => setForm({ ...form, windowSizeDays: e.target.value ? Number(e.target.value) : undefined })}
+                  style={{ width: '100%', padding: '0.5rem' }}
+                />
+              </div>
+            </div>
+
             {/* 配額用盡後的行為 */}
             <div style={{ marginTop: '0.75rem' }}>
               <label style={{ fontSize: '0.9rem' }}>配額用盡後</label>
@@ -511,7 +545,6 @@ export const AssignmentManager: React.FC = () => {
               style={{ width: '100%', padding: '0.5rem' }}
             >
               {QuizTimingPolicy.PRESETS_SECONDS.map((sec) => {
-                // 根據秒數給予不同的標籤提示
                 let label = `${sec} 秒`;
                 if (sec === 6) label += '（極限特訓 - 超額訓練）';
                 else if (sec === 7) label += '（超額訓練 - 模擬高壓）';
@@ -528,7 +561,6 @@ export const AssignmentManager: React.FC = () => {
               })}
             </select>
 
-            {/* 🔥 超額訓練視覺警告 */}
             {form.timeLimitSeconds <= 7 && (
               <small style={{
                 color: '#dc3545',
@@ -559,7 +591,7 @@ export const AssignmentManager: React.FC = () => {
             </small>
           </div>
 
-          {/* 🔥 比賽模式 */}
+          {/* 比賽模式 */}
           <div style={{ gridColumn: '1 / -1' }}>
             <label>🏁 比賽模式</label>
             <div style={{
@@ -729,6 +761,7 @@ export const AssignmentManager: React.FC = () => {
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>指派對象</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>目標等級</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>每日題數</th>
+              <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>活躍要求</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>配額後</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>時限</th>
               <th style={{ padding: '10px', borderBottom: '2px solid #dee2e6' }}>手寫</th>
@@ -784,6 +817,12 @@ export const AssignmentManager: React.FC = () => {
                     {a.targetLevel ? `L${a.targetLevel}` : '自動'}
                   </td>
                   <td style={{ padding: '10px' }}>{a.dailyQuota}</td>
+                  {/* 🔥 新增顯示 */}
+                  <td style={{ padding: '10px', fontSize: '0.85rem' }}>
+                    {a.minActiveDays && a.windowSizeDays 
+                      ? `${a.minActiveDays} / ${a.windowSizeDays} 天` 
+                      : '—'}
+                  </td>
                   <td style={{ padding: '10px', fontSize: '0.85rem' }}>
                     {a.quotaExceededBehavior === 'continue' ? '📚 加強' : '🛑 停止'}
                   </td>

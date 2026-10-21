@@ -43,12 +43,11 @@ export interface Assignment {
   quotaExceededBehavior?: QuotaExceededBehavior;
   timeLimitMs?: number;
   handwritingMode?: HandwritingMode;
-  /**
-   * 🔥 比賽模式：凍結 DDA 並強制從目標等級出題。
-   *
-   * 生命週期由 endDate 控制——作業過期後 selectActiveAssignment
-   * 自動排除，QuizOrchestrator 回到一般模式，DDA 自然恢復。
-   */
+  
+  // 🔥 新增：出席率設定
+  minActiveDays?: number;
+  windowSizeDays?: number;
+
   competitionMode?: boolean;
 }
 
