@@ -44,7 +44,8 @@ export class AnalyticsService {
     private wordRepository = new FirestoreWordRepository();
     private assignmentService = new AssignmentService(); // 🔥 初始化
 
-    private static readonly RECENT_ATTEMPTS_LIMIT = 100;
+    // 把常數改為 101 (多抓一筆作為探針)
+    private static readonly RECENT_ATTEMPTS_LIMIT = 101;
     private static readonly RECENT_SNAPSHOTS_LIMIT = 30;
 
     async getAllClassStats(): Promise<ClassStats[]> {
@@ -271,14 +272,18 @@ export class AnalyticsService {
             const quotaDate = stateData?.quotaDate; // 例如 "2026-10-21"
 
             if (targetQuota > 0 && quotaDate) {
-                // 直接從我們已經拉下來的 attempts 陣列中，過濾出「配額當天」的紀錄
-                const answeredCount = attempts.filter(a => {
+                const todayAttempts = attempts.filter(a => {
                     if (!a.timestamp) return false;
                     const localDate = getLocalDateString(new Date(a.timestamp), studentTimeZone ?? 'Asia/Taipei');
                     return localDate === quotaDate;
-                }).length;
+                });
 
-                // 判斷狀態
+                // 因為上限是 101，如果當天超過 100 題，就會抓到 101 筆
+                const answeredCount = todayAttempts.length;
+
+                // 只有當抓到的筆數大於 100 (也就是 101) 時，才判定為被截斷
+                const isCapped = todayAttempts.length > 100;
+
                 let status: 'completed' | 'incomplete' = 'incomplete';
                 if (answeredCount >= targetQuota) {
                     status = 'completed';
@@ -286,9 +291,10 @@ export class AnalyticsService {
 
                 recentQuotaStats = {
                     date: quotaDate,
-                    answeredCount: answeredCount,
+                    answeredCount: isCapped ? 100 : answeredCount, // 如果被截斷，顯示 100，讓 UI 加上 +
                     targetQuota: targetQuota,
                     status,
+                    isCapped,
                 };
             }
         } catch (e) {
