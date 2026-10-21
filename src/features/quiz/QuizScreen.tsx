@@ -5,30 +5,12 @@ import { QuizQuestion } from './QuizOrchestrator';
 import { Countdown } from './Countdown';
 import { HandwritingCanvas, HandwritingCanvasRef } from './HandwritingCanvas';
 import { maskWordInSentence } from '../../domain/string/maskWord';
+import type { SessionExitReason } from '../../services/storage/ProgressStore';
 
 const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 120;
-
-/**
- * cancel() 後等待的毫秒數。
- * Chrome 的 speechSynthesis.cancel() 是非同步的，
- * 立刻 speak() 可能被忽略或排在舊語音之後，造成殘留。
- */
 const SPEECH_CANCEL_DELAY_MS = 100;
-
-/**
- * 🔥 語音保險時間（毫秒）。
- * 若語音的 onend / onerror 在這麼久內都沒觸發，
- * 強制啟動倒數，避免學生卡死。
- */
 const SPEECH_FALLBACK_TIMEOUT_MS = 8000;
-
-/**
- * 答對（或 Placement 模式）自動跳到下一題的延遲。
- *
- * 普通模式答錯時不會自動跳——會等待學生主動按下「下一題」按鈕，
- * 讓學生有時間看清楚正確答案。
- */
 const AUTO_ADVANCE_DELAY_MS = 1200;
 
 async function callGoogleIME(trace: number[][][], language: string = 'en'): Promise<string[]> {
@@ -37,41 +19,18 @@ async function callGoogleIME(trace: number[][][], language: string = 'en'): Prom
     const ys = (stroke[1] || []).map(y => y * CANVAS_HEIGHT);
     return [xs, ys, []];
   });
-
   const data = JSON.stringify({
     options: 'enable_pre_space',
-    requests: [
-      {
-        writing_guide: {
-          writing_area_width: CANVAS_WIDTH,
-          writing_area_height: CANVAS_HEIGHT,
-        },
-        ink: scaledTrace,
-        language: language,
-      },
-    ],
+    requests: [{ writing_guide: { writing_area_width: CANVAS_WIDTH, writing_area_height: CANVAS_HEIGHT }, ink: scaledTrace, language }],
   });
-
   try {
-    const response = await fetch(
-      'https://www.google.com.tw/inputtools/request?ime=handwriting&app=mobilesearch&cs=1&oe=UTF-8',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: data,
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
+    const response = await fetch('https://www.google.com.tw/inputtools/request?ime=handwriting&app=mobilesearch&cs=1&oe=UTF-8', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data,
+    });
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const result = await response.json();
     if (result && result.length > 1 && result[1] && result[1][0]) {
-      const candidates = result[1][0][1];
-      if (candidates && candidates.length > 0) {
-        return candidates;
-      }
+      return result[1][0][1] || [];
     }
     return [];
   } catch (error) {
@@ -85,10 +44,7 @@ interface QuizScreenProps {
   onSessionEnd: () => void;
 }
 
-export const QuizScreen: React.FC<QuizScreenProps> = ({
-  orchestrator,
-  onSessionEnd,
-}) => {
+export const QuizScreen: React.FC<QuizScreenProps> = ({ orchestrator, onSessionEnd }) => {
   const [question, setQuestion] = useState<QuizQuestion | null>(null);
   const [snapshotUrl, setSnapshotUrl] = useState<string | undefined>(undefined);
   const [status, setStatus] = useState<'idle' | 'answering' | 'submitted' | 'done'>('idle');
@@ -96,134 +52,78 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [storageError, setStorageError] = useState<boolean>(false);
   const [dailyProgress, setDailyProgress] = useState<{ answered: number; max: number }>({ answered: 0, max: 0 });
-
-  // 🔥 新增：倒數是否已啟動（語音結束後才 true）
   const [countdownStarted, setCountdownStarted] = useState(false);
-
-  // 🔥 新增：是否等待學生按「下一題」才繼續
-  //    情境：普通模式答錯時，阻塞等學生看清楚正確答案
   const [waitingForNext, setWaitingForNext] = useState(false);
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [isEndingSession, setIsEndingSession] = useState(false);
 
   const startTimeRef = useRef<number>(0);
   const timedOutRef = useRef<boolean>(false);
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const canvasRef = useRef<HandwritingCanvasRef>(null);
   const submitLockRef = useRef<boolean>(false);
-
   const hasInitializedRef = useRef<boolean>(false);
   const speechIdRef = useRef<number>(0);
-
-  // 🔥 防止 onEnd 被重複呼叫
   const countdownStartedRef = useRef<boolean>(false);
-
-  // 🔥 語音保險計時器
   const speechFallbackTimerRef = useRef<number | null>(null);
 
-  const cancelSpeech = () => {
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+  // 🔥 新增：訂閱即時進度（工業級做法 B）
+  useEffect(() => {
+    if (orchestrator.subscribeToProgress) {
+      const unsubscribe = orchestrator.subscribeToProgress((answered, max) => {
+        // 這裡的 answered 就是從 dailySnapshots.totalAttempts 來的，絕對精準
+        setDailyProgress({ answered, max });
+      });
+      return () => unsubscribe();
     }
-    // 🔥 清除保險計時器
+  }, [orchestrator]);
+
+  const cancelSpeech = () => {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
     if (speechFallbackTimerRef.current !== null) {
       window.clearTimeout(speechFallbackTimerRef.current);
       speechFallbackTimerRef.current = null;
     }
   };
 
-  /**
-   * 🔥 啟動倒數（冪等：多次呼叫只生效一次）
-   */
   const startCountdown = () => {
     if (countdownStartedRef.current) return;
     countdownStartedRef.current = true;
     setCountdownStarted(true);
-    console.log('⏱️ [QuizScreen] 倒數啟動');
   };
 
-  /**
-   * 播放單字 + 英文例句。
-   *
-   * @param word 單字
-   * @param sentence 例句
-   * @param rate 播放速度（1.0 = 標準）
-   * @param onEnd 語音結束（或無法播放）時的回調。重聽時不傳。
-   */
-  const speakWord = async (
-    word: string,
-    sentence: string,
-    rate: number,
-    onEnd?: () => void
-  ) => {
+  const speakWord = async (word: string, sentence: string, rate: number, onEnd?: () => void) => {
     const myId = ++speechIdRef.current;
-
-    // 🔥 瀏覽器不支援語音 → 立刻觸發 onEnd
-    if (!window.speechSynthesis) {
-      onEnd?.();
-      return;
-    }
-
+    if (!window.speechSynthesis) { onEnd?.(); return; }
     window.speechSynthesis.cancel();
     await new Promise(resolve => setTimeout(resolve, SPEECH_CANCEL_DELAY_MS));
+    if (myId !== speechIdRef.current) return;
+    if (!window.speechSynthesis) { onEnd?.(); return; }
 
-    if (myId !== speechIdRef.current) {
-      console.log(`🔇 [speakWord] 跳過過期語音：${word}`);
-      return;
-    }
-    if (!window.speechSynthesis) {
-      onEnd?.();
-      return;
-    }
-
-    const text = `${word}. ${sentence}`;
-
-    const utterance = new SpeechSynthesisUtterance(text);
+    const utterance = new SpeechSynthesisUtterance(`${word}. ${sentence}`);
     utterance.lang = 'en-US';
     utterance.rate = rate;
 
-    // 🔥 語音正常結束
     utterance.onend = () => {
-      if (myId !== speechIdRef.current) {
-        // 過期語音（已被新的覆蓋），忽略
-        return;
-      }
-      console.log(`🔊 [speakWord] 語音結束：${word}`);
-      // 清除保險計時器
-      if (speechFallbackTimerRef.current !== null) {
-        window.clearTimeout(speechFallbackTimerRef.current);
-        speechFallbackTimerRef.current = null;
-      }
-      onEnd?.();
-    };
-
-    // 🔥 語音錯誤
-    utterance.onerror = (e) => {
-      if (e.error !== 'interrupted') {
-        console.warn('🔇 語音播放錯誤:', e.error);
-      }
       if (myId !== speechIdRef.current) return;
-
-      // 被中斷（例如換題、重聽）不算錯誤，不觸發 onEnd
-      if (e.error === 'interrupted') return;
-
-      // 其他錯誤 → 也要啟動倒數
-      if (speechFallbackTimerRef.current !== null) {
-        window.clearTimeout(speechFallbackTimerRef.current);
-        speechFallbackTimerRef.current = null;
-      }
+      if (speechFallbackTimerRef.current !== null) { window.clearTimeout(speechFallbackTimerRef.current); speechFallbackTimerRef.current = null; }
       onEnd?.();
     };
 
-    console.log(`🔊 [speakWord] 播放：${word}（rate=${rate}）`);
+    utterance.onerror = (e) => {
+      if (e.error !== 'interrupted') console.warn('🔇 語音播放錯誤:', e.error);
+      if (myId !== speechIdRef.current) return;
+      if (e.error === 'interrupted') return;
+      if (speechFallbackTimerRef.current !== null) { window.clearTimeout(speechFallbackTimerRef.current); speechFallbackTimerRef.current = null; }
+      onEnd?.();
+    };
+
     speechRef.current = utterance;
     window.speechSynthesis.speak(utterance);
 
-    // 🔥 保險：若 N 秒內 onend/onerror 都沒觸發，強制啟動
     if (onEnd) {
-      if (speechFallbackTimerRef.current !== null) {
-        window.clearTimeout(speechFallbackTimerRef.current);
-      }
+      if (speechFallbackTimerRef.current !== null) window.clearTimeout(speechFallbackTimerRef.current);
       speechFallbackTimerRef.current = window.setTimeout(() => {
-        console.warn(`⚠️ [speakWord] 語音 ${SPEECH_FALLBACK_TIMEOUT_MS}ms 未回應，強制啟動倒數`);
         speechFallbackTimerRef.current = null;
         onEnd();
       }, SPEECH_FALLBACK_TIMEOUT_MS);
@@ -232,20 +132,12 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
   const loadNext = async () => {
     cancelSpeech();
-
-    // 🔥 重置「等待下一題」狀態
     setWaitingForNext(false);
-
     const q = await orchestrator.nextQuestion();
-    setDailyProgress(orchestrator.getDailyProgress());
 
     if (!q) {
       if (orchestrator.finalizeSession) {
-        try {
-          await orchestrator.finalizeSession();
-        } catch (e) {
-          console.warn('⚠️ finalizeSession 失敗:', e);
-        }
+        try { await orchestrator.finalizeSession(); } catch (e) { console.warn('⚠️ finalizeSession 失敗:', e); }
       }
       setStatus('done');
       return;
@@ -256,82 +148,74 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     setResult(null);
     setStorageError(false);
     setStatus('answering');
-
-    // 🔥 重置倒數狀態
     countdownStartedRef.current = false;
     setCountdownStarted(false);
-
-    // 🔥 elapsedMs 起點：從語音開始前
     startTimeRef.current = Date.now();
-
     timedOutRef.current = false;
     submitLockRef.current = false;
 
-    // 🔥 播放語音，語音結束時啟動倒數
-    await speakWord(
-      q.word.word,
-      q.word.sentence,
-      orchestrator.getSpeechRate(),
-      () => startCountdown()
-    );
+    await speakWord(q.word.word, q.word.sentence, orchestrator.getSpeechRate(), () => startCountdown());
   };
 
-  // 🔥 新增：防止學生「未完成每日額度」就烙跑
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // 條件：有設定配額 (max > 0)、還沒寫完 (answered < max)、且不在 done 狀態
-      const isUnfinished =
-        dailyProgress.max > 0 &&
-        dailyProgress.answered < dailyProgress.max &&
-        status !== 'done';
-
+      const isUnfinished = dailyProgress.max > 0 && dailyProgress.answered < dailyProgress.max && status !== 'done';
       if (isUnfinished) {
         e.preventDefault();
-        // 現代瀏覽器會忽略自訂文字，顯示預設的「確定要離開此網站嗎？」
         e.returnValue = '您尚未完成今日的練習額度，確定要離開嗎？';
         return e.returnValue;
       }
     };
-
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [dailyProgress, status]);
 
   useEffect(() => {
-    if (hasInitializedRef.current) {
-      console.log('⚠️ [QuizScreen] useEffect 被觸發第二次，跳過');
-      return;
-    }
+    if (hasInitializedRef.current) return;
     hasInitializedRef.current = true;
-
     loadNext();
-
-    return () => {
-      cancelSpeech();
-    };
+    return () => cancelSpeech();
   }, []);
 
-  /**
-   * 「🐢 重聽一次（慢速）」按鈕處理。
-   *
-   * 🔥 注意：重聽不會重新啟動倒數（不傳 onEnd）。
-   */
   const handleReplaySlow = () => {
     if (!question || status !== 'answering') return;
     const floorRate = orchestrator.getSpeechFloorRate();
     if (floorRate === null) return;
-    // 🔥 不傳 onEnd：重聽不影響倒數
     void speakWord(question.word.word, question.word.sentence, floorRate);
   };
 
-  /**
-   * 🔥 學生按下「下一題」按鈕時呼叫。
-   * 只在普通模式答錯、阻塞狀態下顯示。
-   */
   const handleNextAfterWrong = () => {
     if (!waitingForNext) return;
     setWaitingForNext(false);
     void loadNext();
+  };
+
+  const handleExitClick = () => {
+    setShowExitModal(true);
+    cancelSpeech();
+  };
+
+  const handleConfirmExit = async (reason: SessionExitReason) => {
+    setIsEndingSession(true);
+    try {
+      if (orchestrator.endContinueSession) {
+        await orchestrator.endContinueSession(reason);
+      }
+      setShowExitModal(false);
+      setStatus('done');
+    } catch (e) {
+      console.error('結束練習失敗:', e);
+      alert('結束失敗，請重試');
+    } finally {
+      setIsEndingSession(false);
+    }
+  };
+
+  const handleCancelExit = () => {
+    setShowExitModal(false);
+    if (question && status === 'answering') {
+      void speakWord(question.word.word, question.word.sentence, orchestrator.getSpeechRate(), () => startCountdown());
+    }
   };
 
   const handleSubmit = async () => {
@@ -352,55 +236,19 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
       if (trace.length > 0 && trace[0] && Array.isArray(trace[0][0]) && trace[0][0].length > 0) {
         const candidates = await callGoogleIME(trace, 'en');
-        console.log('🔍 [IME] 候選字：', candidates);
-
         if (candidates.length > 0) {
-          const exactMatch = candidates.find(
-            (cand) => cand.toLowerCase() === question.word.word.toLowerCase()
-          );
+          const exactMatch = candidates.find((cand) => cand.toLowerCase() === question.word.word.toLowerCase());
           recognizedText = exactMatch || candidates[0] || '';
-
-          // 🔥 記錄是否為「強制匹配目標字」
-          //
-          // 為什麼重要：
-          //   當 exactMatch 存在，代表 IME 的候選清單中出現目標字。
-          //   但這不代表學生真的寫了目標字——可能只是 IME 根據字典
-          //   權重把目標字排進來。
-          //
-          //   訓練資料時：
-          //     forcedMatch = false → 高信賴度正樣本（IME 直接辨識出目標字）
-          //     forcedMatch = true  → 中信賴度（IME 候選中有目標字，但不確定學生是否真的寫對）
-          //
-          //   若沒有這個訊號，訓練時無法區分這兩種樣本，會把
-          //   「學生寫了 appease 但被系統選成 appear」的樣本當成
-          //   「學生真的寫了 appear」來訓練，污染訓練集。
           forcedMatch = exactMatch !== undefined;
-
-          // 🔥 記錄候選清單的前 5 個
-          //   訓練後可以分析：哪些候選組合代表「辨識信心低」
           candidatesSnapshot = candidates.slice(0, 5);
         }
       }
 
-      // 🔥 elapsedMs：從語音開始到提交（含語音時間）
       const elapsedMs = Date.now() - startTimeRef.current;
-      console.log('🔍 [TIMING]', {
-        word: question.word.word,
-        recognizedText,
-        elapsedMs,
-        timedOut: timedOutRef.current,
-        countdownStarted: countdownStartedRef.current,
-      });
-
       const submission = {
-        recognizedText,
-        elapsedMs,
-        timedOut: timedOutRef.current,
-        snapshotImageUrl: snapshotUrl || '',
-        // 🔥 新增：IME 辨識的品質訊號
-        forcedMatch,
-        candidatesSnapshot,
-        rawStrokeData: rawTrace.length > 0 ? rawTrace : undefined, // 🔥 新增
+        recognizedText, elapsedMs, timedOut: timedOutRef.current,
+        snapshotImageUrl: snapshotUrl || '', forcedMatch, candidatesSnapshot,
+        rawStrokeData: rawTrace.length > 0 ? rawTrace : undefined,
       };
 
       let isCorrect = false;
@@ -409,7 +257,6 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         const answerResult = await orchestrator.submitAnswer(question.word.id, submission);
         isCorrect = answerResult.grading.isCorrect;
       } catch (saveError) {
-        console.warn('⚠️ 提交答案儲存失敗，但辨識成功:', saveError);
         saveFailed = true;
         isCorrect = recognizedText.toLowerCase() === question.word.word.toLowerCase();
         setStorageError(true);
@@ -421,25 +268,13 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
 
       setResult({ correct: isCorrect, message });
 
-      // ============================================================
-      // 🔥 決定是否自動跳下一題
-      //
-      // 規則：
-      //   答對 + 任何模式        → 自動跳（1.2 秒）
-      //   答錯 + Placement 模式  → 自動跳（模擬考試節奏）
-      //   答錯 + 普通模式        → 阻塞，等學生按「下一題」
-      // ============================================================
       const isPlacementMode = orchestrator.getDisplayInfo().mode === 'placement';
-
       if (!isCorrect && !isPlacementMode) {
-        // 普通模式答錯：阻塞，等學生主動按鈕
         setWaitingForNext(true);
       } else {
-        // 其他情況：自動跳
         setTimeout(() => loadNext(), AUTO_ADVANCE_DELAY_MS);
       }
     } catch (error) {
-      console.error('提交錯誤:', error);
       setResult({ correct: false, message: '發生錯誤，請重試' });
       setStatus('answering');
       submitLockRef.current = false;
@@ -451,18 +286,12 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
   const handleTimeout = () => {
     if (timedOutRef.current) return;
     timedOutRef.current = true;
-    if (question && status === 'answering') {
-      handleSubmit();
-    }
+    if (question && status === 'answering') handleSubmit();
   };
 
   if (status === 'done') {
     const displayInfo = orchestrator.getDisplayInfo();
-    const doneMessage = displayInfo.mode === 'placement'
-      ? '🎉 程度鑑定完成！'
-      : '🎉 今日配額已完成！';
-
-    // 🔥 判斷是否顯示「繼續練習」按鈕
+    const doneMessage = displayInfo.mode === 'placement' ? '🎉 程度鑑定完成！' : '🎉 今日配額已完成！';
     const canContinue = orchestrator.canOfferContinue?.() ?? false;
 
     const handleContinue = () => {
@@ -474,158 +303,65 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
     return (
       <div style={{ textAlign: 'center', padding: '2rem' }}>
         <h2>{doneMessage}</h2>
-        {storageError && (
-          <p style={{ color: '#ffc107' }}>⚠️ 部分資料儲存失敗，但已保留在本地，將自動同步</p>
-        )}
-
-        <div style={{
-          marginTop: '1.5rem',
-          display: 'flex',
-          gap: '0.75rem',
-          justifyContent: 'center',
-          flexWrap: 'wrap',
-        }}>
+        {storageError && <p style={{ color: '#ffc107' }}>⚠️ 部分資料儲存失敗，但已保留在本地，將自動同步</p>}
+        <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
           {canContinue && (
-            <button
-              onClick={handleContinue}
-              style={{
-                padding: '0.75rem 2rem',
-                fontSize: '1.1rem',
-                background: '#28a745',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 'bold',
-              }}
-            >
+            <button onClick={handleContinue} style={{ padding: '0.75rem 2rem', fontSize: '1.1rem', background: '#28a745', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
               📚 繼續練習
             </button>
           )}
-
-          <button
-            onClick={onSessionEnd}
-            style={{
-              padding: '0.75rem 2rem',
-              fontSize: '1.1rem',
-              background: canContinue ? '#6c757d' : '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-            }}
-          >
+          <button onClick={onSessionEnd} style={{ padding: '0.75rem 2rem', fontSize: '1.1rem', background: canContinue ? '#6c757d' : '#007bff', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
             返回登入
           </button>
         </div>
-
-        {canContinue && (
-          <p style={{ color: '#6c757d', marginTop: '1rem', fontSize: '0.9rem' }}>
-            已達建議題數。想多練一些可以按「繼續練習」。
-          </p>
-        )}
+        {canContinue && <p style={{ color: '#6c757d', marginTop: '1rem', fontSize: '0.9rem' }}>已達建議題數。想多練一些可以按「繼續練習」。</p>}
       </div>
     );
   }
 
-  if (!question) {
-    return <div style={{ padding: '2rem', textAlign: 'center' }}>載入中...</div>;
-  }
+  if (!question) return <div style={{ padding: '2rem', textAlign: 'center' }}>載入中...</div>;
 
   const displayInfo = orchestrator.getDisplayInfo();
   const speechRate = orchestrator.getSpeechRate();
   const speechFloorRate = orchestrator.getSpeechFloorRate();
   const showReplayButton = speechFloorRate !== null && speechFloorRate < speechRate;
+  const isContinueMode = displayInfo.title.includes('課後加強');
 
   return (
     <div style={{ maxWidth: '700px', margin: '0 auto', padding: '1rem' }}>
-      {/* iOS 靜音開關提示 */}
       {/iPad|iPhone|iPod/.test(navigator.userAgent) && (
-        <div style={{
-          background: '#fff3cd',
-          border: '1px solid #ffeeba',
-          color: '#856404',
-          padding: '8px 12px',
-          borderRadius: '4px',
-          marginBottom: '12px',
-          fontSize: '0.85rem',
-          textAlign: 'center',
-        }}>
-          🔔 若聽不到聲音，請確認裝置側邊的靜音開關（或控制中心的鈴鐺圖示）已關閉
+        <div style={{ background: '#fff3cd', border: '1px solid #ffeeba', color: '#856404', padding: '8px 12px', borderRadius: '4px', marginBottom: '12px', fontSize: '0.85rem', textAlign: 'center' }}>
+          🔔 若聽不到聲音，請確認裝置側邊的靜音開關已關閉
         </div>
       )}
 
       {displayInfo.showProgress && (
-        <div style={{
-          padding: '0.5rem 1rem',
-          background: displayInfo.mode === 'placement' ? '#fff3cd' : '#e7f3ff',
-          borderRadius: '6px',
-          marginBottom: '1rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          fontSize: '0.9rem',
-          border: displayInfo.mode === 'placement' ? '1px solid #ffeeba' : '1px solid #b8daff',
-        }}>
+        <div style={{ padding: '0.5rem 1rem', background: displayInfo.mode === 'placement' ? '#fff3cd' : '#e7f3ff', borderRadius: '6px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem', border: displayInfo.mode === 'placement' ? '1px solid #ffeeba' : '1px solid #b8daff' }}>
           <span>
             {displayInfo.mode === 'placement' ? '🎯' : '📋'} <strong>{displayInfo.title}</strong>
-            {displayInfo.subtitle && (
-              <span style={{ marginLeft: '0.5rem', color: '#6c757d', fontWeight: 'normal' }}>
-                {displayInfo.subtitle}
-              </span>
-            )}
+            {displayInfo.subtitle && <span style={{ marginLeft: '0.5rem', color: '#6c757d', fontWeight: 'normal' }}>{displayInfo.subtitle}</span>}
           </span>
           <span style={{ color: '#6c757d' }}>
-            {displayInfo.progressLabel}：{displayInfo.progressCurrent} / {displayInfo.progressTotal} 題
+            {displayInfo.progressLabel}：{dailyProgress.answered} / {dailyProgress.max} 題
           </span>
         </div>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ margin: 0 }}>{question.word.meaning}</h2>
-        {/* 🔥 傳入 started；語音結束後才啟動倒數 */}
-        <Countdown
-          key={question.word.id}
-          durationMs={question.timeLimitMs}
-          started={countdownStarted}
-          onTimeout={handleTimeout}
-        />
+        <Countdown key={question.word.id} durationMs={question.timeLimitMs} started={countdownStarted} onTimeout={handleTimeout} />
       </div>
 
-      <p style={{ color: '#666' }}>
-        例句：{status === 'submitted'
-          ? question.word.sentence
-          : maskWordInSentence(question.word.sentence, question.word.word)}
-      </p>
+      <p style={{ color: '#666' }}>例句：{status === 'submitted' ? question.word.sentence : maskWordInSentence(question.word.sentence, question.word.word)}</p>
 
       <div style={{ margin: '1rem 0' }}>
         <label>✍️ 請在手寫區寫下單字</label>
-        <HandwritingCanvas
-          ref={canvasRef}
-          key={question.word.id}
-          maxChars={question.word.word.length + 2}
-          onImageData={(data) => setSnapshotUrl(data)}
-          disabled={status !== 'answering'}
-          lockMode={orchestrator.getHandwritingMode()}
-        />
+        <HandwritingCanvas ref={canvasRef} key={question.word.id} maxChars={question.word.word.length + 2} onImageData={(data) => setSnapshotUrl(data)} disabled={status !== 'answering'} lockMode={orchestrator.getHandwritingMode()} />
       </div>
 
-      {/* 🔊 重聽按鈕（僅在提供下限時顯示） */}
       {showReplayButton && (
         <div style={{ marginBottom: '0.75rem' }}>
-          <button
-            onClick={handleReplaySlow}
-            disabled={status !== 'answering'}
-            style={{
-              padding: '0.5rem 1.25rem',
-              fontSize: '1rem',
-              background: status === 'answering' ? '#17a2b8' : '#ccc',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: status === 'answering' ? 'pointer' : 'default',
-            }}
-          >
+          <button onClick={handleReplaySlow} disabled={status !== 'answering'} style={{ padding: '0.5rem 1.25rem', fontSize: '1rem', background: status === 'answering' ? '#17a2b8' : '#ccc', color: '#fff', border: 'none', borderRadius: '8px', cursor: status === 'answering' ? 'pointer' : 'default' }}>
             🐢 重聽一次（慢速）
           </button>
         </div>
@@ -637,58 +373,51 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({
         </div>
       )}
 
-      <button
-        onClick={handleSubmit}
-        disabled={status !== 'answering' || isSubmitting}
-        style={{
-          padding: '0.75rem 2rem',
-          fontSize: '1.2rem',
-          background: (status === 'answering' && !isSubmitting) ? '#007bff' : '#ccc',
-          color: '#fff',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: (status === 'answering' && !isSubmitting) ? 'pointer' : 'default',
-        }}
-      >
+      <button onClick={handleSubmit} disabled={status !== 'answering' || isSubmitting} style={{ padding: '0.75rem 2rem', fontSize: '1.2rem', background: (status === 'answering' && !isSubmitting) ? '#007bff' : '#ccc', color: '#fff', border: 'none', borderRadius: '8px', cursor: (status === 'answering' && !isSubmitting) ? 'pointer' : 'default' }}>
         {isSubmitting ? '辨識中...' : '提交答案'}
       </button>
 
       {result && (
-        <div
-          style={{
-            marginTop: '1rem',
-            padding: '0.75rem',
-            background: result.correct ? '#d4edda' : '#f8d7da',
-            borderRadius: '6px',
-            fontSize: '1.2rem',
-          }}
-        >
+        <div style={{ marginTop: '1rem', padding: '0.75rem', background: result.correct ? '#d4edda' : '#f8d7da', borderRadius: '6px', fontSize: '1.2rem' }}>
           {result.message}
         </div>
       )}
 
-      {/* ============================================================
-          🔥 新增：普通模式答錯時，等待學生按「下一題」
-          其他情況不顯示（自動跳、或 Placement 模式）
-          ============================================================ */}
       {waitingForNext && (
-        <button
-          onClick={handleNextAfterWrong}
-          style={{
-            marginTop: '1rem',
-            padding: '0.75rem 2rem',
-            fontSize: '1.2rem',
-            background: '#007bff',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-            width: '100%',
-          }}
-        >
+        <button onClick={handleNextAfterWrong} style={{ marginTop: '1rem', padding: '0.75rem 2rem', fontSize: '1.2rem', background: '#007bff', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', width: '100%' }}>
           👉 下一題
         </button>
+      )}
+
+      {isContinueMode && (
+        <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+          <button onClick={handleExitClick} style={{ padding: '0.5rem 1.5rem', fontSize: '1rem', background: '#6c757d', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
+            🏁 結束課後練習
+          </button>
+        </div>
+      )}
+
+      {showExitModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: 'white', padding: '2rem', borderRadius: '12px', maxWidth: '400px', width: '90%', textAlign: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ marginTop: 0, color: '#333' }}>今天的練習辛苦了！</h3>
+            <p style={{ color: '#666', fontSize: '0.95rem' }}>想結束了嗎？請選擇一個原因：</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1.5rem' }}>
+              <button onClick={() => handleConfirmExit('mastered')} disabled={isEndingSession} style={{ padding: '0.75rem', background: '#d4edda', color: '#155724', border: '1px solid #c3e6cb', borderRadius: '8px', cursor: isEndingSession ? 'default' : 'pointer', fontWeight: 'bold' }}>
+                ✅ 我已經掌握今天的內容了
+              </button>
+              <button onClick={() => handleConfirmExit('fatigue')} disabled={isEndingSession} style={{ padding: '0.75rem', background: '#fff3cd', color: '#856404', border: '1px solid #ffeeba', borderRadius: '8px', cursor: isEndingSession ? 'default' : 'pointer', fontWeight: 'bold' }}>
+                🧠 大腦有點累了，需要休息
+              </button>
+              <button onClick={() => handleConfirmExit('time_limit')} disabled={isEndingSession} style={{ padding: '0.75rem', background: '#e2e3e5', color: '#383d41', border: '1px solid #d6d8db', borderRadius: '8px', cursor: isEndingSession ? 'default' : 'pointer', fontWeight: 'bold' }}>
+                ⏰ 時間不夠了，改天再練
+              </button>
+              <button onClick={handleCancelExit} disabled={isEndingSession} style={{ padding: '0.5rem', background: 'transparent', color: '#007bff', border: 'none', cursor: isEndingSession ? 'default' : 'pointer', marginTop: '0.5rem' }}>
+                繼續練習
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

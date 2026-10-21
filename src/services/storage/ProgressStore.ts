@@ -2,55 +2,34 @@
 import { ReviewState } from '../../types/word';
 import type { CorrectnessSignal } from '../../domain/grading/correctnessSignal';
 
+// 新增：學生退出課後練習的理由
+export type SessionExitReason =
+  | 'mastered'      // 已掌握
+  | 'fatigue'       // 認知超載/疲勞
+  | 'time_limit'    // 時間不夠
+  | 'other';        // 其他
+
 export interface AttemptRecord {
-  // === 既有欄位 ===
+  // ... (略，保持原本的 AttemptRecord 不變)
   studentId: string;
   wordId: string;
-  timestamp: string; // ISO
+  timestamp: string;
   recognizedText: string;
   isCorrect: boolean;
   responseTimeMs: number;
-  timeLimitMs?: number; // 新增：記錄當下作答的時限 (ms)
+  timeLimitMs?: number;
   snapshotImageUrl?: string;
-
-  // === Sprint 6-B 新增：資料品質訊號 (Data Quality Signals) ===
-  editDistance: number;          // Levenshtein 編輯距離
-  similarity: number;            // 歸一化相似度 (0~1)
-
-  // === Stage 2.5：教師儀表板用的複合識別碼 ===
-  // 格式：`${className}_${studentSeatNumber}_${studentName}`
-  // 若學生未填班級或座號，則為 undefined
+  editDistance: number;
+  similarity: number;
   studentDisplayId?: string;
-  
-  // 儲存當下的 SM-2 狀態快照 (供未來記憶曲線使用)
   snapshotEaseFactor: number;
   snapshotInterval: number;
-  
-  // 預留給未來單字庫版本管理
-  vocabVersion?: string;         // 例如 "v2026"
-
-  // 🔥 新增：把「事實」與「解讀」都持久化
-  //
-  // timedOut：原始事實，之前沒存，導致訓練資料無法區分
-  //           「寫對但超時」與「寫錯且沒超時」
-  // correctnessSignal：派生視圖，用於查詢與分流
-  //                    （反正 isCorrect 也存了，這是同類設計）
+  vocabVersion?: string;
   timedOut?: boolean;
   correctnessSignal?: CorrectnessSignal;
-
-  // 🔥 新增：IME 辨識的品質訊號
-  //
-  // forcedMatch：系統是否主動選中了目標字
-  //   false（或 undefined，舊資料）→ 高信賴度
-  //   true → 中信賴度（IME 候選中有目標字，但不確定學生是否真的寫對）
-  //
-  // candidatesSnapshot：IME 回傳的前 5 個候選字
-  //   訓練後可用於分析辨識信心分佈
   forcedMatch?: boolean;
   candidatesSnapshot?: string[];
-  // 新增：原始筆跡軌跡 (僅在答錯或超時時收集)
-  // 格式：[筆畫][點][x, y, timeOffsetMs, pressure]
-  rawStrokeData?: number[][][]; // 修正為三維陣列
+  rawStrokeData?: number[][][];
 }
 
 export interface ProgressStore {

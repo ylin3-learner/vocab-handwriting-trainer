@@ -2,6 +2,7 @@
 import { QuizQuestion, AnswerSubmission, SubmitAnswerResult } from './QuizOrchestrator';
 import { ActiveAssignment } from '../../services/assignment/AssignmentService';
 import type { HandwritingMode } from '../../domain/quiz/HandwritingLockPolicy';
+import type { SessionExitReason } from '../../services/storage/ProgressStore'; 
 
 /**
  * QuizScreen 需要的介面。
@@ -68,6 +69,16 @@ export interface QuizSessionApi {
   finalizeSession?(): Promise<void>;
 
   getHandwritingMode(): HandwritingMode; // 新增
+
+  canOfferContinue?: () => boolean;
+  continueSession?: () => void;
+  finalizeSession?: () => Promise<void>;
+  
+  // 新增：結束課後練習（記錄理由）
+  endContinueSession?: (reason: SessionExitReason) => Promise<void>;
+  
+  // 新增：訂閱即時進度更新
+  subscribeToProgress?: (callback: (answered: number, max: number) => void) => () => void;
 }
 
 export interface SessionDisplayInfo {
