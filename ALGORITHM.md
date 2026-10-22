@@ -17,6 +17,8 @@
 - [5. 時間閾值的實證防禦：7秒與5秒的認知邊界 (Empirical Defense of Time Thresholds)](#5-時間閾值的實證防禦7秒與5秒的認知邊界)
 - [6. 邊緣計算與資料一致性 (Edge Computing & Data Consistency)](#6-邊緣計算與資料一致性)
 
+- [7. 未來研究方向收斂率證明與隨機逼近 (Future Work: Convergence Rate & Stochastic Approximation)](#7-未來研究方向收斂率證明與隨機逼近-future-work-convergence-rate--stochastic-approximation)
+
 ---
 
 <a name="1-系統架構總覽"></a>
@@ -175,3 +177,37 @@ $$\mathbf{P}_{\text{select}} = (1-\alpha-\beta) \cdot \mathbb{M}(L_{\text{ceilin
 ### 6.2 即時同步與自我調節學習 (SRL)
 *   **`onSnapshot` 實時監聽**：解決多分頁/多裝置導致的進度不同步，學生端 UI 永遠與伺服器絕對一致。
 *   **SRL 退出機制**：允許學生在課後加強時，選擇「已掌握」、「疲勞」等理由安全退出，並將退出原因透過 `arrayUnion` 寫入 `studentStates`，作為後續分析學習動機的黃金數據。
+
+<a name="7-未來研究方向收斂率證明與隨機逼近 (Future Work: Convergence Rate & Stochastic Approximation)"></a>
+## 7. 未來研究方向：收斂率證明與隨機逼近 (Future Work: Convergence Rate & Stochastic Approximation)
+
+近期在真實教學現場的試點數據中，我們觀察到一個極具啟發性的現象：當系統進入「賽前模式（Exam Mode）」並觸發「日內微觀演練（Aggressive SM-2）」時，學生的正確率曲線在短短 3 天內，從約 50% 呈現非線性的陡峭收斂，直逼 85% 以上。
+
+這引發了一個核心的研究問題：**「我們該如何從數學上定義並證明這個系統的『收斂率（Convergence Rate）』？」**
+
+由於本系統的狀態轉移牽涉到人類認知的不確定性與隨機噪聲，無法直接推導出閉式解（Closed-form solution）。因此，未來的延伸研究將引入以下三種進階的統計與控制方法，來驗證系統的收斂性：
+
+### 7.1 經驗收斂曲線：基於蒙地卡羅模擬（Simulation-Based Evidence）
+我們將建立一個「虛擬學生產生器（Virtual Student Generator）」，從現有的 15,836 筆真實軌跡中萃取參數分佈（包含高能力、中能力與具備非單調能力漏洞的學習者模型）。
+*   **作法**：讓 10,000 個虛擬學生在模擬環境中跑完全體演算法。
+*   **學術價值**：繪製出系統難度在萬次運行下的**「經驗收斂曲線（Empirical Convergence Curve）」**。這在自適應測試（CAT）領域，屬於標準的 Simulation Study，能提供與數學證明等價的實證效力。
+
+### 7.2 隨機逼近理論：Robbins-Monro 演算法的穩定性背書 (Stochastic Approximation)
+本系統外層 DDA 的「非對稱滯後閘門（Asymmetric Hysteresis）」與「50 題冷卻鎖」，在數學上完美契合了 Robbins-Monro 隨機逼近演算法的核心條件。
+*   **理論框架**：只要系統的正向驅動（晉升）與反向驅動（降級）具備非對稱滯後設計，且隨機噪聲的期望值為有限值（Bounded），則整個系統的狀態軌跡在長週期下，必定會以機率 1（Almost Surely）收斂至學生的真實潛在能力（Latent Trait）附近。
+*   **未來目標**：我們將推導出系統狀態轉移矩陣的收斂速度（Rate of Convergence），為這套啟發式系統提供最底層的數學穩定度證明。
+
+### 7.3 無模型強化學習：將啟發式規則視為環境約束 (Model-Free RL Constraints)
+目前的參數（如 7 秒、5 秒、30 題窗口）是基於專家先驗與真實數據分佈所設定的靜態邊界。
+*   **環境定義**：在未來的擴充中，我們將把這套演算法定義為一個 **「無模型強化學習（Model-Free RL）的邊界環境」**。目前的啟發式規則，是在缺乏精確狀態轉移矩陣時，所架構出的防禦性控制律（Defensive Control Law）。
+*   **下一步**：未來的 AI 代理（Agent）可以利用 Q-Learning 或 Policy Gradient 演算法，直接透過學生的即時反饋，去動態學習與逼近最佳的參數配置（例如：自動將某位學生的晉升閾值從 7.0 秒校準為 6.2 秒），實現真正的個體化超參數尋優（Hyperparameter Tuning）。
+
+### 7.4 與大規模貝氏探索框架的比較與權衡 (Trade-off with Bayesian Exploration)
+
+在近期的學術研究中，如 Duolingo 提出的 [S2A3 框架](https://aclanthology.org/2026.aimecon-main.8.pdf)，採用了 Thompson Sampling 來解決高風險 CAT 中的「題目冷啟動與曝光控制」問題。本系統在架構權衡（Trade-off）上，選擇了不同的路徑：
+
+*   **確定性 vs. 機率性**：S2A3 利用題目參數的後驗不確定性來驅動探索；而本系統基於邊緣計算（Edge Computing）與教育可解釋性（Explainability）的嚴格要求，採用了「基於專家先驗的確定性控制律」。
+*   **輕量級的替代方案**：在 Cold Start 階段，本系統不依賴耗時的貝氏後驗更新，而是透過「大考中心分級（Static Expert Prior）」與「\(i+1\) 探針機制」來實現啟發式的探索與利用（Exploration-Exploitation）平衡。我們的 `explorationRate` 實質上扮演了 Epsilon-Greedy 策略的角色。
+*   **未來演進**：未來的擴充可借鑒 S2A3 的核心精神，在不破壞現有可解釋性的前提下，將伺服器端的 Thompson Sampling 作為「離線題目難度校準器」，動態更新本系統前端使用的難度先驗常數，實現雲端與邊緣端的最佳互補。
+
+> **"The system's current architecture serves as a highly robust heuristic baseline. By coupling empirical simulation (MCMC) with formal stochastic approximation (Robbins-Monro), we aim to mathematically prove that the asymmetrical hysteresis design guarantees convergence to the learner's true latent trait under bounded environmental noise."**
