@@ -2,6 +2,8 @@
 
 **🌐 Language / 語言：[English](./README.md) ・ [繁體中文](./README.zh-TW.md)**
 
+**[Algorithm core](./ALGORITHM.md)**
+
 An adaptive, offline-friendly vocabulary training platform built to help a small cohort of
 middle-school students prepare for a live English vocabulary competition ("英語單字王比賽").
 The system pairs a spaced-repetition engine (SM-2) with speech prompts, handwriting capture
