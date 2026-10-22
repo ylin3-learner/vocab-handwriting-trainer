@@ -2,6 +2,9 @@
 
 本文件詳細記錄了「英語單字王訓練系統」背後的底層演算法架構、數學模型與認知科學防禦機制。本系統並非傳統的靜態測驗，而是一台**「具備抗噪與防震能力的雙閉環認知加速器（Dual-Loop Cognitive Accelerator）」**。
 
+> **📝 學術框架聲明 (Framing Statement)**
+> 本白皮書採用控制理論與計量心理學的原則作為**啟發式隱喻與概念框架（Heuristic Metaphors and Conceptual Frameworks）**，來解釋系統的離散工程實作。本系統並不聲稱能求解連續微分方程，而是透過經驗模擬與真實數據，展示其強健的收斂性與抗噪能力。
+
 **[📖 回主 README](./README.zh-TW.md)**
 
 ---
@@ -102,7 +105,7 @@ graph TD
 
 ## 2. 外層控制迴圈：全域能力估計與防震盪
 
-為了防止系統在臨界點產生「抖動與反饋迴圈共振（System Chattering & Positive Feedback Resonance）」，我們引入了控制工程中的**雙重阻尼濾波器（Dual-Stage Damping Filter）**。
+為了防止系統在臨界點產生「抖動與反饋迴圈共振（System Chattering & Positive Feedback Resonance）」，我們引入了控制工程中的**雙重阻尼機制（Dual-Stage Damping Mechanisms）**。
 
 ### 2.1 空間維度：非對稱滯後死區 (Asymmetric Hysteresis Deadband)
 系統的狀態轉移並非單一臨界點，而是拉開了一個高達 35% 的「認知死區」。設 \($\mathcal{R}$\) 為 30 題窗口正確率，\($\bar{T}$\) 為平均反應時間：
@@ -114,8 +117,8 @@ graph TD
 ### 2.2 時間維度：非週期性動態冷卻鎖 (Aperiodic Cooldown Lock)
 在狀態轉移（如 \($L_3 \rightarrow L_4$\)）的瞬間，系統強制實施 `LOCK_ATTEMPTS_AFTER_CHANGE = 50`。在控制理論中，這等同於**「超臨界阻尼（Overdamped Status）」**，切斷狀態轉移瞬間的歷史殘留震盪，給予內層 SM-2 足夠的時間片去重新洗牌。
 
-### 2.3 統計防禦：應對非 i.i.d. 的時序數據流
-學生的答題狀態具備高度時間相依性（前題挫折影響後題），不滿足嚴格 i.i.d.。本系統透過「10% \(i+1\) 探針與錯題的隨機洗牌（Interleaved Practice）」降低局部相依性（Covariance）；並利用 50 題冷卻鎖強制拉長取樣時間跨度，確保 30 題窗口具備足夠的資訊熵（Information Entropy）。
+### 基於大數法則與資訊熵的時序數據流
+學生的答題狀態具備高度時間相依性（前題挫折影響後題），不滿足嚴格 i.i.d. 與中央極限定理（CLT）。本系統不追求完美的常態分佈，而是基於大數法則（Law of Large Numbers）與資訊熵（Information Entropy），透過「10% i+1 探針與錯題的隨機洗牌（Interleaved Practice）」降低局部相依性；並利用 50 題冷卻鎖強制拉長取樣時間跨度，確保 30 題窗口內具備足夠的資訊量來抵抗時序相依性。
 
 ---
 
@@ -155,7 +158,7 @@ $$\mathbf{P}_{\text{select}} = (1-\alpha-\beta) \cdot \mathbb{M}(L_{\text{ceilin
 
 本系統的 7 秒（晉升）與 5 秒（降級）並非主觀猜測，而是基於「真實縱貫性軌跡」的經驗校準邊界。
 
-根據 15,836 筆真實作答數據（如 `routine` 單字軌跡），我們觀察到明顯的**「提取流暢性相變（Phase Transition）」**：
+根據 15,836 筆真實作答數據（如 `routine` 單字軌跡），我們觀察到明顯的 **「非連續性的流暢度躍遷（Discontinuous Fluency Shift）**，或者說 **「認知自動化的閾值跨越（Threshold Crossing of Cognitive Automaticity）」**：
 *   **7秒 (晉升閾值)**：捕捉的是學生從「完全不會（7.9s）」跨越到「自動化提取」的分水嶺。這對齊了 Card 等人（1983）的 GOMS 模型，排除了聽覺輸入時間，純粹測量詞彙檢索與手寫輸出。
 *   **5秒 (降級地板)**：區分「認知挣扎」與「單純手速慢」。5 秒是基於試點數據中慢速群體的反應時間分佈所設定的經驗邊界，確保系統能量測到真實的認知卡頓，而非物理 I/O 延遲。
 
