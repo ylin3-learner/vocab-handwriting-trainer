@@ -141,7 +141,8 @@ graph TD
 
 選題機率向量：
 
-$\mathbf{P}_{\text{select}} = (1-\alpha-\beta) \cdot \mathbb{M}(L_{\text{ceiling}}) + \alpha \cdot \mathbb{M}(L_{\text{ceiling}}+1) + \beta \cdot \mathbb{M}(\text{ReviewPool})$
+$$\mathbf{P}_{\text{select}} = (1-\alpha-\beta) \cdot \mathbb{M}(L_{\text{ceiling}}) + \alpha \cdot \mathbb{M}(L_{\text{ceiling}}+1) + \beta \cdot \mathbb{M}(\text{ReviewPool})$$
+
 
 
 *   **0.50 下限的科學依據**：基於 IRT 理論，正確率 50% 是費雪訊息量（Fisher Information）的最大值點，最能精準分辨學生能力；且根據 *Nature Communications* 的「85% 法則」，85% 正確率是人類認知尋優的最佳狀態。
