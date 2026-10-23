@@ -15,7 +15,7 @@ const mockWord: Word = {
   sentence: 'I eat an apple every day.',
 };
 
-const NOW = new Date('2026-09-14T12:00:00Z');
+const BASE_DATE = new Date('2026-09-14T12:00:00Z').getTime();
 
 function makeParams(
   currentState: ReviewState,
@@ -23,8 +23,12 @@ function makeParams(
     recognizedText?: string;
     elapsedMs?: number;
     timedOut?: boolean;
+    dayOffset?: number; // 🔥 新增：用來模擬跨天
   } = {}
 ) {
+  // 每次可以傳入 dayOffset，模擬過了幾天
+  const now = new Date(BASE_DATE + (overrides.dayOffset ?? 0) * 24 * 60 * 60 * 1000);
+
   return {
     word: mockWord,
     submission: {
@@ -36,77 +40,85 @@ function makeParams(
     timeLimitMs: 8000,
     studentId: 'test-student',
     studentDisplayId: '709_1_測試生',
-    now: NOW,
+    now,
+    studentTimeZone: 'Asia/Taipei', // 🔥 補上傳入時區
   };
 }
 
 const processor = new AnswerProcessor();
 
 // ============================================================
-// correctStreak 與 everWrong 生命週期
+// correctStreak 與 everWrong 生命週期（雙軌解耦測試）
 // ============================================================
 
-describe('AnswerProcessor - everWrong 生命週期', () => {
-  test('首次答對 → everWrong 保持 undefined/false，correctStreak=1', () => {
+describe('AnswerProcessor - everWrong 生命週期 (雙軌解耦)', () => {
+  test('首次答對 → everWrong 保持 false，correctStreak=1，dailyStreak=1', () => {
     const initial = createInitialReviewState();
     const result = processor.process(makeParams(initial));
-    assert.notStrictEqual(result.nextState.everWrong, true);
+    assert.strictEqual(result.nextState.everWrong, false);
     assert.strictEqual(result.nextState.correctStreak, 1);
+    assert.strictEqual(result.nextState.dailyStreak, 1);
   });
 
-  test('首次答錯 → everWrong=true，correctStreak=0', () => {
+  test('首次答錯 → everWrong=true，correctStreak=0，dailyStreak=0', () => {
     const initial = createInitialReviewState();
     const result = processor.process(
       makeParams(initial, { recognizedText: 'wrong' })
     );
     assert.strictEqual(result.nextState.everWrong, true);
     assert.strictEqual(result.nextState.correctStreak, 0);
+    assert.strictEqual(result.nextState.dailyStreak, 0);
   });
 
-  test('everWrong=true，連續答對 4 次 → 仍為 true，correctStreak=4', () => {
+  test('everWrong=true，同一天內連續答對 4 次 → correctStreak 仍為 1，dailyStreak=4', () => {
     let state: ReviewState = {
       ...createInitialReviewState(),
       everWrong: true,
     };
 
+    // 模擬同一天內按了 4 次提交
     for (let i = 0; i < 4; i++) {
-      const result = processor.process(makeParams(state));
+      const result = processor.process(makeParams(state, { dayOffset: 0 }));
       state = result.nextState;
     }
 
     assert.strictEqual(state.everWrong, true);
-    assert.strictEqual(state.correctStreak, 4);
+    assert.strictEqual(state.correctStreak, 1); // 跨天計數器只有第一天加 1
+    assert.strictEqual(state.dailyStreak, 4);   // 日內計數器加到 4
   });
 
-  test('everWrong=true，連續答對 5 次 → 清除為 false，correctStreak 歸零', () => {
+  test('everWrong=true，跨 5 天皆答對 → 清除為 false，correctStreak 歸零', () => {
     let state: ReviewState = {
       ...createInitialReviewState(),
       everWrong: true,
     };
 
+    // 模擬跨 5 天，每天答對 1 次
     for (let i = 0; i < 5; i++) {
-      const result = processor.process(makeParams(state));
+      const result = processor.process(makeParams(state, { dayOffset: i }));
       state = result.nextState;
     }
 
     assert.strictEqual(state.everWrong, false);
-    assert.strictEqual(state.correctStreak, 0);
+    assert.strictEqual(state.correctStreak, 0); // 畢業後歸零
+    assert.strictEqual(state.dailyStreak, 1);
   });
 
-  test('連續答對 4 次後答錯 → everWrong 保持 true，correctStreak 歸零', () => {
+  test('跨天答對 4 次後，隔天答錯 → everWrong 保持 true，correctStreak 歸零', () => {
     let state: ReviewState = {
       ...createInitialReviewState(),
       everWrong: true,
     };
 
     for (let i = 0; i < 4; i++) {
-      const result = processor.process(makeParams(state));
+      const result = processor.process(makeParams(state, { dayOffset: i }));
       state = result.nextState;
     }
     assert.strictEqual(state.correctStreak, 4);
 
+    // 第 5 天答錯
     const result = processor.process(
-      makeParams(state, { recognizedText: 'wrong' })
+      makeParams(state, { dayOffset: 5, recognizedText: 'wrong' })
     );
     state = result.nextState;
 
@@ -129,11 +141,11 @@ describe('AnswerProcessor - everWrong 生命週期', () => {
     assert.strictEqual(result.nextState.correctStreak, 0);
   });
 
-  test('從未答錯的字，連續答對多次也不會變成 everWrong=true', () => {
+  test('從未答錯的字，跨天連續答對多次也不會變成 everWrong=true', () => {
     let state = createInitialReviewState();
 
     for (let i = 0; i < 5; i++) {
-      const result = processor.process(makeParams(state));
+      const result = processor.process(makeParams(state, { dayOffset: i }));
       state = result.nextState;
     }
 
@@ -141,13 +153,10 @@ describe('AnswerProcessor - everWrong 生命週期', () => {
   });
 
   test('correctStreak 不受 sm2.ts 的 MASTERY_STREAK 歸零影響', () => {
-    // 這個測試確保 correctStreak 是獨立計數器。
-    // sm2.ts 的 consecutiveCorrect 在答對 3 次後歸零，
-    // 但 correctStreak 應該繼續累積。
     let state = createInitialReviewState();
 
     for (let i = 0; i < 3; i++) {
-      const result = processor.process(makeParams(state));
+      const result = processor.process(makeParams(state, { dayOffset: i }));
       state = result.nextState;
     }
 

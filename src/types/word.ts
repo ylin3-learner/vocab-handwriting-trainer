@@ -68,18 +68,32 @@ export interface ReviewState {
   everWrong: boolean;
 
   /**
-   * 自上次答錯以來連續答對的次數。
-   *
-   * 與 `consecutiveCorrect` 不同：
-   *   - `consecutiveCorrect` 在達成 MASTERY_STREAK（3）後歸零
-   *   - `correctStreak` 只在答錯時歸零，用來判斷是否已「真正掌握」
+   * 跨天連續答對次數。
    *
    * 當 correctStreak 達到 EVER_WRONG_CLEAR_THRESHOLD（5）時，
    * AnswerProcessor 會清除 everWrong，將該字移出複習池。
+   * 注意：同一天內重複答對不會增加此數值。
    *
    * 🔥 必填：新單字初始為 0。
    */
   correctStreak: number;
+
+  /**
+   * 當日連續答對次數（用於日內微觀演練防呆）。
+   *
+   * 如果當天連續答對 2 次，系統今天就不再抽出該字。
+   *
+   * 🔥 必填：新單字初始為 0。
+   */
+  dailyStreak: number;
+
+  /**
+   * 最後一次連續答對的日期 (YYYY-MM-DD)。
+   * 用來判斷是否跨天，以重置 dailyStreak 或累加 correctStreak。
+   *
+   * 🔥 必填：新單字初始為空字串。
+   */
+  lastStreakDate: string;
 }
 
 /**
@@ -98,5 +112,7 @@ export function createInitialReviewState(): ReviewState {
     nextReviewDate: null,
     everWrong: false,
     correctStreak: 0,
+    dailyStreak: 0,
+    lastStreakDate: '',
   };
 }

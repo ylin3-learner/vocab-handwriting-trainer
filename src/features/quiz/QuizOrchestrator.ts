@@ -43,7 +43,6 @@ import {
 import { buildDisplayId } from '../../domain/string/displayId';
 import { getLocalDateString } from '../../domain/date/timezone';
 
-// 🔥 引入 Realtime Listener 與 arrayUnion
 import { doc, getDoc, getDocs, setDoc, query, where, collection, arrayUnion, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import type { SessionExitReason } from '../../services/storage/ProgressStore';
@@ -221,10 +220,6 @@ export class QuizOrchestrator implements QuizSessionApi {
     console.log('📚 [QuizOrchestrator] 學生選擇繼續練習，session 進入 continue 模式');
   }
 
-  /**
-   * 🔥 工業級做法 B：監聽 dailySnapshots 的 totalAttempts
-   * 這是跨分頁、跨裝置的「單一真實來源」，確保進度絕對同步。
-   */
   subscribeToProgress(callback: (answered: number, max: number) => void): () => void {
     const displayId = this.getDisplayId();
     const today = getLocalDateString(this.getNow(), this.studentTimeZone);
@@ -237,15 +232,12 @@ export class QuizOrchestrator implements QuizSessionApi {
         const serverCount = snap.data().totalAttempts ?? 0;
         const serverCorrect = snap.data().correctCount ?? 0;
 
-        // 同步內部狀態，確保後續邏輯（如 nextQuestion 的配額判斷）正確
-        // 使用 Math.max 避免非同步寫入延遲導致的短暫 UI 倒退現象
         if (serverCount > this.dailyAnsweredCount) {
           console.log(`🔄 [Realtime Sync] 題數更新：${this.dailyAnsweredCount} -> ${serverCount}`);
           this.dailyAnsweredCount = serverCount;
           this.dailyCorrectCount = serverCorrect;
         }
       }
-      // 通知 UI 更新
       callback(this.dailyAnsweredCount, this.dailyMaxQuota);
     }, (error) => {
       console.error('❌ [Realtime Sync] 監聽失敗:', error);
@@ -334,14 +326,8 @@ export class QuizOrchestrator implements QuizSessionApi {
     console.log(`✅ [QuizOrchestrator.init] 完成！單字池：${this.words.length} 個，等級：L${this.currentLevel}`);
   }
 
-  /**
-   * 🔥 優先從 dailySnapshots 讀取 totalAttempts（絕對權威）
-   */
   private async loadTodayStats(displayId: string, today: string): Promise<void> {
     try {
-      // ============================================================
-      // 路徑 1：讀 dailySnapshots 文件（絕對真實來源）
-      // ============================================================
       const snapshotRef = doc(db, 'studentStates', displayId, 'dailySnapshots', today);
       const snapshotSnap = await getDoc(snapshotRef);
 
@@ -349,16 +335,12 @@ export class QuizOrchestrator implements QuizSessionApi {
         const d = snapshotSnap.data() as DailySnapshot;
         this.dailyAnsweredCount = d.totalAttempts ?? 0;
         this.dailyCorrectCount = d.correctCount ?? 0;
-        // 反推總時間
         this.dailyTotalResponseTime = (d.avgResponseTimeMs ?? 0) * this.dailyAnsweredCount;
         console.log(`   📊 從 Firestore dailySnapshots 讀取 (${this.dailyAnsweredCount} 題)`);
         this.syncToLocalStorage(displayId, today);
         return;
       }
 
-      // ============================================================
-      // 路徑 2：查 attempts 集合（舊資料遷移，或今天第一次登入）
-      // ============================================================
       const todayStart = new Date(`${today}T00:00:00+08:00`);
       const attemptsSnap = await getDocs(
         query(
@@ -377,7 +359,6 @@ export class QuizOrchestrator implements QuizSessionApi {
         );
         console.log(`   📊 從 attempts 集合回填（${attempts.length} 筆）`);
 
-        // 🔥 回填 dailySnapshots，確保後續監聽與讀取有資料
         try {
           const dailySnapshot: DailySnapshot = {
             date: today,
@@ -397,9 +378,6 @@ export class QuizOrchestrator implements QuizSessionApi {
         return;
       }
 
-      // ============================================================
-      // 路徑 3：localStorage（最後 fallback）
-      // ============================================================
       const localStats = this.dailyStatsTracker.load(displayId, today);
       this.dailyAnsweredCount = localStats.answeredCount;
       this.dailyCorrectCount = localStats.correctCount;
@@ -528,20 +506,71 @@ export class QuizOrchestrator implements QuizSessionApi {
     if (!this.quotaPolicy.shouldContinue(this.dailyAnsweredCount)) {
       return null;
     }
-    const availableWords = this.words.filter((w) => !this.askedToday.has(w.id));
-    const usingPool = availableWords.length > 0 ? availableWords : this.words;
+
+    // 🔥 1. 先從當前題池過濾出今天沒寫過的
+    let usingPool = this.words.filter((w) => !this.askedToday.has(w.id));
+
+    // 🔥 2. 如果題池空了，啟動動態補題 (Dynamic Fetch)
+    if (usingPool.length === 0) {
+      console.log('⚠️ [Pool Exhausted] 靜態題池已耗盡，啟動動態補題...');
+      const fallbackIds = Array.from(this.stateCache?.entries() ?? [])
+        .filter(([id, state]) => state.everWrong === true && !this.askedToday.has(id))
+        .map(([id]) => id);
+
+      if (fallbackIds.length > 0) {
+        console.log(`🔄 [Dynamic Fetch] 找到 ${fallbackIds.length} 個尚未複習的錯題`);
+        const fallbackWords = await this.deps.wordRepository.getWordsByIds(fallbackIds);
+        usingPool = fallbackWords;
+
+        // 將補題的字加進 wordMap 備用
+        for (const w of fallbackWords) {
+          this.wordMap.set(w.id, w);
+        }
+      } else {
+        // 如果連 stateCache 的錯題都被榨乾了，直接結束 Session
+        console.log('🏁 [Pool Exhausted] 所有錯題今日都已複習完畢，結束 Session');
+        return null;
+      }
+    }
+
     const entries: WordEntry[] = [];
     for (const word of usingPool) {
       const state = this.stateCache?.get(word.id) ?? createInitialReviewState();
       const overdueDays = calculateOverdueDays(state.nextReviewDate, this.getNow());
       entries.push({ wordId: word.id, state, overdueDays });
     }
-    const selectedId = pickNextWordId(entries, { dailyNewQuotaRemaining: this.dailyNewQuotaRemaining }, this.activeAssignment?.explorationRate ?? 0.1);
+
+    // 🔥 3. 過濾掉今天已經在日內軌道達標的字 (防日內無限迴圈)
+    const today = getLocalDateString(this.getNow(), this.studentTimeZone);
+    const filteredEntries = entries.filter((e) => {
+      // 如果今天已經連續答對 2 次，今天就放過他，不要再抽出來
+      if (e.state.lastStreakDate === today && (e.state.dailyStreak ?? 0) >= 2) {
+        return false;
+      }
+      return true;
+    });
+
+    // 如果過濾後沒有字了，就從 entries 隨便抽一個（或者回傳 null 結束）
+    const finalEntries = filteredEntries.length > 0 ? filteredEntries : entries;
+
+    const selectedId = pickNextWordId(
+      finalEntries,
+      { dailyNewQuotaRemaining: this.dailyNewQuotaRemaining },
+      this.activeAssignment?.explorationRate ?? 0.1
+    );
+
     if (!selectedId) return null;
+
     const word = this.wordMap.get(selectedId);
     if (!word) return null;
+
     this.askedToday.add(selectedId);
-    return { word, timeLimitMs: this.resolvedTimeLimitMs, isProbe: Number(word.level ?? '0') > this.currentLevel };
+
+    return {
+      word,
+      timeLimitMs: this.resolvedTimeLimitMs,
+      isProbe: Number(word.level ?? '0') > this.currentLevel,
+    };
   }
 
   async endContinueSession(reason: SessionExitReason): Promise<void> {
@@ -578,6 +607,7 @@ export class QuizOrchestrator implements QuizSessionApi {
     const processed = this.answerProcessor.process({
       word, submission, currentState, timeLimitMs: this.resolvedTimeLimitMs,
       studentId: this.studentId, studentDisplayId, now,
+      studentTimeZone: this.studentTimeZone, // 🔥 傳入時區
     });
 
     const today = getLocalDateString(now, this.studentTimeZone);

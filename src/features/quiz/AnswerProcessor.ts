@@ -7,16 +7,10 @@ import { mergeSM2ResultWithState } from '../../domain/scheduler/reviewStateMappe
 import { calculateOverdueDays } from '../../domain/date/overdue';
 import { levenshteinDistance, normalizedSimilarity } from '../../domain/string/similarity';
 import { AnswerSubmission } from './QuizOrchestrator';
+import { getLocalDateString } from '../../domain/date/timezone'; // 🔥 引入時區工具
 
 /**
- * 連續答對幾次後，將 everWrong 清除（移出複習池）。
- *
- * 為什麼不用 sm2.ts 的 consecutiveCorrect？
- *   因為 sm2.ts 的 MASTERY_STREAK = 3，consecutiveCorrect 達 3 就歸零，
- *   永遠不會累積到 5。所以這裡自己維護 correctStreak。
- *
- * 閾值 5 的依據：連續答對 5 次代表學生已經在多個不同的複習週期
- * （間隔約 1、2、3、4、5 天）都答對，實質上已掌握。
+ * 跨天連續答對幾次後，將 everWrong 清除（移出複習池）。
  */
 const EVER_WRONG_CLEAR_THRESHOLD = 5;
 
@@ -28,6 +22,7 @@ export interface ProcessAnswerParams {
   studentId: string;
   studentDisplayId?: string;
   now: Date;
+  studentTimeZone: string; // 🔥 新增：用於計算日期
 }
 
 export interface ProcessedAnswer {
@@ -39,14 +34,6 @@ export interface ProcessedAnswer {
   similarity: number;
 }
 
-/**
- * 純運算：評分 + SM-2 排程 + 組裝 AttemptRecord。
- *
- * 設計原則：
- * - 不碰 I/O（不寫 Firestore、不寫本地）
- * - 相同輸入必定相同輸出
- * - 由呼叫者決定「要怎麼寫」（batch / 記憶體 / 其他）
- */
 export class AnswerProcessor {
   process(params: ProcessAnswerParams): ProcessedAnswer {
     const {
@@ -57,6 +44,7 @@ export class AnswerProcessor {
       studentId,
       studentDisplayId,
       now,
+      studentTimeZone,
     } = params;
 
     // ============================================================
@@ -71,16 +59,10 @@ export class AnswerProcessor {
     });
 
     // ============================================================
-    // 2. 計算編輯距離與相似度（用於錯誤分類與弱點分析）
+    // 2. 計算編輯距離與相似度
     // ============================================================
-    const editDistance = levenshteinDistance(
-      submission.recognizedText,
-      word.word
-    );
-    const similarity = normalizedSimilarity(
-      submission.recognizedText,
-      word.word
-    );
+    const editDistance = levenshteinDistance(submission.recognizedText, word.word);
+    const similarity = normalizedSimilarity(submission.recognizedText, word.word);
 
     // ============================================================
     // 3. SM-2 排程計算
@@ -99,32 +81,37 @@ export class AnswerProcessor {
       overdueDays
     );
 
-    // ============================================================
-    // 4. 更新 correctStreak 與 everWrong
-    //
-    // correctStreak：自上次答錯以來連續答對的次數（獨立於 sm2.ts）
-    //   - 答對 → +1
-    //   - 答錯 → 歸零
-    //
-    // everWrong：
-    //   - 答錯 → 設為 true（永久追蹤）
-    //   - 答對 + 之前 everWrong=true + correctStreak >= 5 → 清除為 false
-    //   - 其他 → 保持不變
-    //
-    // 🔥 防禦 legacy 資料：
-    //   舊版資料可能沒寫入過 everWrong / correctStreak，
-    //   讀出來會是 undefined。這裡 coerce 成 boolean / number，
-    //   確保輸出永遠是乾淨的 ReviewState，
-    //   不會再撞回 Firestore 的 Unsupported field value: undefined。
-    // ============================================================
     const mergedState = mergeSM2ResultWithState(currentState, scheduling, now);
 
-    const prevEverWrong = currentState.everWrong === true;
-    const prevStreak = currentState.correctStreak ?? 0;
-    const nextStreak = grading.isCorrect ? prevStreak + 1 : 0;
+    // ============================================================
+    // 4. 雙軌解耦計數器 (Dual-Track Scheduler)
+    // ============================================================
+    const today = getLocalDateString(now, studentTimeZone);
 
-    const shouldClearEverWrong =
-      prevEverWrong && nextStreak >= EVER_WRONG_CLEAR_THRESHOLD;
+    const prevEverWrong = currentState.everWrong === true;
+    const prevCorrectStreak = currentState.correctStreak ?? 0;
+    const prevDailyStreak = currentState.dailyStreak ?? 0;
+    const prevLastStreakDate = currentState.lastStreakDate ?? '';
+
+    let nextCorrectStreak = prevCorrectStreak;
+    let nextDailyStreak = prevDailyStreak;
+
+    if (grading.isCorrect) {
+      if (prevLastStreakDate === today) {
+        // 同一天內答對：只增加日內連對次數，不增加跨天次數
+        nextDailyStreak += 1;
+      } else {
+        // 跨天答對：日內次數重置為 1，跨天次數 +1
+        nextDailyStreak = 1;
+        nextCorrectStreak += 1;
+      }
+    } else {
+      // 答錯：日內與跨天計數全部歸零
+      nextDailyStreak = 0;
+      nextCorrectStreak = 0;
+    }
+
+    const shouldClearEverWrong = prevEverWrong && nextCorrectStreak >= EVER_WRONG_CLEAR_THRESHOLD;
 
     const nextEverWrong = !grading.isCorrect
       ? true
@@ -133,27 +120,21 @@ export class AnswerProcessor {
     const nextState: ReviewState = {
       ...mergedState,
       everWrong: nextEverWrong,
-      correctStreak: shouldClearEverWrong ? 0 : nextStreak,
+      correctStreak: shouldClearEverWrong ? 0 : nextCorrectStreak,
+      dailyStreak: nextDailyStreak,
+      lastStreakDate: today,
     };
 
     if (shouldClearEverWrong) {
-      console.log(
-        `🎓 [AnswerProcessor]「${word.word}」連續答對 ${nextStreak} 次，移出複習池`
-      );
+      console.log(`🎓 [AnswerProcessor]「${word.word}」跨天連續答對 ${nextCorrectStreak} 次，正式移出複習池`);
     }
 
     // 🔥 判斷是否要保留原始軌跡
-    // 條件：答錯 (not true-positive) 或 超時
     const shouldCaptureStrokeData =
       grading.correctnessSignal !== 'true-positive' || submission.timedOut;
 
     // ============================================================
     // 5. 組裝 AttemptRecord
-    //
-    // 注意：studentDisplayId 和 snapshotImageUrl 可能是 undefined，
-    //      這是刻意允許的——呼叫方（HybridProgressStore / AttemptBatcher）
-    //      會在寫入 Firestore 前用 removeUndefined 過濾。
-    //      這樣這個純運算函式不需要知道 Firestore 的限制。
     // ============================================================
     const attempt: AttemptRecord = {
       studentId,
@@ -163,7 +144,7 @@ export class AnswerProcessor {
       recognizedText: submission.recognizedText,
       isCorrect: grading.isCorrect,
       responseTimeMs: submission.elapsedMs,
-      timeLimitMs, // 新增這行
+      timeLimitMs,
       snapshotImageUrl: submission.snapshotImageUrl,
       editDistance,
       similarity,
@@ -171,11 +152,8 @@ export class AnswerProcessor {
       snapshotInterval: scheduling.nextInterval,
       timedOut: submission.timedOut,
       correctnessSignal: grading.correctnessSignal,
-      // 🔥 新增：IME 辨識的品質訊號
       forcedMatch: submission.forcedMatch,
       candidatesSnapshot: submission.candidatesSnapshot,
-      // 🔥 只有符合條件才寫入，否則為 undefined。
-      // AttemptBatcher 的 removeUndefined 會自動忽略它。
       rawStrokeData: shouldCaptureStrokeData ? submission.rawStrokeData : undefined,
     };
 
