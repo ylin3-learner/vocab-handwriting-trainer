@@ -323,63 +323,39 @@ export class AnalyticsService {
         // ============================================================
         let recentQuotaStats: StudentAnalytics['recentQuotaStats'] = undefined;
         try {
-            let targetQuota = stateData?.currentDailyQuota ?? 0;
-            let quotaDate = stateData?.quotaDate;
-
-            // 🔥 核心修正：取得今天的字串與今天的快照
             const tz = studentTimeZone ?? 'Asia/Taipei';
             const todayStr = getLocalDateString(new Date(), tz);
+
+            // 1. 優先看今天有沒有快照紀錄 (這是最準確的當日真實來源)
             const todaySnapshot = dailySnapshots.find(s => s.date === todayStr);
 
-            // 🔥 如果今天有練習紀錄，強制將 quotaDate 校正為今天（解決舊版程式碼未更新 quotaDate 的歷史共業）
-            if (todaySnapshot && todaySnapshot.totalAttempts > 0) {
-                if (quotaDate !== todayStr) {
-                    console.log(`🩹 [AnalyticsService] 偵測到歷史資料污染，自動校正 quotaDate: ${quotaDate} -> ${todayStr}`);
-                    quotaDate = todayStr;
-                }
-                // 如果 targetQuota 是 0（因為舊版沒寫入），給予一個合理的預設值
-                if (targetQuota <= 0) {
-                    targetQuota = 30;
-                }
+            // 2. 取得學生設定的配額 (如果今天的日期對得上才用，否則用預設)
+            let targetQuota = stateData?.currentDailyQuota ?? 30;
+            if (stateData?.quotaDate !== todayStr) {
+                // 如果 quotaDate 不是今天，代表是舊資料或還沒更新，使用預設值 30
+                targetQuota = 30;
             }
 
-            // 如果在今天的快照中找到了，或者原本的資料有效
-            if (targetQuota > 0 && quotaDate) {
-                const statsRef = doc(db, 'studentStates', displayId, 'dailyStats', quotaDate);
-                let answeredCount = 0;
+            // 3. 只有當「今天有快照」或「今天登入過(quotaDate是今天)」時，才顯示標籤
+            if (todaySnapshot || stateData?.quotaDate === todayStr) {
+                const answeredCount = todaySnapshot ? todaySnapshot.totalAttempts : 0;
 
-                // 優先使用已經拉下來的 todaySnapshot 資料，減少讀取
-                if (quotaDate === todayStr && todaySnapshot) {
-                    answeredCount = todaySnapshot.totalAttempts;
-                } else {
-                    // 如果不是今天，才去讀取歷史的 dailyStats
-                    if (!forceServer) {
-                        try {
-                            const cachedStats = await getDocFromCache(statsRef);
-                            if (cachedStats.exists()) answeredCount = cachedStats.data().answeredCount ?? 0;
-                        } catch { /* miss */ }
-                    }
-                    if (answeredCount === 0) {
-                        const serverStats = await getDoc(statsRef);
-                        if (serverStats.exists()) answeredCount = serverStats.data().answeredCount ?? 0;
-                    }
-                }
-
-                // 判斷狀態
                 let status: 'completed' | 'incomplete' = 'incomplete';
                 if (answeredCount >= targetQuota) {
                     status = 'completed';
                 }
 
                 recentQuotaStats = {
-                    date: quotaDate,
+                    date: todayStr,
                     answeredCount: answeredCount,
                     targetQuota: targetQuota,
                     status,
                 };
             }
+            // 如果今天沒快照，quotaDate 也不是今天，就代表「今天沒練」，recentQuotaStats 保持 undefined，UI 就不會顯示舊的假進度。
+
         } catch (e) {
-            console.warn('⚠️ [AnalyticsService] 取得配額進度失敗:', e);
+            console.warn('⚠️ [AnalyticsService] 取得今日配額進度失敗:', e);
         }
 
         // ============================================================
