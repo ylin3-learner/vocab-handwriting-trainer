@@ -298,6 +298,18 @@ export class QuizOrchestrator implements QuizSessionApi {
     } else {
       this.dailyMaxQuota = this.deps.defaultDailyMaxQuota;
       this.dailyNewQuotaRemaining = this.deps.defaultDailyNewQuota;
+
+      console.warn(`   ⚠️ 無生效作業，使用預設配額：${this.dailyMaxQuota} 題`);
+
+      // 新增：即便沒有作業，也要把「預設配額」寫入資料庫！
+      try {
+        await setDoc(doc(db, 'studentStates', displayId), {
+          currentDailyQuota: this.dailyMaxQuota,
+          quotaDate: today,
+        }, { merge: true });
+      } catch (e) {
+        console.warn('⚠️ 寫入預設 currentDailyQuota 失敗:', e);
+      }
     }
 
     const exceededBehavior: QuotaExceededBehavior =

@@ -323,16 +323,49 @@ export class AnalyticsService {
         // ============================================================
         let recentQuotaStats: StudentAnalytics['recentQuotaStats'] = undefined;
         try {
-            const targetQuota = stateData?.currentDailyQuota ?? 0;
-            const quotaDate = stateData?.quotaDate;
+            let targetQuota = stateData?.currentDailyQuota ?? 0;
+            let quotaDate = stateData?.quotaDate;
 
+            // 🔥 核心修正：取得今天的字串與今天的快照
+            const tz = studentTimeZone ?? 'Asia/Taipei';
+            const todayStr = getLocalDateString(new Date(), tz);
+            const todaySnapshot = dailySnapshots.find(s => s.date === todayStr);
+
+            // 🔥 如果今天有練習紀錄，強制將 quotaDate 校正為今天（解決舊版程式碼未更新 quotaDate 的歷史共業）
+            if (todaySnapshot && todaySnapshot.totalAttempts > 0) {
+                if (quotaDate !== todayStr) {
+                    console.log(`🩹 [AnalyticsService] 偵測到歷史資料污染，自動校正 quotaDate: ${quotaDate} -> ${todayStr}`);
+                    quotaDate = todayStr;
+                }
+                // 如果 targetQuota 是 0（因為舊版沒寫入），給予一個合理的預設值
+                if (targetQuota <= 0) {
+                    targetQuota = 30;
+                }
+            }
+
+            // 如果在今天的快照中找到了，或者原本的資料有效
             if (targetQuota > 0 && quotaDate) {
-                // 直接在快照陣列中尋找該日期的紀錄
-                const targetSnapshot = dailySnapshots.find(s => s.date === quotaDate);
+                const statsRef = doc(db, 'studentStates', displayId, 'dailyStats', quotaDate);
+                let answeredCount = 0;
 
-                // 如果有找到，就拿 totalAttempts；如果找不到，代表那天沒練，就是 0
-                const answeredCount = targetSnapshot ? targetSnapshot.totalAttempts : 0;
+                // 優先使用已經拉下來的 todaySnapshot 資料，減少讀取
+                if (quotaDate === todayStr && todaySnapshot) {
+                    answeredCount = todaySnapshot.totalAttempts;
+                } else {
+                    // 如果不是今天，才去讀取歷史的 dailyStats
+                    if (!forceServer) {
+                        try {
+                            const cachedStats = await getDocFromCache(statsRef);
+                            if (cachedStats.exists()) answeredCount = cachedStats.data().answeredCount ?? 0;
+                        } catch { /* miss */ }
+                    }
+                    if (answeredCount === 0) {
+                        const serverStats = await getDoc(statsRef);
+                        if (serverStats.exists()) answeredCount = serverStats.data().answeredCount ?? 0;
+                    }
+                }
 
+                // 判斷狀態
                 let status: 'completed' | 'incomplete' = 'incomplete';
                 if (answeredCount >= targetQuota) {
                     status = 'completed';
