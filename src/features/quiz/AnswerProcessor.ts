@@ -76,7 +76,8 @@ export class AnswerProcessor {
         totalReviews: currentState.totalReviews,
       },
       grading.quality,
-      overdueDays
+      overdueDays,
+      now // 修正：把 now 傳進去
     );
 
     const mergedState = mergeSM2ResultWithState(currentState, scheduling, now);

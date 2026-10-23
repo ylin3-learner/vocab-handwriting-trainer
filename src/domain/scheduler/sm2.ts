@@ -1,7 +1,4 @@
-// domain/scheduler/sm2.ts
-// 從 quiz.py 的 calculate_next_review_date() + evaluate_answer() 移植並合併
-// 純函式,不碰資料庫、不碰時間以外的外部狀態
-// quality 只能來自 grader.calculateQuality() 的輸出,這裡不做任何自評相關邏輯
+// src/domain/scheduler/sm2.ts
 
 export interface SM2State {
   reviewInterval: number;
@@ -21,12 +18,13 @@ export interface SM2Result {
 }
 
 const MIN_EASE_FACTOR = 1.3;
-const MASTERY_STREAK = 3; // 連續答對幾次視為「已掌握」,歸零 reviewCount
+const MASTERY_STREAK = 3;
 
 export function calculateNextReview(
   state: SM2State,
   quality: number,
-  overdueDays: number
+  overdueDays: number,
+  now: Date // 🔥 新增：傳入當下時間，確保純函式性質
 ): SM2Result {
   const isCorrect = quality >= 3;
 
@@ -34,17 +32,14 @@ export function calculateNextReview(
   let nextEaseFactor: number;
 
   if (!isCorrect) {
-    // 答錯或超時:間隔乘性下降(減半),EF 輕微下降,下限 1.3
     nextEaseFactor = Math.max(MIN_EASE_FACTOR, state.easeFactor - 0.1);
     nextInterval = Math.max(1, Math.floor(state.reviewInterval / 2));
   } else {
-    // 答對:間隔加性增長,並依逾期天數給額外加成;EF 微升
     nextEaseFactor = state.easeFactor + 0.02;
     const overdueBonus = 1 + 0.1 * overdueDays;
     nextInterval = Math.round(state.reviewInterval + 1 * overdueBonus);
   }
 
-  // 答題後的狀態轉移(原本在 quiz.py 的 evaluate_answer 裡)
   let nextReviewCount: number;
   let nextConsecutiveCorrect: number;
 
@@ -61,8 +56,9 @@ export function calculateNextReview(
     }
   }
 
+  // 🔥 修正：使用傳入的 now，而不是 Date.now()
   const nextReviewDate = new Date(
-    Date.now() + nextInterval * 24 * 60 * 60 * 1000
+    now.getTime() + nextInterval * 24 * 60 * 60 * 1000
   ).toISOString();
 
   return {
