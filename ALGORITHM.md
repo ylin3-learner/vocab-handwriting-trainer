@@ -135,7 +135,7 @@ graph TD
 ### 3.1 對數加權抽樣 (Logarithmic Weighted Sampling)
 選題引擎（`questionSelector.ts`）的權重計算公式為：
 `reviewWeight = Math.log1p(state.reviewCount) * 100`
-使用對數衰減避免了答錯次數無限疊加導致的權重爆炸。剛答錯的單字（`reviewCount=1`），權重會瞬間增加 ~69，成為系統優先轟炸的目標。
+我們採用了「對數平滑（Logarithmic Smoothing）」來取代線性懲罰。這避免了答錯次數無限疊加導致的權重爆炸，確保系統不會因為單一極難單字而完全卡死。剛答錯的單字（`reviewCount=1`），權重會瞬間增加 ~69，成為系統優先轟炸的目標。
 
 ### 3.2 出題池耗盡與雙軌解耦微觀演練 (Dual-Track Decoupled Micro-drilling)
 
