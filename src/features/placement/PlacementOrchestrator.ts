@@ -216,6 +216,7 @@ export class PlacementOrchestrator implements QuizSessionApi {
             studentId: this.studentId,
             studentDisplayId,
             now,
+            studentTimeZone: 'Asia/Taipei',
         });
 
         // 緩衝寫入（不碰 Firestore）

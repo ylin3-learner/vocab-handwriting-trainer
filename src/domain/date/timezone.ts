@@ -34,27 +34,52 @@ export function detectTimeZone(): string {
 }
 
 /**
+ * 取得指定時區「當天 00:00:00」對應的 UTC 時間。
+ * 用於 Firestore 查詢（需要傳入 UTC ISO 字串）。
+ */
+export function getStartOfDayUTC(date: Date, timeZone: string): Date {
+  try {
+    const dateStr = getLocalDateString(date, timeZone);
+    const midnightUTC = new Date(`${dateStr}T00:00:00Z`);
+    
+    // 透過 Intl 取得該時間點在該時區的 offset
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric',
+      hour12: false,
+    });
+    
+    const parts = formatter.formatToParts(midnightUTC);
+    const getPart = (type: string) => Number(parts.find(p => p.type === type)?.value || 0);
+    
+    const tzDate = new Date(Date.UTC(
+      getPart('year'),
+      getPart('month') - 1,
+      getPart('day'),
+      getPart('hour'),
+      getPart('minute'),
+      getPart('second')
+    ));
+    
+    const offset = tzDate.getTime() - midnightUTC.getTime();
+    return new Date(midnightUTC.getTime() - offset);
+  } catch {
+    // 如果時區無效，直接回退到 UTC 當天 00:00:00
+    const dateStr = date.toISOString().slice(0, 10);
+    return new Date(`${dateStr}T00:00:00Z`);
+  }
+}
+
+/**
  * 將 Date 轉為指定時區的 YYYY-MM-DD 字串。
- *
- * @param date      任意 Date 物件
- * @param timeZone  IANA 時區名稱，預設為 DEFAULT_TIME_ZONE
- *
- * 為什麼不用 toISOString().slice(0, 10)：
- *   那個方法回傳 UTC 日期。對台北使用者來說，
- *   UTC 16:00 之後的作答會被錯誤地歸到前一日。
- *
- * 為什麼用 Intl.DateTimeFormat 而非手動 +8 小時：
- *   手動 offset 無法正確處理夏令時（DST）。
- *   例如美國東岸夏天是 UTC-4、冬天是 UTC-5。
- *   Intl 會自動處理。
  */
 export function getLocalDateString(
   date: Date,
   timeZone: string = DEFAULT_TIME_ZONE
 ): string {
-  // Guard: Invalid Date 會讓 toISOString 炸掉，必須先擋
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-    return '';  // 呼叫端負責處理空字串
+    return ''; 
   }
 
   try {
@@ -65,10 +90,17 @@ export function getLocalDateString(
       day: '2-digit',
     });
     return formatter.format(date);
-  } catch {
-    // 這裡只剩「timeZone 名稱無效」一種可能，date 已保證有效
-    const fallback = new Date(date.getTime() + 8 * 60 * 60 * 1000);
-    return fallback.toISOString().slice(0, 10);
+  } catch (e) {
+    // 🔥 修正：拔除硬編碼 +8，改為回退到預設時區，若預設時區也失敗則回退到 UTC
+    try {
+      const fallbackFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: DEFAULT_TIME_ZONE,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      });
+      return fallbackFormatter.format(date);
+    } catch {
+      return date.toISOString().slice(0, 10);
+    }
   }
 }
 

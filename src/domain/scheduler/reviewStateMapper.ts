@@ -33,5 +33,9 @@ export function mergeSM2ResultWithState(
     // 🔥 沿用 currentState 的非 SM-2 欄位（coerce 成合法型別）
     everWrong: currentState.everWrong === true,
     correctStreak: currentState.correctStreak ?? 0,
+
+    // 補上這兩個漏掉的欄位
+    dailyStreak: currentState.dailyStreak ?? 0,
+    lastStreakDate: currentState.lastStreakDate ?? '',
   };
 }

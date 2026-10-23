@@ -41,7 +41,7 @@ import {
 } from '../../domain/quiz/CompetitionModePolicy';
 
 import { buildDisplayId } from '../../domain/string/displayId';
-import { getLocalDateString } from '../../domain/date/timezone';
+import { getLocalDateString, getStartOfDayUTC } from '../../domain/date/timezone';
 
 import { doc, getDoc, getDocs, setDoc, query, where, collection, arrayUnion, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -341,7 +341,8 @@ export class QuizOrchestrator implements QuizSessionApi {
         return;
       }
 
-      const todayStart = new Date(`${today}T00:00:00+08:00`);
+      // 修改：使用精準的 getStartOfDayUTC
+      const todayStart = getStartOfDayUTC(this.getNow(), this.studentTimeZone);
       const attemptsSnap = await getDocs(
         query(
           collection(db, 'attempts'),
