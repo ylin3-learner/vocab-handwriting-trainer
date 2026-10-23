@@ -155,9 +155,13 @@ export class AnswerProcessor {
       correctnessSignal: grading.correctnessSignal,
       forcedMatch: submission.forcedMatch,
       candidatesSnapshot: submission.candidatesSnapshot,
-      rawStrokeData: shouldCaptureStrokeData ? submission.rawStrokeData : undefined,
+      rawStrokeData: shouldCaptureStrokeData && submission.rawStrokeData
+        ? JSON.stringify(submission.rawStrokeData)
+        : undefined,
       isProbe, // 🔥 新增：寫入 AttemptRecord 供未來分析
     };
+
+    console.log('🔥 [AnswerProcessor] 準備寫入的 attempt:', attempt);
 
     return {
       grading,

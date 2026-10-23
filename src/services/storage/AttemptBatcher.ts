@@ -144,6 +144,8 @@ export class AttemptBatcher {
       );
     }
 
+    console.log('🔥 [AttemptBatcher] 準備 commit 的資料:', attempt);
+
     await batch.commit();
   }
 }

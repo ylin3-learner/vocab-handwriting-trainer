@@ -234,6 +234,9 @@ export const QuizScreen: React.FC<QuizScreenProps> = ({ orchestrator, onSessionE
       const trace = canvasRef.current?.getTrace() || [];
       const rawTrace = canvasRef.current?.getRawTrace() || [];
 
+      console.log('🔍 [TEST] trace length:', trace.length);
+      console.log('🔍 [TEST] rawTrace:', rawTrace);
+
       if (trace.length > 0 && trace[0] && Array.isArray(trace[0][0]) && trace[0][0].length > 0) {
         const candidates = await callGoogleIME(trace, 'en');
         if (candidates.length > 0) {

@@ -29,7 +29,7 @@ export interface AttemptRecord {
   correctnessSignal?: CorrectnessSignal;
   forcedMatch?: boolean;
   candidatesSnapshot?: string[];
-  rawStrokeData?: number[][][];
+  rawStrokeData?: string;
   // 新增：是否為探針題（供未來 ML 分析與錯題池隔離使用）
   isProbe?: boolean;
 }
