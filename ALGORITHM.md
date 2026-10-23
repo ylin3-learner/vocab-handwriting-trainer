@@ -55,7 +55,8 @@ graph TD
         subgraph Inner_Loop ["內層：個體化項目難度 (Local Memory Tuning)"]
             Selector["選題策略 (Question Selector)<br/>- 探針注入 (i+1 Probing)<br/>- 加權隨機抽樣"]
             SM2["記憶排程 (SM-2 引擎)<br/>- Ease Factor (EF)<br/>- 錯題池 (everWrong)"]
-            Fallback["出題池耗盡防禦<br/>(Aggressive Micro-drilling)"]
+            DualTrack["雙軌解耦計數器<br/>(Dual-Track Counters)<br/>- dailyStreak 防過擬合<br/>- correctStreak 跨天固化"]
+            Fallback["動態補題防禦<br/>(Dynamic Fetch Fallback)"]
         end
     end
 
@@ -65,7 +66,7 @@ graph TD
         Dashboard["教師儀表板 (Teacher Dashboard)<br/>- Top 5 Dose Diagnose<br/>- 滑動窗口出席率 (Pro-rata)<br/>- SRL 退出理由分析"]
     end
 
-    %% 連線與資料流
+    %% 連線邏輯
     UI -->|學生手寫提交| Canvas
     Canvas -->|辨識結果 & 時間| Orchestrator
     
@@ -75,7 +76,9 @@ graph TD
     Orchestrator -->|呼叫選題| Selector
     Selector -->|"探針 (10%)"| DDA
     Selector -->|"常規題 / 錯題"| SM2
-    Selector -.->|"池子耗盡 (Aggressive)"| Fallback
+    Selector -.->|"池子耗盡"| Fallback
+    Selector -->|"狀態過濾"| DualTrack
+    Fallback -->|"補充未複習錯題"| DualTrack
     
     Orchestrator -->|每 30 題評估| DDA
     DDA --> Gate
@@ -99,7 +102,7 @@ graph TD
     class UI,Canvas,Sync client
     class Orchestrator core
     class DDA,Gate,Cooldown,Deadband,Upgrade,Downgrade dda
-    class Selector,SM2,Fallback sm2
+    class Selector,SM2,Fallback,DualTrack sm2
     class Firestore,LocalCache,Dashboard data
 ```
 
@@ -134,8 +137,13 @@ graph TD
 `reviewWeight = Math.log1p(state.reviewCount) * 100`
 使用對數衰減避免了答錯次數無限疊加導致的權重爆炸。剛答錯的單字（`reviewCount=1`），權重會瞬間增加 ~69，成為系統優先轟炸的目標。
 
-### 3.2 出題池耗盡與日內微觀演練 (Aggressive SM-2 / Micro-drilling)
-當學生開啟「課後加強」大量練習（如單日 150+ 題）導致 `this.words` 池子耗盡時，系統的 Fallback 機制會將今日已出過的字重置回池中。配合高權重的加權抽樣，這在無形中打破了標準 SM-2 必須「跨日複習」的限制，轉化為**「日內微觀演練（Within-day Micro-drilling）」**。此機制能在短期高壓競賽中，將單字從 7.9 秒的掙扎期，硬生生壓縮進 1.4 秒的肌肉記憶區間。
+### 3.2 出題池耗盡與雙軌解耦微觀演練 (Dual-Track Decoupled Micro-drilling)
+
+當學生開啟「課後加強」大量練習（如單日 300+ 題）導致靜態題池耗盡時，系統並不會無腦地將所有舊題重置（這會導致局部死鎖與無限迴圈）。取而代之的是，我們引入了**「雙軌計數器（Dual-Track Counters）」**機制來進行動態補題：
+
+*   **日內微間隔（Within-day Micro-spacing）**：系統引入 `dailyStreak` 計數器。若同一個單字在同一天內連續答對 2 次，系統當天會暫時將其從抽題池中遮蔽（Masking）。這在認知科學上對應了 **「防短期記憶過擬合（Short-term Overfitting Prevention）」**。因為連續的同日提取只會拉高「提取強度（Retrieval Strength）」，卻無法建立「儲存強度（Storage Strength）」。暫停抽取能迫使大腦進行極短暫的微間隔遺忘，避免「流暢度錯覺（Fluency Illusion）」。
+*   **跨天固化（Cross-day Consolidation）**：系統引入 `correctStreak` 計數器。即便單字在當天達到 `dailyStreak = 2` 被暫時遮蔽，它的跨天計數器依然只會增加 1。該單字必須在未來至少 5 個不同的日期區間中都被成功提取，才能真正觸發 `everWrong = false`，從長期複習池中畢業。
+*   **動態補題防禦（Dynamic Fetch Fallback）**：當 `this.words` 靜態池徹底乾涸時，系統不再重置舊題，而是從 `stateCache` 中撈出所有「歷史錯題」且「今日尚未觸發日內遮蔽」的單字來進行補充。若連歷史錯題都撈完，系統將優雅地觸發 SRL 退出機制，結束該 Session，徹底根絕無限迴圈。
 
 ---
 
@@ -209,5 +217,11 @@ $$\mathbf{P}_{\text{select}} = (1-\alpha-\beta) \cdot \mathbb{M}(L_{\text{ceilin
 *   **確定性 vs. 機率性**：S2A3 利用題目參數的後驗不確定性來驅動探索；而本系統基於邊緣計算（Edge Computing）與教育可解釋性（Explainability）的嚴格要求，採用了「基於專家先驗的確定性控制律」。
 *   **輕量級的替代方案**：在 Cold Start 階段，本系統不依賴耗時的貝氏後驗更新，而是透過「大考中心分級（Static Expert Prior）」與「\(i+1\) 探針機制」來實現啟發式的探索與利用（Exploration-Exploitation）平衡。我們的 `explorationRate` 實質上扮演了 Epsilon-Greedy 策略的角色。
 *   **未來演進**：未來的擴充可借鑒 S2A3 的核心精神，在不破壞現有可解釋性的前提下，將伺服器端的 Thompson Sampling 作為「離線題目難度校準器」，動態更新本系統前端使用的難度先驗常數，實現雲端與邊緣端的最佳互補。
+
+### 7.5 雙軌閾值的超參數優化：為何是 2 次？(Hyperparameter Tuning of Daily-Streak Threshold)
+
+目前的 `dailyStreak >= 2` 是基於工程防死鎖與短期工作記憶的經驗法則所設定的靜態閾值。然而，最佳的日內遮蔽次數可能因學生的能力層級（\(\theta\)）與單字難度（\(\beta\)）而異。對於高能力學生，1 次提取可能就足夠；對於低能力學生，可能需要 3 次。
+
+未來的延伸研究將利用試點階段收集的真實軌跡，導入 **貝氏優化（Bayesian Optimization）** 或 **Q-Learning**，讓系統能根據學生的即時狀態，動態調整該次 Session 的 `dailyStreak` 閾值，在「榨取短期記憶」與「保留認知資源給其他單字」之間，尋找個人化的帕雷托最優解（Pareto Optimality）。
 
 > **"The system's current architecture serves as a highly robust heuristic baseline. By coupling empirical simulation (MCMC) with formal stochastic approximation (Robbins-Monro), we aim to mathematically prove that the asymmetrical hysteresis design guarantees convergence to the learner's true latent trait under bounded environmental noise."**
