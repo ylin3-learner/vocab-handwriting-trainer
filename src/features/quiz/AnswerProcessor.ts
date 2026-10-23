@@ -7,11 +7,8 @@ import { mergeSM2ResultWithState } from '../../domain/scheduler/reviewStateMappe
 import { calculateOverdueDays } from '../../domain/date/overdue';
 import { levenshteinDistance, normalizedSimilarity } from '../../domain/string/similarity';
 import { AnswerSubmission } from './QuizOrchestrator';
-import { getLocalDateString } from '../../domain/date/timezone'; // 🔥 引入時區工具
+import { getLocalDateString } from '../../domain/date/timezone';
 
-/**
- * 跨天連續答對幾次後，將 everWrong 清除（移出複習池）。
- */
 const EVER_WRONG_CLEAR_THRESHOLD = 5;
 
 export interface ProcessAnswerParams {
@@ -22,7 +19,8 @@ export interface ProcessAnswerParams {
   studentId: string;
   studentDisplayId?: string;
   now: Date;
-  studentTimeZone: string; // 🔥 新增：用於計算日期
+  studentTimeZone: string;
+  isProbe?: boolean; // 🔥 新增：是否為探針題
 }
 
 export interface ProcessedAnswer {
@@ -45,6 +43,7 @@ export class AnswerProcessor {
       studentDisplayId,
       now,
       studentTimeZone,
+      isProbe = false, // 🔥 預設為 false
     } = params;
 
     // ============================================================
@@ -68,7 +67,6 @@ export class AnswerProcessor {
     // 3. SM-2 排程計算
     // ============================================================
     const overdueDays = calculateOverdueDays(currentState.nextReviewDate, now);
-
     const scheduling = calculateNextReview(
       {
         reviewInterval: currentState.reviewInterval,
@@ -87,7 +85,6 @@ export class AnswerProcessor {
     // 4. 雙軌解耦計數器 (Dual-Track Scheduler)
     // ============================================================
     const today = getLocalDateString(now, studentTimeZone);
-
     const prevEverWrong = currentState.everWrong === true;
     const prevCorrectStreak = currentState.correctStreak ?? 0;
     const prevDailyStreak = currentState.dailyStreak ?? 0;
@@ -98,24 +95,28 @@ export class AnswerProcessor {
 
     if (grading.isCorrect) {
       if (prevLastStreakDate === today) {
-        // 同一天內答對：只增加日內連對次數，不增加跨天次數
         nextDailyStreak += 1;
       } else {
-        // 跨天答對：日內次數重置為 1，跨天次數 +1
         nextDailyStreak = 1;
         nextCorrectStreak += 1;
       }
     } else {
-      // 答錯：日內與跨天計數全部歸零
       nextDailyStreak = 0;
       nextCorrectStreak = 0;
     }
 
     const shouldClearEverWrong = prevEverWrong && nextCorrectStreak >= EVER_WRONG_CLEAR_THRESHOLD;
 
-    const nextEverWrong = !grading.isCorrect
+    // 🔥 核心修正：探針題隔離沙盒 (Explore-Sandbox)
+    let nextEverWrong = !grading.isCorrect
       ? true
       : (shouldClearEverWrong ? false : prevEverWrong);
+
+    if (isProbe && !grading.isCorrect) {
+      // 探針題答錯：不污染 SM-2 錯題池，直接沿用原本狀態（通常是 false）
+      nextEverWrong = prevEverWrong;
+      console.log(`🛡️ [AnswerProcessor] 探針題「${word.word}」答錯，啟動單向隔離，不寫入錯題池`);
+    }
 
     const nextState: ReviewState = {
       ...mergedState,
@@ -129,7 +130,6 @@ export class AnswerProcessor {
       console.log(`🎓 [AnswerProcessor]「${word.word}」跨天連續答對 ${nextCorrectStreak} 次，正式移出複習池`);
     }
 
-    // 🔥 判斷是否要保留原始軌跡
     const shouldCaptureStrokeData =
       grading.correctnessSignal !== 'true-positive' || submission.timedOut;
 
@@ -155,6 +155,7 @@ export class AnswerProcessor {
       forcedMatch: submission.forcedMatch,
       candidatesSnapshot: submission.candidatesSnapshot,
       rawStrokeData: shouldCaptureStrokeData ? submission.rawStrokeData : undefined,
+      isProbe, // 🔥 新增：寫入 AttemptRecord 供未來分析
     };
 
     return {

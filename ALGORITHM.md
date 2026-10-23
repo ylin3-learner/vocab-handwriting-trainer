@@ -19,6 +19,8 @@
 
 - [7. 未來研究方向收斂率證明與隨機逼近 (Future Work: Convergence Rate & Stochastic Approximation)](#7-未來研究方向收斂率證明與隨機逼近-future-work-convergence-rate--stochastic-approximation)
 
+- [8-系統限制與風險管理 (Limitations & Risk Management)](#8-系統限制與風險管理-limitations--risk-management)
+
 ---
 
 <a name="1-系統架構總覽"></a>
@@ -159,7 +161,7 @@ $$\mathbf{P}_{\text{select}} = (1-\alpha-\beta) \cdot \mathbb{M}(L_{\text{ceilin
 
 
 *   **0.50 下限的科學依據**：基於 IRT 理論，正確率 50% 是費雪訊息量（Fisher Information）的最大值點，最能精準分辨學生能力；且根據 *Nature Communications* 的「85% 法則」，85% 正確率是人類認知尋優的最佳狀態。
-*   **\(i+1\) 探針雙軌逃逸 (Dual Exploration Pathways)**：每 10 題注入 10% 的超綱題。若探針正確率 \($\ge 70\%$\)，觸發快速通道瞬間晉升（打破局部最優）；若答錯，則安全地降維吸收進 SM-2 錯題庫，絕不污染常態評估。
+*   **\(i+1\) 探針雙軌逃逸與單向隔離沙盒 (Dual Exploration Pathways & Explore-Sandbox)**：每 10 題注入 10% 的超綱題。若探針正確率 \($\ge 70\%$\)，觸發快速通道瞬間晉升（打破局部最優）；若答錯，系統將啟動 **「單向隔離沙盒（Explore-Sandbox）」**。該超綱題只會寫入 `AttemptRecord` 作為能力評估參考，**絕對不會進入 SM-2 的 `everWrong` 錯題池**。這徹底防止了高階探針題污染低階複習池，保護了學生的自信心與認知負荷。
 
 ---
 
@@ -223,5 +225,20 @@ $$\mathbf{P}_{\text{select}} = (1-\alpha-\beta) \cdot \mathbb{M}(L_{\text{ceilin
 目前的 `dailyStreak >= 2` 是基於工程防死鎖與短期工作記憶的經驗法則所設定的靜態閾值。然而，最佳的日內遮蔽次數可能因學生的能力層級（\(\theta\)）與單字難度（\(\beta\)）而異。對於高能力學生，1 次提取可能就足夠；對於低能力學生，可能需要 3 次。
 
 未來的延伸研究將利用試點階段收集的真實軌跡，導入 **貝氏優化（Bayesian Optimization）** 或 **Q-Learning**，讓系統能根據學生的即時狀態，動態調整該次 Session 的 `dailyStreak` 閾值，在「榨取短期記憶」與「保留認知資源給其他單字」之間，尋找個人化的帕雷托最優解（Pareto Optimality）。
+
+<a name="8-系統限制與風險管理 (Limitations & Risk Management)"></a>
+## 8. 系統限制與風險管理 (Limitations & Risk Management)
+
+本系統在極限開發週期內，採用了高度整合的單體架構（Monolithic Architecture），並實作了高強度的非線性控制機制。在工業級部署時，必須正視以下技術債與風險，並在架構上予以防禦：
+
+### 8.1 單體架構的技術債：調度器（God Object）的重構藍圖
+為了在 9 天內交付 MVP 並應對高壓比賽，本系統由單一調度器（`QuizOrchestrator`）管理所有狀態與副作用。雖然這在軟體工程上接近 God Object 的反模式，但在邊緣計算與嚴格配額限制下，它保證了零網路延遲與最少的讀取。
+**未來重構**：將導入微核心架構，拆分出 `ProbeManager`（探針隔離）、`EmergencyBreakService`（心理防禦熔斷）與 `DynamicQuestionFetcher`（流式補題），降低耦合度。
+
+### 8.2 冷卻鎖的「硬著陸」與緊急熔斷 (Emergency Break)
+外層 DDA 的「50 題冷卻鎖」雖能防止系統震盪，但在極端情境下（如學生生病、心態炸裂），可能導致學生在高難度被「硬著陸」虐滿 50 題。為此人道主義防禦，系統在 `QuizOrchestrator` 中實作了**「緊急熔斷機制（Emergency Break）」**：當偵測到連續 5 次 `compound-error`（又慢又錯），系統將無視冷卻鎖，強制介入降級，保護學生的心理健康與自我效能感。
+
+### 8.3 前攝抑制的特徵化：最小對比對訓練 (Proactive Inhibition as a Feature)
+SM-2 的加權抽樣可能導致相似拼寫的單字（如 `expect` vs. `inspect`）在短時間內連續出現。這在認知心理學中雖是「前攝抑制（Proactive Inhibition）」的干擾源，但在本系統中，我們刻意保留此特性，將其轉化為**「最小對比對訓練（Minimal Pair Training）」**。這強迫學生在不需要老師提醒的情況下，於高壓環境中進行精細編碼（Elaborative Encoding），建立對近似字的鑑別力。
 
 > **"The system's current architecture serves as a highly robust heuristic baseline. By coupling empirical simulation (MCMC) with formal stochastic approximation (Robbins-Monro), we aim to mathematically prove that the asymmetrical hysteresis design guarantees convergence to the learner's true latent trait under bounded environmental noise."**

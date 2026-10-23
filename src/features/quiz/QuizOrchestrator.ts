@@ -125,6 +125,10 @@ export class QuizOrchestrator implements QuizSessionApi {
 
   private studentTimeZone: string = 'Asia/Taipei';
 
+  // 🔥 新增：緊急熔斷計數器
+  private consecutiveCompoundErrors = 0;
+  private readonly EMERGENCY_BREAK_THRESHOLD = 5;
+
   constructor(studentId: string, className: string, deps: QuizOrchestratorDeps) {
     this.studentId = studentId;
     this.className = className;
@@ -301,7 +305,6 @@ export class QuizOrchestrator implements QuizSessionApi {
 
       console.warn(`   ⚠️ 無生效作業，使用預設配額：${this.dailyMaxQuota} 題`);
 
-      // 新增：即便沒有作業，也要把「預設配額」寫入資料庫！
       try {
         await setDoc(doc(db, 'studentStates', displayId), {
           currentDailyQuota: this.dailyMaxQuota,
@@ -353,7 +356,6 @@ export class QuizOrchestrator implements QuizSessionApi {
         return;
       }
 
-      // 修改：使用精準的 getStartOfDayUTC
       const todayStart = getStartOfDayUTC(this.getNow(), this.studentTimeZone);
       const attemptsSnap = await getDocs(
         query(
@@ -520,10 +522,8 @@ export class QuizOrchestrator implements QuizSessionApi {
       return null;
     }
 
-    // 🔥 1. 先從當前題池過濾出今天沒寫過的
     let usingPool = this.words.filter((w) => !this.askedToday.has(w.id));
 
-    // 🔥 2. 如果題池空了，啟動動態補題 (Dynamic Fetch)
     if (usingPool.length === 0) {
       console.log('⚠️ [Pool Exhausted] 靜態題池已耗盡，啟動動態補題...');
       const fallbackIds = Array.from(this.stateCache?.entries() ?? [])
@@ -534,13 +534,10 @@ export class QuizOrchestrator implements QuizSessionApi {
         console.log(`🔄 [Dynamic Fetch] 找到 ${fallbackIds.length} 個尚未複習的錯題`);
         const fallbackWords = await this.deps.wordRepository.getWordsByIds(fallbackIds);
         usingPool = fallbackWords;
-
-        // 將補題的字加進 wordMap 備用
         for (const w of fallbackWords) {
           this.wordMap.set(w.id, w);
         }
       } else {
-        // 如果連 stateCache 的錯題都被榨乾了，直接結束 Session
         console.log('🏁 [Pool Exhausted] 所有錯題今日都已複習完畢，結束 Session');
         return null;
       }
@@ -553,17 +550,14 @@ export class QuizOrchestrator implements QuizSessionApi {
       entries.push({ wordId: word.id, state, overdueDays });
     }
 
-    // 🔥 3. 過濾掉今天已經在日內軌道達標的字 (防日內無限迴圈)
     const today = getLocalDateString(this.getNow(), this.studentTimeZone);
     const filteredEntries = entries.filter((e) => {
-      // 如果今天已經連續答對 2 次，今天就放過他，不要再抽出來
       if (e.state.lastStreakDate === today && (e.state.dailyStreak ?? 0) >= 2) {
         return false;
       }
       return true;
     });
 
-    // 如果過濾後沒有字了，就從 entries 隨便抽一個（或者回傳 null 結束）
     const finalEntries = filteredEntries.length > 0 ? filteredEntries : entries;
 
     const selectedId = pickNextWordId(
@@ -617,15 +611,23 @@ export class QuizOrchestrator implements QuizSessionApi {
     const currentState = await this.deps.progressStore.getState(displayId, wordId);
     const now = this.getNow();
 
+    // 🔥 在後端判定是否為探針題
+    const isProbe = Number(word.level ?? '0') > this.currentLevel;
+
     const processed = this.answerProcessor.process({
-      word, submission, currentState, timeLimitMs: this.resolvedTimeLimitMs,
-      studentId: this.studentId, studentDisplayId, now,
-      studentTimeZone: this.studentTimeZone, // 🔥 傳入時區
+      word,
+      submission,
+      currentState,
+      timeLimitMs: this.resolvedTimeLimitMs,
+      studentId: this.studentId,
+      studentDisplayId,
+      now,
+      studentTimeZone: this.studentTimeZone,
+      isProbe, // 🔥 傳入 isProbe
     });
 
     const today = getLocalDateString(now, this.studentTimeZone);
 
-    // 樂觀更新本地狀態
     this.dailyAnsweredCount += 1;
     if (processed.grading.isCorrect) {
       this.dailyCorrectCount += 1;
@@ -680,7 +682,18 @@ export class QuizOrchestrator implements QuizSessionApi {
       this.studentStateService.incrementTotalAttempts(displayId).catch((error) => console.warn('⚠️ 累加總題數失敗:', error));
     }
 
+    // ============================================================
+    // 🔥 緊急熔斷機制 (Emergency Break)
+    // ============================================================
+    if (processed.grading.correctnessSignal === 'compound-error') {
+      this.consecutiveCompoundErrors += 1;
+    } else {
+      this.consecutiveCompoundErrors = 0;
+    }
+
     let progressionDecision: ProgressionDecision | null = null;
+
+    // 條件 A：正常評估
     if (this.sessionAttempts > 0 && this.sessionAttempts % 30 === 0) {
       try {
         progressionDecision = await this.levelProgressionService.evaluate(displayId, this.competitionConfig.enabled);
@@ -689,6 +702,22 @@ export class QuizOrchestrator implements QuizSessionApi {
         }
       } catch (e) {
         console.warn('⚠️ 等級評估失敗:', e);
+      }
+    }
+
+    // 🔥 條件 B：緊急熔斷（無視冷卻鎖，強制降級）
+    if (this.consecutiveCompoundErrors >= this.EMERGENCY_BREAK_THRESHOLD) {
+      console.warn(`🚨 [QuizOrchestrator] 觸發緊急熔斷！連續 ${this.EMERGENCY_BREAK_THRESHOLD} 次複合錯誤，強制介入。`);
+      this.consecutiveCompoundErrors = 0; // 重置計數器
+
+      // 強制降級（或至少把天花板壓低）
+      const forcedNewLevel = Math.max(1, this.currentLevel - 1);
+      if (forcedNewLevel < this.currentLevel) {
+        this.currentLevel = forcedNewLevel;
+        console.log(`🚨 強制降級至 L${this.currentLevel}`);
+
+        // 這裡可以呼叫 StudentStateService 寫入強制降級的紀錄，若有的話
+        // await this.studentStateService.forceDemote(displayId, forcedNewLevel);
       }
     }
 

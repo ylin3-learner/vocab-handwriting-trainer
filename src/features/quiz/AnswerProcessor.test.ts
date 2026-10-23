@@ -209,4 +209,27 @@ describe('AnswerProcessor - 評分與排程', () => {
     assert.deepStrictEqual(r1.nextState, r2.nextState);
     assert.deepStrictEqual(r2.nextState, r3.nextState);
   });
+
+  test('探針題答錯 → 啟動單向隔離，everWrong 保持 false，不污染錯題池', () => {
+    const initial = createInitialReviewState();
+
+    // 模擬 L2 學生遇到 L3 探針題，且答錯了
+    const result = processor.process({
+      ...makeParams(initial, { recognizedText: 'wrong' }),
+      isProbe: true, // 🔥 關鍵：標記為探針題
+    });
+
+    // 雖然答錯，但因為是探針題，everWrong 不應該變成 true
+    assert.strictEqual(result.nextState.everWrong, false);
+    assert.strictEqual(result.grading.isCorrect, false);
+  });
+
+  test('非探針題答錯 → everWrong 正常變成 true', () => {
+    const initial = createInitialReviewState();
+    const result = processor.process({
+      ...makeParams(initial, { recognizedText: 'wrong' }),
+      isProbe: false,
+    });
+    assert.strictEqual(result.nextState.everWrong, true);
+  });
 });
